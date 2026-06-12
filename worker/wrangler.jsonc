@@ -3,6 +3,7 @@
   "name": "brisk",
   "main": "src/index.ts",
   "compatibility_date": "2025-09-06",
+  "account_id": "YOUR_CLOUDFLARE_ACCOUNT_ID",
 
   // The dashboard (and the browser SDK at /brisk.js) ship as static assets.
   // run_worker_first lets the worker decide when to serve them.
@@ -16,7 +17,7 @@
     {
       "binding": "DB",
       "database_name": "brisk",
-      "database_id": "REPLACE_WITH_YOUR_D1_ID",
+      "database_id": "REPLACE_WITH_YOUR_D1_DATABASE_ID",
       "migrations_dir": "migrations"
     }
   ],
@@ -37,16 +38,25 @@
     // Host your sites hang off of, e.g. "brisk.example.com" → site foo lives
     // at foo.brisk.example.com. Leave empty for path-only mode (/s/foo/),
     // which is what you get on *.workers.dev and local dev.
-    "BASE_HOST": "",
+    "BASE_HOST": "brisk.example.com",
     // "google" turns on Google OAuth for the whole platform (see README).
     // "none" gives every visitor a dev identity — fine on a trusted network.
-    "AUTH": "none",
+    "AUTH": "google",
     // Who gets through Google OAuth (comma-separated, either list admits):
     // whole domains, e.g. "yourco.com" — or exact emails for personal
     // instances, e.g. "you@gmail.com" (never allow all of "gmail.com").
     "ALLOWED_EMAIL_DOMAINS": "",
-    "ALLOWED_EMAILS": ""
-  }
+    "ALLOWED_EMAILS": "you@example.com",
+    // "public" = demo mode: anyone can view sites and the dashboard without
+    // signing in; db/ai/files/realtime and deploys still require login.
+    // "private" (the default) gates everything behind login.
+    "VISIBILITY": "public"
+  },
+
+  "routes": [
+    { "pattern": "brisk.example.com", "custom_domain": true },
+    { "pattern": "*.brisk.example.com/*", "zone_name": "brisk.example.com" }
+  ]
 
   // Secrets (set with `wrangler secret put <NAME>`):
   //   SESSION_SECRET        — required when AUTH=google; signs session cookies

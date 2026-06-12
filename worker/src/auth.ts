@@ -12,6 +12,25 @@ const CLI_TOKEN_DAYS = 90;
 /** Who you are when auth is off: a trusted-network dev identity. */
 const devUser = (): User => ({ email: 'dev@localhost', name: 'Dev' });
 
+/** Who you are on a VISIBILITY=public instance before signing in. */
+export const VISITOR: User = { email: 'visitor', name: 'Visitor' };
+
+export const isVisitor = (user: User): boolean => user.email === VISITOR.email;
+
+/**
+ * What a visitor may touch on a public instance: viewing, and nothing that
+ * writes, costs money, or opens a websocket. `/api/sites` is the one API
+ * exception (the dashboard's list); `/auth/*` past the public login routes is
+ * excluded so visitors can't mint CLI tokens.
+ */
+function visitorAllowed(method: string, pathname: string): boolean {
+  if (method !== 'GET' && method !== 'HEAD') return false;
+  if (pathname === '/api/sites') return true;
+  if (pathname.startsWith('/api/') || pathname.startsWith('/files/')) return false;
+  if (pathname.startsWith('/auth/')) return false;
+  return true; // static site files, dashboard assets, /brisk.js, /docs
+}
+
 const apexHost = (c: Context<AppEnv>): string => c.env.BASE_HOST || new URL(c.req.url).host;
 
 const apexOrigin = (c: Context<AppEnv>): string => `${new URL(c.req.url).protocol}//${apexHost(c)}`;
@@ -190,6 +209,14 @@ export function auth(): MiddlewareHandler<AppEnv> {
     const user = await readSession(c);
     if (user) {
       c.set('user', user);
+      return next();
+    }
+
+    if (
+      c.env.VISIBILITY === 'public' &&
+      visitorAllowed(c.req.method, new URL(c.req.url).pathname)
+    ) {
+      c.set('user', VISITOR);
       return next();
     }
 

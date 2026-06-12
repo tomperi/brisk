@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { AiNotConfiguredError, chat } from './ai';
-import { auth, authRoutes, cliAuthRoute } from './auth';
+import { auth, authRoutes, cliAuthRoute, isVisitor } from './auth';
 import { DocStore } from './docs';
 import { contentType } from './mime';
 import {
@@ -15,7 +15,7 @@ import {
   type DeployFile,
 } from './sites';
 import type { DbEvent } from './room';
-import type { AppEnv, Env } from './env';
+import type { AppEnv, Env, User } from './env';
 
 const MAX_DEPLOY_FILES = 2000;
 
@@ -254,11 +254,33 @@ export function createApp(): Hono<AppEnv> {
 
   // ---- static serving ----------------------------------------------------
 
+  // Visitors on a public instance get edge-cached responses, so a busy demo
+  // costs ~zero R2/D1 operations. Members always see fresh deploys.
+  const serveSiteFor = async (
+    c: { env: Env; executionCtx: ExecutionContext; req: { raw: Request }; var: { user: User } },
+    site: string,
+    path: string,
+  ): Promise<Response | null> => {
+    if (!isVisitor(c.var.user)) return serveSite(c.env, site, path);
+    const key = new Request(c.req.raw.url, { method: 'GET' });
+    const cache = caches.default;
+    const hit = await cache.match(key);
+    if (hit) return hit;
+    const res = await serveSite(c.env, site, path);
+    if (!res) return null;
+    // Buffer the body so the cached copy doesn't keep the R2 stream open.
+    const body = await res.arrayBuffer();
+    const headers = new Headers(res.headers);
+    headers.set('cache-control', 'public, max-age=300');
+    c.executionCtx.waitUntil(cache.put(key, new Response(body.slice(0), { headers })));
+    return new Response(body, { headers });
+  };
+
   // Path mode: /s/<site>/... works on any host (workers.dev, local dev).
   app.get('/s/:site/*', async (c) => {
     const site = c.req.param('site');
     const path = new URL(c.req.url).pathname.slice(`/s/${site}`.length);
-    return (await serveSite(c.env, site, path)) ?? notFoundPage(site);
+    return (await serveSiteFor(c, site, path)) ?? notFoundPage(site);
   });
   app.get('/s/:site', (c) => c.redirect(`/s/${c.req.param('site')}/`));
 
@@ -268,7 +290,7 @@ export function createApp(): Hono<AppEnv> {
     const path = new URL(c.req.url).pathname;
     const site = c.var.site;
 
-    const deployed = await serveSite(c.env, site, path);
+    const deployed = await serveSiteFor(c, site, path);
     if (deployed) return deployed;
 
     if (site === 'home') {

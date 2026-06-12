@@ -9,6 +9,11 @@ export interface Env {
   /** "google" = Google OAuth on the apex domain; "none" = trusted network. */
   AUTH: 'none' | 'google';
   /**
+   * "public" lets anonymous visitors view sites and the dashboard (read-only,
+   * edge-cached); every API and deploy still requires login. Default: private.
+   */
+  VISIBILITY?: 'private' | 'public';
+  /**
    * Who gets through OAuth: comma-separated email domains and/or exact
    * emails. Both empty = allow anyone who can complete the Google login.
    */

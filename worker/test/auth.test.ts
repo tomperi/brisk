@@ -9,9 +9,12 @@ const app = createApp();
 const googleEnv = {
   ...env,
   AUTH: 'google' as const,
+  VISIBILITY: 'private' as const,
   SESSION_SECRET: 'test-secret',
   DEPLOY_TOKEN: 'ci-token',
 };
+
+const publicEnv = { ...googleEnv, VISIBILITY: 'public' as const };
 
 async function fetchAs(authEnv: typeof env, path: string, init?: RequestInit) {
   const ctx = createExecutionContext();
@@ -66,6 +69,54 @@ describe('auth=google', () => {
       headers: { authorization: 'Bearer ci-token' },
     });
     expect(badPort.status).toBe(400);
+  });
+});
+
+describe('visibility=public (demo mode)', () => {
+  it('lets visitors view sites with edge-cache headers, members see fresh', async () => {
+    const form = new FormData();
+    form.append('files', new File(['<h1>demo</h1>'], 'index.html'));
+    const deployed = await fetchAs(publicEnv, '/api/deploy/showcase', {
+      method: 'POST',
+      headers: { authorization: 'Bearer ci-token' },
+      body: form,
+    });
+    expect(deployed.status).toBe(200);
+
+    const visitor = await fetchAs(publicEnv, '/s/showcase/');
+    expect(visitor.status).toBe(200);
+    expect(await visitor.text()).toBe('<h1>demo</h1>');
+    expect(visitor.headers.get('cache-control')).toBe('public, max-age=300');
+
+    const member = await fetchAs(publicEnv, '/s/showcase/', {
+      headers: { authorization: 'Bearer ci-token' },
+    });
+    expect(member.headers.get('cache-control')).toBe('no-cache');
+  });
+
+  it('lets visitors list sites for the dashboard', async () => {
+    const res = await fetchAs(publicEnv, '/api/sites');
+    expect(res.status).toBe(200);
+  });
+
+  it('401s every dynamic surface for visitors', async () => {
+    const blocked = [
+      ['/api/me', {}],
+      ['/api/db/notes', {}],
+      ['/api/db/notes', { method: 'POST', body: '{}' }],
+      ['/api/deploy/showcase', { method: 'POST' }],
+      ['/api/fs/upload', { method: 'POST' }],
+      ['/api/ai/chat', { method: 'POST', body: '{}' }],
+      ['/api/ws', {}],
+      ['/api/sites/showcase/raw/index.html', {}],
+      ['/files/showcase/x/y.png', {}],
+      ['/auth/cli?port=4444&state=abc', {}],
+      ['/api/sites/showcase', { method: 'DELETE' }],
+    ] as const;
+    for (const [path, init] of blocked) {
+      const res = await fetchAs(publicEnv, path, init as RequestInit);
+      expect(res.status, path).toBe(401);
+    }
   });
 });
 

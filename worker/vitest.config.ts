@@ -8,9 +8,21 @@ export default defineWorkersConfig(async () => {
       setupFiles: ['./test/apply-migrations.ts'],
       poolOptions: {
         workers: {
+          // caches.default writes (the visitor edge cache) break per-test
+          // storage snapshots; tests use unique site names instead.
+          isolatedStorage: false,
           wrangler: { configPath: './wrangler.jsonc' },
           miniflare: {
-            bindings: { TEST_MIGRATIONS: migrations },
+            // Tests pin their own auth mode so production config in
+            // wrangler.jsonc (AUTH, VISIBILITY, allowlists) can't break them.
+            bindings: {
+              TEST_MIGRATIONS: migrations,
+              AUTH: 'none',
+              VISIBILITY: 'private',
+              BASE_HOST: '',
+              ALLOWED_EMAILS: '',
+              ALLOWED_EMAIL_DOMAINS: '',
+            },
           },
         },
       },
