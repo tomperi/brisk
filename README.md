@@ -23,7 +23,7 @@ for the things every little site eventually wants:
 
 No frameworks, no deploy pipelines, no config files, no permissions. It runs
 entirely on Cloudflare (one Worker + R2 + D1 + Durable Objects) and costs
-approximately nothing.
+[approximately nothing](#cost).
 
 **What you get:**
 
@@ -110,7 +110,10 @@ serves site `foo`:
 
 You'll also need a wildcard DNS record (`*.brisk` → CNAME to the apex) and a
 [Total TLS or advanced certificate](https://developers.cloudflare.com/ssl/edge-certificates/)
-covering `*.brisk.example.com`.
+covering `*.brisk.example.com`. That second-level wildcard is the one part of
+Brisk that isn't free (~$10/mo) — putting sites one level deep instead
+(`BASE_HOST=example.com`, sites at `foo.example.com`) keeps them on free
+Universal SSL. See [Cost](#cost).
 
 ### Google login (one login for every site)
 
@@ -146,6 +149,20 @@ Deploys are then attributed to your email on the dashboard. The
 `ci@brisk`). With `AUTH: "none"` (the default) everyone is a trusted dev
 user — only do that on a network you trust.
 
+#### Auth at a glance
+
+| `AUTH`           | `VISIBILITY`        | Viewing sites                      | Deploys + APIs (db / ai / files / realtime) |
+| ---------------- | ------------------- | ---------------------------------- | ------------------------------------------- |
+| `none` (default) | —                   | everyone                           | everyone, as the dev identity               |
+| `google`         | `private` (default) | members only                       | members + CI token                          |
+| `google`         | `public`            | **anyone**, read-only, edge-cached | members + CI token                          |
+
+Members are whoever passes `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS`. Three
+credentials exist: the browser session cookie (7 days, covers every site
+subdomain), the personal CLI token from `brisk login` (90 days, attributed to
+you), and the optional `DEPLOY_TOKEN` secret (CI, attributed as `ci@brisk`;
+leave it unset and that path simply doesn't exist).
+
 ### AI
 
 ```sh
@@ -153,6 +170,74 @@ npx wrangler secret put ANTHROPIC_API_KEY   # and/or OPENAI_API_KEY
 ```
 
 Keys stay on the server; sites call `brisk.ai.chat(...)` with no setup.
+
+### Demo mode (public, view-only)
+
+Want strangers to be able to _see_ your instance without being able to touch
+it? Set `"VISIBILITY": "public"` alongside `AUTH: "google"`:
+
+- **Visitors (no login)** can browse the dashboard, the docs, and every
+  deployed site. Their static requests are edge-cached (`max-age=300`), so a
+  busy demo costs ~zero R2/D1 operations — at the price of deploys taking up
+  to 5 minutes to reach signed-out eyes.
+- **Everything else is a 401 for visitors**: the database (reads included —
+  the API has no rate limiting, so don't give the internet a free query
+  button), AI, uploads, websockets, deploys, site deletion, and CLI token
+  minting. Demo pages render; their `brisk.*` calls fail fast with a clear
+  error, and the SDK stops retrying rejected websockets instead of hammering
+  the worker.
+- **Members** (you, via `ALLOWED_EMAILS`) sign in with the dashboard's
+  "sign in" button or `brisk login` and get the full platform, uncached.
+
+Before publishing, spend two minutes in the Cloudflare dashboard on your
+zone — both are free and block abusive traffic _before_ it bills as Worker
+requests:
+
+1. **Security → WAF → Rate limiting rules**: one rule on
+   `(http.host wildcard "*your-brisk-host")`, e.g. block 10s when an IP
+   exceeds ~100 requests.
+2. **Security → Bots**: enable Bot Fight Mode.
+
+Also leave `DEPLOY_TOKEN` unset unless you have CI — an unset secret means
+that authentication path simply doesn't exist.
+
+## Cost
+
+Brisk is built to live inside Cloudflare's free tier. At personal or small-team
+scale the platform itself costs **nothing** — the only things that can land on a
+bill are an optional wildcard certificate and, if sites use it, AI tokens.
+
+What the free tier covers (per Cloudflare account):
+
+| Product         | Brisk uses it for               | Free tier                                           |
+| --------------- | ------------------------------- | --------------------------------------------------- |
+| Workers         | every request                   | 100k requests/day, 10 ms CPU/request                |
+| R2              | site files + `brisk.fs` uploads | 10 GB stored, 1M writes + 10M reads/mo, zero egress |
+| D1              | the `sites` and `docs` tables   | 5 GB, 5M row-reads/day, 100k row-writes/day         |
+| Durable Objects | one realtime room per site      | included on the free plan (SQLite-backed)           |
+
+Realtime doesn't push you onto a paid plan: `SiteRoom` is a SQLite-backed
+Durable Object (free-plan eligible) using WebSocket hibernation, so idle
+channels bill nothing — you only pay when messages actually flow. 100k
+requests/day is plenty of headroom for an internal instance, and the demo-mode
+edge cache above keeps signed-out traffic off your R2/D1 quotas entirely. Cross
+the request cap and you're on
+[Workers Paid](https://developers.cloudflare.com/workers/platform/pricing/)
+($5/mo), which turns the daily caps into a forgiving monthly pool.
+
+**The one catch is wildcard TLS.** Free Universal SSL covers a domain's apex and
+_one_ level of subdomain. Sites one level deep — `foo.example.com` with
+`BASE_HOST=example.com` — are covered for free. Nest them under a label —
+`foo.brisk.example.com` — and that second-level wildcard needs an
+[advanced certificate](https://developers.cloudflare.com/ssl/edge-certificates/advanced-certificate-manager/)
+(~$10/mo). The cheap fix is a dedicated domain: register one (~$10/**year** at
+Cloudflare Registrar, at cost), point `BASE_HOST` at its apex, and every
+`*.yourdomain` site gets free TLS. Path-mode URLs (`/s/foo/`) sidestep the
+question entirely.
+
+**AI is pass-through.** `brisk.ai` calls bill against your own Anthropic/OpenAI
+key at provider rates — the only cost here with no ceiling, so set a spend limit
+on the provider side if your sites lean on it.
 
 ## The CLI
 

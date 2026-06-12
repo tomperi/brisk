@@ -1,11 +1,19 @@
 # Copy to .dev.vars for local development with `wrangler dev`.
-# All of these are optional — without them you get the dev identity and no AI.
+# Values here override the `vars` in wrangler.jsonc, so if your wrangler.jsonc
+# carries production settings (AUTH=google etc.), this is where you relax them
+# locally:
 
+# AUTH=none
+# VISIBILITY=private
+
+# To exercise google-mode / public-mode behavior locally instead:
+# AUTH=google
+# VISIBILITY=public
+# SESSION_SECRET=dev-secret
+# DEPLOY_TOKEN=dev-token          # then: BRISK_TOKEN=dev-token brisk deploy …
+# GOOGLE_CLIENT_ID=               # only for testing the real browser login
+# GOOGLE_CLIENT_SECRET=
+
+# Optional AI providers:
 # ANTHROPIC_API_KEY=
 # OPENAI_API_KEY=
-
-# Only needed when testing AUTH=google locally:
-# GOOGLE_CLIENT_ID=
-# GOOGLE_CLIENT_SECRET=
-# SESSION_SECRET=
-# DEPLOY_TOKEN=

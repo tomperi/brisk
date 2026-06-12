@@ -83,4 +83,7 @@ room.on('presence', (members) => {});                 // fires on join/leave
 - Everything is client-side; there is no custom backend. If you need state, use \`brisk.db\`.
 - Docs are plain JSON; design data shapes freely, there are no schemas or migrations.
 - Keep it one folder of static files. \`index.html\` is the entry point.
+- All \`brisk.*\` calls require a signed-in viewer. On public (view-only)
+  instances, signed-out visitors get 401s — degrade gracefully if this site
+  will be demoed publicly.
 `;

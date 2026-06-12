@@ -31,6 +31,13 @@ router, dashboard. Request flow and storage layout: README → Architecture.
   segment there too.
 - **`home` is just a site.** The dashboard in `assets/` serves only while no
   deployed site named `home` exists. Don't special-case it beyond that.
+- **The visitor gate is one function.** On `VISIBILITY=public` instances,
+  `visitorAllowed` in `auth.ts` decides what anonymous users may touch
+  (static views + `GET /api/sites`, nothing else). New routes under `/api/`,
+  `/files/`, or `/auth/` are visitor-blocked by default — any other GET
+  becomes publicly viewable, so check that function when adding routes.
+  Visitor static responses are edge-cached (`serveSiteFor` in `app.ts`);
+  members always bypass the cache.
 
 ## Working on it
 
