@@ -7,7 +7,7 @@ brisk deploy examples/guestbook
 brisk deploy examples/cursors
 ```
 
-| Example | What it shows |
-| --- | --- |
+| Example                  | What it shows                                                       |
+| ------------------------ | ------------------------------------------------------------------- |
 | [`guestbook`](guestbook) | `brisk.db` collections, realtime `subscribe`, `brisk.me()` identity |
-| [`cursors`](cursors) | `brisk.channel` multiplayer: live cursors with presence |
+| [`cursors`](cursors)     | `brisk.channel` multiplayer: live cursors with presence             |

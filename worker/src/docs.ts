@@ -86,7 +86,9 @@ export class DocStore {
     const merged = { ...current, ...fields };
     const now = new Date().toISOString();
     await this.db
-      .prepare('UPDATE docs SET data = ?, updated_at = ? WHERE site = ? AND collection = ? AND id = ?')
+      .prepare(
+        'UPDATE docs SET data = ?, updated_at = ? WHERE site = ? AND collection = ? AND id = ?',
+      )
       .bind(JSON.stringify(merged), now, site, collection, id)
       .run();
     return { id, createdAt, updatedAt: now, ...merged };

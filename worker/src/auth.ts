@@ -13,8 +13,7 @@ export const devUser = (): User => ({ email: 'dev@localhost', name: 'Dev' });
 
 const apexHost = (c: Context<AppEnv>): string => c.env.BASE_HOST || new URL(c.req.url).host;
 
-const apexOrigin = (c: Context<AppEnv>): string =>
-  `${new URL(c.req.url).protocol}//${apexHost(c)}`;
+const apexOrigin = (c: Context<AppEnv>): string => `${new URL(c.req.url).protocol}//${apexHost(c)}`;
 
 /**
  * The session cookie is scoped to `.BASE_HOST`, so one login on the apex
@@ -31,7 +30,11 @@ async function readSession(c: Context<AppEnv>): Promise<User | null> {
   if (!token || !c.env.SESSION_SECRET) return null;
   try {
     const payload = await verify(token, c.env.SESSION_SECRET, 'HS256');
-    return { email: String(payload.email), name: String(payload.name), picture: payload.picture as string | undefined };
+    return {
+      email: String(payload.email),
+      name: String(payload.name),
+      picture: payload.picture as string | undefined,
+    };
   } catch {
     return null;
   }
@@ -81,7 +84,11 @@ export function auth(): MiddlewareHandler<AppEnv> {
     }
 
     const bearer = c.req.header('authorization');
-    if (bearer?.startsWith('Bearer ') && c.env.DEPLOY_TOKEN && bearer.slice(7) === c.env.DEPLOY_TOKEN) {
+    if (
+      bearer?.startsWith('Bearer ') &&
+      c.env.DEPLOY_TOKEN &&
+      bearer.slice(7) === c.env.DEPLOY_TOKEN
+    ) {
       c.set('user', { email: 'cli@brisk', name: 'CLI (deploy token)' });
       return next();
     }
@@ -94,7 +101,8 @@ export function auth(): MiddlewareHandler<AppEnv> {
 
     const wantsHtml =
       c.req.method === 'GET' &&
-      (c.req.header('sec-fetch-dest') === 'document' || (c.req.header('accept') ?? '').includes('text/html'));
+      (c.req.header('sec-fetch-dest') === 'document' ||
+        (c.req.header('accept') ?? '').includes('text/html'));
     return wantsHtml
       ? c.redirect(loginUrl(c, c.req.url))
       : c.json({ error: 'unauthenticated' }, 401);
@@ -149,13 +157,17 @@ export function authRoutes(): Hono<AppEnv> {
     const { id_token } = await tokenRes.json<{ id_token: string }>();
 
     // The id_token came straight from Google over TLS; decoding is enough.
-    const claims = JSON.parse(atob(id_token.split('.')[1]!.replaceAll('-', '+').replaceAll('_', '/'))) as {
+    const claims = JSON.parse(
+      atob(id_token.split('.')[1]!.replaceAll('-', '+').replaceAll('_', '/')),
+    ) as {
       email: string;
       name?: string;
       picture?: string;
     };
 
-    const allowed = c.env.ALLOWED_EMAIL_DOMAINS.split(',').map((d) => d.trim()).filter(Boolean);
+    const allowed = c.env.ALLOWED_EMAIL_DOMAINS.split(',')
+      .map((d) => d.trim())
+      .filter(Boolean);
     const domain = claims.email.split('@')[1] ?? '';
     if (allowed.length && !allowed.includes(domain)) {
       return c.text(`Sorry, ${claims.email} isn't allowed on this Brisk instance.`, 403);

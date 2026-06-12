@@ -1,57 +1,96 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>guestbook</title>
-  <script src="/brisk.js"></script>
-  <style>
-    body { font: 16px/1.6 ui-monospace, Menlo, monospace; max-width: 38rem; margin: 3rem auto; padding: 0 1rem; background: oklch(96.5% 0.012 85); color: oklch(24% 0.015 75); }
-    h1 { font-size: 1.4rem; }
-    form { display: flex; gap: 0.5rem; margin: 1.5rem 0; }
-    input { flex: 1; font: inherit; padding: 0.5rem 0.75rem; border: 1px solid oklch(80% 0.013 85); border-radius: 8px; background: white; }
-    button { font: inherit; padding: 0.5rem 1rem; border: 1px solid oklch(46% 0.19 262); border-radius: 8px; background: oklch(46% 0.19 262); color: white; cursor: pointer; }
-    li { margin: 0.75rem 0; list-style: none; }
-    ul { padding: 0; }
-    .who { color: oklch(48% 0.014 75); font-size: 0.8rem; }
-  </style>
-</head>
-<body>
-  <h1>guestbook</h1>
-  <p>Like it's 2001. Signed with your real name, because the platform knows it.</p>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>guestbook</title>
+    <script src="/brisk.js"></script>
+    <style>
+      body {
+        font:
+          16px/1.6 ui-monospace,
+          Menlo,
+          monospace;
+        max-width: 38rem;
+        margin: 3rem auto;
+        padding: 0 1rem;
+        background: oklch(96.5% 0.012 85);
+        color: oklch(24% 0.015 75);
+      }
+      h1 {
+        font-size: 1.4rem;
+      }
+      form {
+        display: flex;
+        gap: 0.5rem;
+        margin: 1.5rem 0;
+      }
+      input {
+        flex: 1;
+        font: inherit;
+        padding: 0.5rem 0.75rem;
+        border: 1px solid oklch(80% 0.013 85);
+        border-radius: 8px;
+        background: white;
+      }
+      button {
+        font: inherit;
+        padding: 0.5rem 1rem;
+        border: 1px solid oklch(46% 0.19 262);
+        border-radius: 8px;
+        background: oklch(46% 0.19 262);
+        color: white;
+        cursor: pointer;
+      }
+      li {
+        margin: 0.75rem 0;
+        list-style: none;
+      }
+      ul {
+        padding: 0;
+      }
+      .who {
+        color: oklch(48% 0.014 75);
+        font-size: 0.8rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>guestbook</h1>
+    <p>Like it's 2001. Signed with your real name, because the platform knows it.</p>
 
-  <form id="form">
-    <input id="message" placeholder="leave a note" maxlength="200" autocomplete="off" required />
-    <button>sign</button>
-  </form>
-  <ul id="entries"></ul>
+    <form id="form">
+      <input id="message" placeholder="leave a note" maxlength="200" autocomplete="off" required />
+      <button>sign</button>
+    </form>
+    <ul id="entries"></ul>
 
-  <script>
-    const entries = brisk.db.collection('entries');
-    const list = document.getElementById('entries');
+    <script>
+      const entries = brisk.db.collection('entries');
+      const list = document.getElementById('entries');
 
-    function show(entry) {
-      const li = document.createElement('li');
-      const text = document.createElement('div');
-      text.textContent = entry.message;
-      const who = document.createElement('div');
-      who.className = 'who';
-      who.textContent = `${entry.author} · ${new Date(entry.createdAt).toLocaleString()}`;
-      li.append(text, who);
-      list.prepend(li);
-    }
+      function show(entry) {
+        const li = document.createElement('li');
+        const text = document.createElement('div');
+        text.textContent = entry.message;
+        const who = document.createElement('div');
+        who.className = 'who';
+        who.textContent = `${entry.author} · ${new Date(entry.createdAt).toLocaleString()}`;
+        li.append(text, who);
+        list.prepend(li);
+      }
 
-    entries.list({ sort: '-created', limit: 100 }).then((docs) => docs.reverse().forEach(show));
-    entries.subscribe({ onCreate: show });
+      entries.list({ sort: '-created', limit: 100 }).then((docs) => docs.reverse().forEach(show));
+      entries.subscribe({ onCreate: show });
 
-    document.getElementById('form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const input = document.getElementById('message');
-      const me = await brisk.me();
-      const message = input.value.trim();
-      input.value = '';
-      await entries.create({ message, author: me.name });
-    });
-  </script>
-</body>
+      document.getElementById('form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const input = document.getElementById('message');
+        const me = await brisk.me();
+        const message = input.value.trim();
+        input.value = '';
+        await entries.create({ message, author: me.name });
+      });
+    </script>
+  </body>
 </html>

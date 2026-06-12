@@ -60,7 +60,9 @@ export async function init(name: string | undefined, flags: Flags): Promise<void
   await write('brisk.json', briskJson(site));
   await write('index.html', starterHtml(site));
   await write('AGENTS.md', agentsMd(site));
-  console.log(`\nNext: ${bold(`brisk deploy${name ? ` ${name}` : ''}`)}${flags.server ? dim(` --server ${flags.server}`) : ''}`);
+  console.log(
+    `\nNext: ${bold(`brisk deploy${name ? ` ${name}` : ''}`)}${flags.server ? dim(` --server ${flags.server}`) : ''}`,
+  );
 }
 
 export async function deploy(dirArg: string | undefined, flags: Flags): Promise<SiteInfo> {
@@ -134,7 +136,8 @@ export async function open(siteArg: string | undefined, flags: Flags): Promise<v
   const server = serverUrl(flags.server, loadConfig(dir));
   const info = await api<SiteInfo>(server, `/api/sites/${site}`);
   console.log(cyan(info.url));
-  const opener = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+  const opener =
+    process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
   spawn(opener, [info.url], { stdio: 'ignore', detached: true }).unref();
 }
 

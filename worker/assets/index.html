@@ -1,64 +1,72 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>brisk</title>
-  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="/app.css" />
-  <script src="/brisk.js" defer></script>
-  <script src="/app.js" defer></script>
-</head>
-<body>
-  <main>
-    <header>
-      <a class="wordmark" href="/">brisk<span class="cursor">▮</span></a>
-      <nav>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>brisk</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/app.css" />
+    <script src="/brisk.js" defer></script>
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <a class="wordmark" href="/">brisk<span class="cursor">▮</span></a>
+        <nav>
+          <a href="/docs">docs</a>
+          <a href="https://github.com/your-org/brisk">source</a>
+          <span class="whoami" id="whoami" hidden>
+            <span class="presence" id="presence" hidden></span><span id="who"></span>
+          </span>
+        </nav>
+      </header>
+
+      <section class="hero">
+        <h1>Drop a folder. Get a site.</h1>
+        <p>
+          Static hosting plus a zero-config backend: database, files, AI, realtime, identity. No
+          keys, no pipelines, no permissions. Everything here is visible to everyone, on purpose.
+        </p>
+      </section>
+
+      <!-- Empty state doubles as the quickstart; hidden once sites exist. -->
+      <ol class="quickstart" id="quickstart" hidden>
+        <li>
+          <p>scaffold a folder (or bring any folder of HTML)</p>
+          <div class="cmd">
+            <code>brisk init my-site</code
+            ><button class="copy" data-copy="brisk init my-site">copy</button>
+          </div>
+        </li>
+        <li>
+          <p>ship it</p>
+          <div class="cmd">
+            <code>brisk deploy my-site</code
+            ><button class="copy" data-copy="brisk deploy my-site">copy</button>
+          </div>
+        </li>
+        <li>
+          <p>
+            that's the whole pipeline. need a database, AI, realtime?
+            <a href="/docs">one script tag</a>.
+          </p>
+        </li>
+      </ol>
+
+      <section id="sites-section" hidden>
+        <div class="sites-head">
+          <h2 id="site-count"></h2>
+          <input id="filter" type="search" placeholder="filter… ( / )" autocomplete="off" />
+        </div>
+        <ul class="site-list" id="site-list"></ul>
+      </section>
+
+      <footer>
+        <span>brisk</span>
         <a href="/docs">docs</a>
-        <a href="https://github.com/your-org/brisk">source</a>
-        <span class="whoami" id="whoami" hidden>
-          <span class="presence" id="presence" hidden></span><span id="who"></span>
-        </span>
-      </nav>
-    </header>
-
-    <section class="hero">
-      <h1>Drop a folder. Get a site.</h1>
-      <p>
-        Static hosting plus a zero-config backend: database, files, AI, realtime,
-        identity. No keys, no pipelines, no permissions. Everything here is
-        visible to everyone, on purpose.
-      </p>
-    </section>
-
-    <!-- Empty state doubles as the quickstart; hidden once sites exist. -->
-    <ol class="quickstart" id="quickstart" hidden>
-      <li>
-        <p>scaffold a folder (or bring any folder of HTML)</p>
-        <div class="cmd"><code>brisk init my-site</code><button class="copy" data-copy="brisk init my-site">copy</button></div>
-      </li>
-      <li>
-        <p>ship it</p>
-        <div class="cmd"><code>brisk deploy my-site</code><button class="copy" data-copy="brisk deploy my-site">copy</button></div>
-      </li>
-      <li>
-        <p>that's the whole pipeline. need a database, AI, realtime? <a href="/docs">one script tag</a>.</p>
-      </li>
-    </ol>
-
-    <section id="sites-section" hidden>
-      <div class="sites-head">
-        <h2 id="site-count"></h2>
-        <input id="filter" type="search" placeholder="filter… ( / )" autocomplete="off" />
-      </div>
-      <ul class="site-list" id="site-list"></ul>
-    </section>
-
-    <footer>
-      <span>brisk</span>
-      <a href="/docs">docs</a>
-      <a href="https://shopify.engineering/quick">inspired by Shopify's Quick</a>
-    </footer>
-  </main>
-</body>
+        <a href="https://shopify.engineering/quick">inspired by Shopify's Quick</a>
+      </footer>
+    </main>
+  </body>
 </html>

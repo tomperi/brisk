@@ -59,12 +59,16 @@ async function activeDeploy(env: Env, site: string): Promise<string | null> {
 }
 
 export async function listSites(env: Env): Promise<SiteInfo[]> {
-  const { results } = await env.DB.prepare('SELECT * FROM sites ORDER BY updated_at DESC').all<SiteRow>();
+  const { results } = await env.DB.prepare(
+    'SELECT * FROM sites ORDER BY updated_at DESC',
+  ).all<SiteRow>();
   return results.map(toInfo);
 }
 
 export async function getSite(env: Env, name: string): Promise<SiteInfo | null> {
-  const row = await env.DB.prepare('SELECT * FROM sites WHERE name = ?').bind(name).first<SiteRow>();
+  const row = await env.DB.prepare('SELECT * FROM sites WHERE name = ?')
+    .bind(name)
+    .first<SiteRow>();
   return row ? toInfo(row) : null;
 }
 
@@ -77,9 +81,7 @@ export async function serveSite(env: Env, site: string, path: string): Promise<R
   if (!deploy) return null;
 
   const clean = path.replace(/^\/+/, '').replaceAll('../', '');
-  const candidates = clean
-    ? [clean, `${clean}/index.html`, `${clean}.html`]
-    : ['index.html'];
+  const candidates = clean ? [clean, `${clean}/index.html`, `${clean}.html`] : ['index.html'];
 
   for (const candidate of candidates) {
     const object = await env.BUCKET.get(deployPrefix(site, deploy) + candidate);

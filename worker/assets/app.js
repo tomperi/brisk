@@ -43,7 +43,8 @@ const lobby = brisk.channel('dashboard');
 lobby.on('presence', (members) => {
   const others = members.length - 1;
   $('presence').hidden = others < 1;
-  if (others >= 1) $('presence').title = `${others} other ${others === 1 ? 'person' : 'people'} here now`;
+  if (others >= 1)
+    $('presence').title = `${others} other ${others === 1 ? 'person' : 'people'} here now`;
 });
 
 // ---- site list ----------------------------------------------------------------
@@ -102,7 +103,8 @@ async function load() {
     return;
   }
   $('sites-section').hidden = false;
-  $('site-count').textContent = `${sites.length} ${sites.length === 1 ? 'site' : 'sites'}, freshest first`;
+  $('site-count').textContent =
+    `${sites.length} ${sites.length === 1 ? 'site' : 'sites'}, freshest first`;
   $('filter').hidden = sites.length < 9;
   render();
 }

@@ -1,65 +1,99 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>cursors</title>
-  <script src="/brisk.js"></script>
-  <style>
-    body { font: 16px/1.6 ui-monospace, Menlo, monospace; margin: 0; min-height: 100vh; background: oklch(21% 0.012 75); color: oklch(89% 0.012 85); overflow: hidden; }
-    main { display: grid; place-items: center; min-height: 100vh; text-align: center; }
-    h1 { font-weight: 400; }
-    #count { color: oklch(72% 0.14 150); }
-    .cursor { position: fixed; pointer-events: none; transition: transform 80ms linear; will-change: transform; }
-    .cursor svg { display: block; }
-    .cursor span { font-size: 11px; background: oklch(72% 0.13 262); color: oklch(15% 0.01 262); border-radius: 4px; padding: 1px 6px; margin-left: 12px; }
-  </style>
-</head>
-<body>
-  <main>
-    <div>
-      <h1>open this page in two windows</h1>
-      <p><span id="count">1</span> here now</p>
-    </div>
-  </main>
-
-  <script>
-    const room = brisk.channel('cursors');
-    const cursors = new Map();
-
-    function cursorFor(email, name) {
-      let el = cursors.get(email);
-      if (el) return el;
-      el = document.createElement('div');
-      el.className = 'cursor';
-      el.innerHTML = `<svg width="14" height="18" viewBox="0 0 14 18"><path d="M1 1l12 7-5.5 1.5L5 16z" fill="oklch(72% 0.13 262)"/></svg><span></span>`;
-      el.querySelector('span').textContent = name;
-      document.body.append(el);
-      cursors.set(email, el);
-      return el;
-    }
-
-    room.on('message', (pos, from) => {
-      cursorFor(from.email, from.name).style.transform = `translate(${pos.x * innerWidth}px, ${pos.y * innerHeight}px)`;
-    });
-
-    room.on('presence', (members) => {
-      document.getElementById('count').textContent = members.length;
-      for (const [email, el] of cursors) {
-        if (!members.some((m) => m.email === email)) {
-          el.remove();
-          cursors.delete(email);
-        }
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>cursors</title>
+    <script src="/brisk.js"></script>
+    <style>
+      body {
+        font:
+          16px/1.6 ui-monospace,
+          Menlo,
+          monospace;
+        margin: 0;
+        min-height: 100vh;
+        background: oklch(21% 0.012 75);
+        color: oklch(89% 0.012 85);
+        overflow: hidden;
       }
-    });
+      main {
+        display: grid;
+        place-items: center;
+        min-height: 100vh;
+        text-align: center;
+      }
+      h1 {
+        font-weight: 400;
+      }
+      #count {
+        color: oklch(72% 0.14 150);
+      }
+      .cursor {
+        position: fixed;
+        pointer-events: none;
+        transition: transform 80ms linear;
+        will-change: transform;
+      }
+      .cursor svg {
+        display: block;
+      }
+      .cursor span {
+        font-size: 11px;
+        background: oklch(72% 0.13 262);
+        color: oklch(15% 0.01 262);
+        border-radius: 4px;
+        padding: 1px 6px;
+        margin-left: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div>
+        <h1>open this page in two windows</h1>
+        <p><span id="count">1</span> here now</p>
+      </div>
+    </main>
 
-    let last = 0;
-    addEventListener('mousemove', (e) => {
-      const now = performance.now();
-      if (now - last < 40) return; // ~25 updates/s is plenty
-      last = now;
-      room.send({ x: e.clientX / innerWidth, y: e.clientY / innerHeight });
-    });
-  </script>
-</body>
+    <script>
+      const room = brisk.channel('cursors');
+      const cursors = new Map();
+
+      function cursorFor(email, name) {
+        let el = cursors.get(email);
+        if (el) return el;
+        el = document.createElement('div');
+        el.className = 'cursor';
+        el.innerHTML = `<svg width="14" height="18" viewBox="0 0 14 18"><path d="M1 1l12 7-5.5 1.5L5 16z" fill="oklch(72% 0.13 262)"/></svg><span></span>`;
+        el.querySelector('span').textContent = name;
+        document.body.append(el);
+        cursors.set(email, el);
+        return el;
+      }
+
+      room.on('message', (pos, from) => {
+        cursorFor(from.email, from.name).style.transform =
+          `translate(${pos.x * innerWidth}px, ${pos.y * innerHeight}px)`;
+      });
+
+      room.on('presence', (members) => {
+        document.getElementById('count').textContent = members.length;
+        for (const [email, el] of cursors) {
+          if (!members.some((m) => m.email === email)) {
+            el.remove();
+            cursors.delete(email);
+          }
+        }
+      });
+
+      let last = 0;
+      addEventListener('mousemove', (e) => {
+        const now = performance.now();
+        if (now - last < 40) return; // ~25 updates/s is plenty
+        last = now;
+        room.send({ x: e.clientX / innerWidth, y: e.clientY / innerHeight });
+      });
+    </script>
+  </body>
 </html>

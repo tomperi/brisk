@@ -120,7 +120,13 @@ export class SiteRoom extends DurableObject<Env> {
 }
 
 function getAttachment(ws: WebSocket): Attachment {
-  return (ws.deserializeAttachment() as Attachment | null) ?? { user: anonymous(), subs: [], channels: [] };
+  return (
+    (ws.deserializeAttachment() as Attachment | null) ?? {
+      user: anonymous(),
+      subs: [],
+      channels: [],
+    }
+  );
 }
 
 function setAttachment(ws: WebSocket, att: Attachment): void {

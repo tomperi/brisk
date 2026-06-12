@@ -42,7 +42,9 @@ export async function api<T>(server: string, route: string, init: RequestInit = 
     } catch {
       /* not json */
     }
-    throw new Error(`${init.method ?? 'GET'} ${route} → ${res.status}${message ? `: ${message}` : ''}`);
+    throw new Error(
+      `${init.method ?? 'GET'} ${route} → ${res.status}${message ? `: ${message}` : ''}`,
+    );
   }
   return res.json() as Promise<T>;
 }

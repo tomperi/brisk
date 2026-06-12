@@ -1,93 +1,95 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>brisk docs</title>
-  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="/app.css" />
-  <script src="/brisk.js" defer></script>
-  <script>
-    document.addEventListener('DOMContentLoaded', () => {
-      document.querySelectorAll('pre').forEach((pre) => {
-        const btn = document.createElement('button');
-        btn.className = 'copy';
-        btn.textContent = 'copy';
-        btn.style.cssText = 'float:right;margin:-0.2rem -0.4rem 0 1rem';
-        btn.onclick = async () => {
-          await navigator.clipboard.writeText(pre.querySelector('code').textContent);
-          btn.textContent = 'copied';
-          btn.classList.add('done');
-          setTimeout(() => { btn.textContent = 'copy'; btn.classList.remove('done'); }, 1200);
-        };
-        pre.prepend(btn);
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>brisk docs</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/app.css" />
+    <script src="/brisk.js" defer></script>
+    <script>
+      document.addEventListener('DOMContentLoaded', () => {
+        document.querySelectorAll('pre').forEach((pre) => {
+          const btn = document.createElement('button');
+          btn.className = 'copy';
+          btn.textContent = 'copy';
+          btn.style.cssText = 'float:right;margin:-0.2rem -0.4rem 0 1rem';
+          btn.onclick = async () => {
+            await navigator.clipboard.writeText(pre.querySelector('code').textContent);
+            btn.textContent = 'copied';
+            btn.classList.add('done');
+            setTimeout(() => {
+              btn.textContent = 'copy';
+              btn.classList.remove('done');
+            }, 1200);
+          };
+          pre.prepend(btn);
+        });
       });
-    });
-  </script>
-</head>
-<body>
-  <main class="doc">
-    <header>
-      <a class="wordmark" href="/">brisk<span class="cursor">▮</span></a>
-      <nav>
-        <a href="/docs">docs</a>
-        <a href="https://github.com/your-org/brisk">source</a>
-      </nav>
-    </header>
+    </script>
+  </head>
+  <body>
+    <main class="doc">
+      <header>
+        <a class="wordmark" href="/">brisk<span class="cursor">▮</span></a>
+        <nav>
+          <a href="/docs">docs</a>
+          <a href="https://github.com/your-org/brisk">source</a>
+        </nav>
+      </header>
 
-    <h1>Everything Brisk does</h1>
-    <p class="lede">
-      One page, because that's all it needs. A Brisk site is a folder of static
-      files plus, if you want it, six backend primitives reachable from one
-      script tag. There are no other features.
-    </p>
+      <h1>Everything Brisk does</h1>
+      <p class="lede">
+        One page, because that's all it needs. A Brisk site is a folder of static files plus, if you
+        want it, six backend primitives reachable from one script tag. There are no other features.
+      </p>
 
-    <ul class="toc">
-      <li><a href="#deploying">deploying</a></li>
-      <li><a href="#sdk">the sdk</a></li>
-      <li><a href="#db">database</a></li>
-      <li><a href="#identity">identity</a></li>
-      <li><a href="#ai">ai</a></li>
-      <li><a href="#files">files</a></li>
-      <li><a href="#channels">channels</a></li>
-      <li><a href="#philosophy">philosophy</a></li>
-    </ul>
+      <ul class="toc">
+        <li><a href="#deploying">deploying</a></li>
+        <li><a href="#sdk">the sdk</a></li>
+        <li><a href="#db">database</a></li>
+        <li><a href="#identity">identity</a></li>
+        <li><a href="#ai">ai</a></li>
+        <li><a href="#files">files</a></li>
+        <li><a href="#channels">channels</a></li>
+        <li><a href="#philosophy">philosophy</a></li>
+      </ul>
 
-    <h2 id="deploying"><a href="#deploying">Deploying</a></h2>
-    <p>Install the CLI once, then any folder is one command away from being a site:</p>
-<pre><code>npm install -g @brisk/cli
+      <h2 id="deploying"><a href="#deploying">Deploying</a></h2>
+      <p>Install the CLI once, then any folder is one command away from being a site:</p>
+      <pre><code>npm install -g @brisk/cli
 
 brisk init my-site     # scaffold (optional — any folder works)
 brisk deploy my-site   # → https://my-site.your-host/
 brisk dev my-site      # redeploy on every save
 brisk list             # everything on this instance
 brisk pull some-site   # download any site's source to remix it</code></pre>
-    <p>
-      Deploys are atomic: files upload to a fresh version, then the live pointer
-      swaps. Site names are first come, never owned. Anyone can overwrite
-      anything, including this dashboard (deploy a site called
-      <code>home</code>).
-    </p>
-    <p>
-      Point the CLI at your instance with <code>BRISK_SERVER</code>, and set
-      <code>BRISK_TOKEN</code> if the server requires login.
-    </p>
+      <p>
+        Deploys are atomic: files upload to a fresh version, then the live pointer swaps. Site names
+        are first come, never owned. Anyone can overwrite anything, including this dashboard (deploy
+        a site called
+        <code>home</code>).
+      </p>
+      <p>
+        Point the CLI at your instance with <code>BRISK_SERVER</code>, and set
+        <code>BRISK_TOKEN</code> if the server requires login.
+      </p>
 
-    <h2 id="sdk"><a href="#sdk">The SDK</a></h2>
-    <p>Every site, deployed or not, can load the SDK from its own origin:</p>
-<pre><code>&lt;script src="/brisk.js"&gt;&lt;/script&gt;</code></pre>
-    <p>
-      That's the entire setup. No API keys (they live on the server), no
-      configuration, no build step. <code>brisk</code> is a global with five
-      namespaces, each scoped to the site that loads it.
-    </p>
+      <h2 id="sdk"><a href="#sdk">The SDK</a></h2>
+      <p>Every site, deployed or not, can load the SDK from its own origin:</p>
+      <pre><code>&lt;script src="/brisk.js"&gt;&lt;/script&gt;</code></pre>
+      <p>
+        That's the entire setup. No API keys (they live on the server), no configuration, no build
+        step. <code>brisk</code> is a global with five namespaces, each scoped to the site that
+        loads it.
+      </p>
 
-    <h2 id="db"><a href="#db">Database</a></h2>
-    <p>
-      Schemaless JSON collections, Firebase-style. Treat it like a big persisted
-      JSON store: no schemas, no migrations, shape your data freely.
-    </p>
-<pre><code>const posts = brisk.db.collection('posts');
+      <h2 id="db"><a href="#db">Database</a></h2>
+      <p>
+        Schemaless JSON collections, Firebase-style. Treat it like a big persisted JSON store: no
+        schemas, no migrations, shape your data freely.
+      </p>
+      <pre><code>const posts = brisk.db.collection('posts');
 
 const doc = await posts.create({ title: 'Hello', votes: 0 });
 const all = await posts.list({ sort: '-created', limit: 50 });
@@ -100,25 +102,25 @@ const stop = posts.subscribe({
   onUpdate: (doc) => {},
   onDelete: (id) => {},
 });</code></pre>
-    <p>
-      Docs carry <code>id</code>, <code>createdAt</code>, <code>updatedAt</code>.
-      Collections are namespaced per site, so name things whatever you like.
-    </p>
+      <p>
+        Docs carry <code>id</code>, <code>createdAt</code>, <code>updatedAt</code>. Collections are
+        namespaced per site, so name things whatever you like.
+      </p>
 
-    <h2 id="identity"><a href="#identity">Identity</a></h2>
-    <p>
-      The platform authenticates everyone before any page loads, so sites get
-      identity for free. No login flows, ever.
-    </p>
-<pre><code>const user = await brisk.me();
+      <h2 id="identity"><a href="#identity">Identity</a></h2>
+      <p>
+        The platform authenticates everyone before any page loads, so sites get identity for free.
+        No login flows, ever.
+      </p>
+      <pre><code>const user = await brisk.me();
 // { email: 'sam@yourco.com', name: 'Sam', picture: '…' }</code></pre>
 
-    <h2 id="ai"><a href="#ai">AI</a></h2>
-    <p>
-      LLM calls straight from the browser. The server holds the provider keys
-      (Anthropic or OpenAI) and proxies the request.
-    </p>
-<pre><code>const res = await brisk.ai.chat('Turn these notes into a haiku: …');
+      <h2 id="ai"><a href="#ai">AI</a></h2>
+      <p>
+        LLM calls straight from the browser. The server holds the provider keys (Anthropic or
+        OpenAI) and proxies the request.
+      </p>
+      <pre><code>const res = await brisk.ai.chat('Turn these notes into a haiku: …');
 res.text;
 
 // or full control:
@@ -127,16 +129,16 @@ await brisk.ai.chat(
   { system: 'You are terse.', model: 'claude-opus-4-8' },
 );</code></pre>
 
-    <h2 id="files"><a href="#files">Files</a></h2>
-<pre><code>const [file] = await brisk.fs.upload(input.files);
+      <h2 id="files"><a href="#files">Files</a></h2>
+      <pre><code>const [file] = await brisk.fs.upload(input.files);
 file.url;   // permanent, immutable URL</code></pre>
 
-    <h2 id="channels"><a href="#channels">Channels</a></h2>
-    <p>
-      Realtime messaging with presence. This is the multiplayer primitive:
-      cursors, games, live polls, collaborative anything.
-    </p>
-<pre><code>const room = brisk.channel('lobby');
+      <h2 id="channels"><a href="#channels">Channels</a></h2>
+      <p>
+        Realtime messaging with presence. This is the multiplayer primitive: cursors, games, live
+        polls, collaborative anything.
+      </p>
+      <pre><code>const room = brisk.channel('lobby');
 
 room.send({ x: 128, y: 64 });                    // to everyone else
 room.on('message', (data, from) => { … });       // from = { email, name }
@@ -144,24 +146,23 @@ room.on('presence', (members) => { … });         // join/leave
 room.members;                                    // current list
 room.leave();</code></pre>
 
-    <h2 id="philosophy"><a href="#philosophy">Philosophy</a></h2>
-    <p>
-      Brisk stays useful by staying small. No site owners, no permissions, no
-      custom backends, no cron jobs. Everything is open to every teammate, which
-      is exactly why a leaderboard takes five minutes instead of a security
-      review. When a feature request shows up, the answer is usually a
-      demonstration that the six primitives above already cover it.
-    </p>
-    <p>
-      Self-hosting, Google login, and wildcard subdomains are covered in the
-      <a href="https://github.com/your-org/brisk#readme">README</a>.
-    </p>
+      <h2 id="philosophy"><a href="#philosophy">Philosophy</a></h2>
+      <p>
+        Brisk stays useful by staying small. No site owners, no permissions, no custom backends, no
+        cron jobs. Everything is open to every teammate, which is exactly why a leaderboard takes
+        five minutes instead of a security review. When a feature request shows up, the answer is
+        usually a demonstration that the six primitives above already cover it.
+      </p>
+      <p>
+        Self-hosting, Google login, and wildcard subdomains are covered in the
+        <a href="https://github.com/your-org/brisk#readme">README</a>.
+      </p>
 
-    <footer>
-      <span>brisk</span>
-      <a href="/">home</a>
-      <a href="https://shopify.engineering/quick">inspired by Shopify's Quick</a>
-    </footer>
-  </main>
-</body>
+      <footer>
+        <span>brisk</span>
+        <a href="/">home</a>
+        <a href="https://shopify.engineering/quick">inspired by Shopify's Quick</a>
+      </footer>
+    </main>
+  </body>
 </html>

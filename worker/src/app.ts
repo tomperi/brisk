@@ -56,7 +56,11 @@ export function createApp(): Hono<AppEnv> {
 
   // ---- database ----------------------------------------------------------
 
-  const publish = (c: { env: Env; executionCtx: ExecutionContext }, site: string, event: object) => {
+  const publish = (
+    c: { env: Env; executionCtx: ExecutionContext },
+    site: string,
+    event: object,
+  ) => {
     const room = c.env.ROOMS.get(c.env.ROOMS.idFromName(site));
     c.executionCtx.waitUntil(
       room.fetch('https://room/publish', { method: 'POST', body: JSON.stringify(event) }),
@@ -97,7 +101,12 @@ export function createApp(): Hono<AppEnv> {
   app.patch('/api/db/:collection/:id', async (c) => {
     const collection = c.req.param('collection');
     const fields = await c.req.json<Record<string, unknown>>();
-    const doc = await new DocStore(c.env.DB).update(c.var.site, collection, c.req.param('id'), fields);
+    const doc = await new DocStore(c.env.DB).update(
+      c.var.site,
+      collection,
+      c.req.param('id'),
+      fields,
+    );
     if (!doc) return c.json({ error: 'not found' }, 404);
     publish(c, c.var.site, { collection, event: 'update', doc });
     return c.json(doc);
@@ -127,7 +136,12 @@ export function createApp(): Hono<AppEnv> {
         await c.env.BUCKET.put(`uploads/${c.var.site}/${id}/${name}`, file.stream(), {
           httpMetadata: { contentType: file.type || contentType(name) },
         });
-        return { name, url: `/files/${c.var.site}/${id}/${name}`, size: file.size, type: file.type };
+        return {
+          name,
+          url: `/files/${c.var.site}/${id}/${name}`,
+          size: file.size,
+          type: file.type,
+        };
       }),
     );
     return c.json({ files: uploaded });
@@ -173,7 +187,9 @@ export function createApp(): Hono<AppEnv> {
 
   app.get('/api/sites/:name', async (c) => {
     const site = await getSite(c.env, c.req.param('name'));
-    return site ? c.json({ ...site, url: siteUrl(c, site.name) }) : c.json({ error: 'not found' }, 404);
+    return site
+      ? c.json({ ...site, url: siteUrl(c, site.name) })
+      : c.json({ error: 'not found' }, 404);
   });
 
   app.get('/api/sites/:name/files', async (c) =>

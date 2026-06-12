@@ -91,7 +91,9 @@ describe('deploy and serve', () => {
       body: deployForm({ 'index.html': 'temp' }),
     });
 
-    const list = await (await SELF.fetch(`${HOST}/api/sites`)).json<{ sites: { name: string }[] }>();
+    const list = await (
+      await SELF.fetch(`${HOST}/api/sites`)
+    ).json<{ sites: { name: string }[] }>();
     expect(list.sites.map((s) => s.name)).toContain('temp');
 
     const raw = await SELF.fetch(`${HOST}/api/sites/temp/raw/index.html`);
@@ -135,7 +137,10 @@ describe('database', () => {
     ).json<{ docs: unknown[] }>();
     expect(other.docs).toHaveLength(0);
 
-    const del = await SELF.fetch(`${HOST}/api/db/notes/${created.id}`, { method: 'DELETE', headers });
+    const del = await SELF.fetch(`${HOST}/api/db/notes/${created.id}`, {
+      method: 'DELETE',
+      headers,
+    });
     expect((await del.json<{ ok: boolean }>()).ok).toBe(true);
   });
 

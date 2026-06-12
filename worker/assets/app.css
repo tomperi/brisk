@@ -33,7 +33,13 @@ body {
   margin: 0;
   background: var(--paper);
   color: var(--ink);
-  font: 15px/1.65 ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+  font:
+    15px/1.65 ui-monospace,
+    'SF Mono',
+    SFMono-Regular,
+    Menlo,
+    Consolas,
+    monospace;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -79,7 +85,9 @@ header {
 }
 
 @keyframes blink {
-  50% { background: transparent; }
+  50% {
+    background: transparent;
+  }
 }
 
 header nav {
@@ -114,7 +122,9 @@ header nav a:hover {
 }
 
 @keyframes breathe {
-  50% { opacity: 0.35; }
+  50% {
+    opacity: 0.35;
+  }
 }
 
 /* ---- hero ----------------------------------------------------------------- */
@@ -170,7 +180,10 @@ header nav a:hover {
   border-radius: 6px;
   padding: 0.15rem 0.6rem;
   cursor: pointer;
-  transition: color 150ms ease, border-color 150ms ease, transform 100ms ease;
+  transition:
+    color 150ms ease,
+    border-color 150ms ease,
+    transform 100ms ease;
 }
 
 .copy:hover {
@@ -201,7 +214,9 @@ code {
   font-family: inherit;
 }
 
-p code, li code, td code {
+p code,
+li code,
+td code {
   background: var(--paper-raised);
   border-radius: 4px;
   padding: 0.1em 0.35em;
@@ -283,7 +298,10 @@ p code, li code, td code {
 }
 
 @keyframes settle {
-  from { opacity: 0; transform: translateY(4px); }
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
 }
 
 .site-row {
@@ -323,7 +341,11 @@ p code, li code, td code {
 
 .site-row .copy {
   opacity: 0;
-  transition: opacity 150ms ease, color 150ms ease, border-color 150ms ease, transform 100ms ease;
+  transition:
+    opacity 150ms ease,
+    color 150ms ease,
+    border-color 150ms ease,
+    transform 100ms ease;
 }
 
 .site-row:hover .copy,
