@@ -119,18 +119,12 @@ export class SiteRoom extends DurableObject<Env> {
   }
 }
 
+// Every accepted socket gets an attachment up front, and hibernation
+// preserves it — so reading it back is infallible.
 function getAttachment(ws: WebSocket): Attachment {
-  return (
-    (ws.deserializeAttachment() as Attachment | null) ?? {
-      user: anonymous(),
-      subs: [],
-      channels: [],
-    }
-  );
+  return ws.deserializeAttachment() as Attachment;
 }
 
 function setAttachment(ws: WebSocket, att: Attachment): void {
   ws.serializeAttachment(att);
 }
-
-const anonymous = (): User => ({ email: 'unknown@brisk', name: 'Unknown' });

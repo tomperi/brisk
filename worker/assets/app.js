@@ -96,6 +96,13 @@ function cell(className, text) {
 
 async function load() {
   const res = await fetch('/api/sites');
+  if (!res.ok) {
+    const section = $('sites-section');
+    section.hidden = false;
+    $('site-count').textContent = `couldn't load sites (${res.status}) — try reloading`;
+    $('filter').hidden = true;
+    return;
+  }
   ({ sites } = await res.json());
 
   if (!sites.length) {
