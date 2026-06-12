@@ -148,6 +148,29 @@ describe('database', () => {
     const res = await SELF.fetch(`${HOST}/api/db/notes/nope`, { headers });
     expect(res.status).toBe(404);
   });
+
+  it('ignores attempts to forge id/createdAt and bogus limits', async () => {
+    const doc = await (
+      await SELF.fetch(`${HOST}/api/db/forgery`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ id: 'fake', createdAt: '1999-01-01', real: true }),
+      })
+    ).json<{ id: string; createdAt: string }>();
+    expect(doc.id).not.toBe('fake');
+    expect(doc.createdAt).not.toBe('1999-01-01');
+
+    // negative limit must not disable the cap (SQLite treats LIMIT -1 as ∞)
+    const res = await SELF.fetch(`${HOST}/api/db/forgery?limit=-1`, { headers });
+    expect((await res.json<{ docs: unknown[] }>()).docs).toHaveLength(1);
+  });
+
+  it('rejects malformed x-brisk-site headers', async () => {
+    const res = await SELF.fetch(`${HOST}/api/db/notes`, {
+      headers: { 'x-brisk-site': 'home/../sneaky' },
+    });
+    expect(res.status).toBe(400);
+  });
 });
 
 describe('file uploads', () => {

@@ -12,6 +12,12 @@ export interface CollectionInfo {
 
 const MAX_LIMIT = 500;
 
+/** `id` / `createdAt` / `updatedAt` are ours; user fields can't shadow them. */
+function ownFields(fields: Record<string, unknown>): Record<string, unknown> {
+  const { id: _id, createdAt: _c, updatedAt: _u, ...rest } = fields;
+  return rest;
+}
+
 interface DocRow {
   id: string;
   data: string;
@@ -41,7 +47,7 @@ export class DocStore {
     collection: string,
     opts: { limit?: number; sort?: string } = {},
   ): Promise<Doc[]> {
-    const limit = Math.min(opts.limit ?? 100, MAX_LIMIT);
+    const limit = Math.min(Math.max(1, opts.limit ?? 100), MAX_LIMIT);
     const order = opts.sort === '-created' ? 'DESC' : 'ASC';
     const { results } = await this.db
       .prepare(
@@ -62,15 +68,16 @@ export class DocStore {
   }
 
   async create(site: string, collection: string, fields: Record<string, unknown>): Promise<Doc> {
+    const data = ownFields(fields);
     const now = new Date().toISOString();
     const id = crypto.randomUUID().replaceAll('-', '').slice(0, 12);
     await this.db
       .prepare(
         'INSERT INTO docs (site, collection, id, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
       )
-      .bind(site, collection, id, JSON.stringify(fields), now, now)
+      .bind(site, collection, id, JSON.stringify(data), now, now)
       .run();
-    return { id, createdAt: now, updatedAt: now, ...fields };
+    return { id, createdAt: now, updatedAt: now, ...data };
   }
 
   /** Shallow-merges `fields` into the existing doc, Firebase-update style. */
@@ -83,7 +90,7 @@ export class DocStore {
     const existing = await this.get(site, collection, id);
     if (!existing) return null;
     const { id: _id, createdAt, updatedAt: _updatedAt, ...current } = existing;
-    const merged = { ...current, ...fields };
+    const merged = { ...current, ...ownFields(fields) };
     const now = new Date().toISOString();
     await this.db
       .prepare(

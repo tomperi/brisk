@@ -9,7 +9,7 @@ const STATE_COOKIE = 'brisk_oauth_state';
 const SESSION_DAYS = 7;
 
 /** Who you are when auth is off: a trusted-network dev identity. */
-export const devUser = (): User => ({ email: 'dev@localhost', name: 'Dev' });
+const devUser = (): User => ({ email: 'dev@localhost', name: 'Dev' });
 
 const apexHost = (c: Context<AppEnv>): string => c.env.BASE_HOST || new URL(c.req.url).host;
 
@@ -43,7 +43,7 @@ async function readSession(c: Context<AppEnv>): Promise<User | null> {
 async function writeSession(c: Context<AppEnv>, user: User): Promise<void> {
   const token = await sign(
     { ...user, exp: Math.floor(Date.now() / 1000) + SESSION_DAYS * 86_400 },
-    c.env.SESSION_SECRET!,
+    c.env.SESSION_SECRET!, // guaranteed by the auth middleware's fail-fast
   );
   setCookie(c, SESSION_COOKIE, token, {
     domain: cookieDomain(c),
@@ -65,12 +65,27 @@ function safeNext(c: Context<AppEnv>, next: string | undefined): string {
     const url = new URL(next);
     const base = apexHost(c).split(':')[0]!;
     const host = url.hostname;
-    if (host === base || host.endsWith(`.${base}`)) return next;
+    const httpish = url.protocol === 'https:' || url.protocol === 'http:';
+    if (httpish && (host === base || host.endsWith(`.${base}`))) return next;
   } catch {
-    if (next.startsWith('/')) return next;
+    // Relative path only — and not protocol-relative (`//evil.com`) or the
+    // backslash variant browsers normalize to it (`/\evil.com`).
+    if (next.startsWith('/') && !/^\/[\\/]/.test(next)) return next;
   }
   return '/';
 }
+
+/** Constant-time-ish bearer check: compare digests, not strings. */
+async function tokenMatches(presented: string, expected: string): Promise<boolean> {
+  const digest = async (s: string) =>
+    new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)));
+  const [a, b] = await Promise.all([digest(presented), digest(expected)]);
+  return a.every((byte, i) => byte === b[i]);
+}
+
+const utf8ToB64 = (s: string): string => btoa(String.fromCharCode(...new TextEncoder().encode(s)));
+const b64ToUtf8 = (s: string): string =>
+  new TextDecoder().decode(Uint8Array.from(atob(s), (ch) => ch.charCodeAt(0)));
 
 /**
  * Resolves the requesting user. With AUTH=google: session cookie or a CLI
@@ -82,12 +97,15 @@ export function auth(): MiddlewareHandler<AppEnv> {
       c.set('user', devUser());
       return next();
     }
+    if (!c.env.SESSION_SECRET) {
+      return c.text('Misconfigured: AUTH=google requires the SESSION_SECRET secret.', 500);
+    }
 
     const bearer = c.req.header('authorization');
     if (
       bearer?.startsWith('Bearer ') &&
       c.env.DEPLOY_TOKEN &&
-      bearer.slice(7) === c.env.DEPLOY_TOKEN
+      (await tokenMatches(bearer.slice(7), c.env.DEPLOY_TOKEN))
     ) {
       c.set('user', { email: 'cli@brisk', name: 'CLI (deploy token)' });
       return next();
@@ -115,7 +133,7 @@ export function authRoutes(): Hono<AppEnv> {
 
   app.get('/auth/login', (c) => {
     if (c.env.AUTH !== 'google') return c.redirect('/');
-    const state = `${crypto.randomUUID()}.${btoa(safeNext(c, c.req.query('next')))}`;
+    const state = `${crypto.randomUUID()}.${utf8ToB64(safeNext(c, c.req.query('next')))}`;
     setCookie(c, STATE_COOKIE, state, {
       path: '/auth',
       httpOnly: true,
@@ -158,7 +176,7 @@ export function authRoutes(): Hono<AppEnv> {
 
     // The id_token came straight from Google over TLS; decoding is enough.
     const claims = JSON.parse(
-      atob(id_token.split('.')[1]!.replaceAll('-', '+').replaceAll('_', '/')),
+      b64ToUtf8(id_token.split('.')[1]!.replaceAll('-', '+').replaceAll('_', '/')),
     ) as {
       email: string;
       name?: string;
@@ -178,7 +196,7 @@ export function authRoutes(): Hono<AppEnv> {
       name: claims.name ?? claims.email,
       picture: claims.picture,
     });
-    return c.redirect(safeNext(c, atob(state.split('.')[1] ?? '')));
+    return c.redirect(safeNext(c, b64ToUtf8(state.split('.')[1] ?? '')));
   });
 
   app.get('/auth/logout', (c) => {
