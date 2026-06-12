@@ -1,0 +1,11 @@
+# Copy to .dev.vars for local development with `wrangler dev`.
+# All of these are optional — without them you get the dev identity and no AI.
+
+# ANTHROPIC_API_KEY=
+# OPENAI_API_KEY=
+
+# Only needed when testing AUTH=google locally:
+# GOOGLE_CLIENT_ID=
+# GOOGLE_CLIENT_SECRET=
+# SESSION_SECRET=
+# DEPLOY_TOKEN=
