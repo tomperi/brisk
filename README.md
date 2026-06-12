@@ -35,7 +35,8 @@ entirely on Cloudflare (one Worker + R2 + D1 + Durable Objects) and costs
   hosting itself.
 - **A dashboard** at the apex domain listing every site on the instance —
   a living changelog of what your team is making — plus a one-page SDK
-  reference at `/docs`.
+  reference at `/docs`. Signed-in members can also deploy by dragging a
+  folder straight onto it (confetti included).
 - **A CLI** with watch-mode deploys (`brisk dev`) and the ability to download
   any site's source (`brisk pull`) to remix it.
 - **One login for everything** (optional): Google OAuth on the apex domain
