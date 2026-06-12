@@ -367,10 +367,9 @@ td code {
 }
 
 /* ---- docs ---------------------------------------------------------------------- */
-
-.doc {
-  max-width: 44rem;
-}
+/* `.doc` is a <main>, so it inherits the 56rem page width — same as the dashboard,
+   so navigating between them doesn't shift the layout. Prose stays readable via the
+   per-element ch caps below. */
 
 .doc h1 {
   font-size: 1.5rem;
@@ -395,6 +394,15 @@ td code {
 
 .doc p {
   max-width: 65ch;
+}
+
+.doc ol {
+  max-width: 65ch;
+  padding-left: 1.2rem;
+}
+
+.doc ol li {
+  margin: 0.4rem 0;
 }
 
 .doc .lede {
