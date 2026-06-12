@@ -19,7 +19,7 @@ then run as `node cli/dist/cli.js …`.
 - **`templates.ts` ships SDK documentation.** The `AGENTS.md` it generates
   teaches coding agents the `brisk.*` API inside every initialized site
   folder. Any SDK surface change must be reflected there (and in
-  `worker/assets/docs.html`).
+  `worker/assets/docs.html` and `skills/brisk/references/sdk.md`).
 - **Connection resolution lives in one place** (`resolveConnection` in
   `config.ts`): `--profile`/`BRISK_PROFILE` > `--server`/`BRISK_SERVER` >
   `brisk.json` `server` > active profile > localhost. When a server is given
