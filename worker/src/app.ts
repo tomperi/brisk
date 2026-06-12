@@ -4,19 +4,26 @@ import { auth, authRoutes } from './auth';
 import { DocStore } from './docs';
 import { contentType } from './mime';
 import {
+  deleteSite,
   deploySite,
   getFile,
   getSite,
   isValidSiteName,
   listFiles,
   listSites,
-  removeSite,
   serveSite,
   type DeployFile,
 } from './sites';
+import type { DbEvent } from './room';
 import type { AppEnv, Env } from './env';
 
 const MAX_DEPLOY_FILES = 2000;
+
+/** Every File in the form's `files` field, whatever Hono parsed it into. */
+function formFiles(body: Record<string, unknown>): File[] {
+  const raw = body['files'];
+  return (Array.isArray(raw) ? raw : [raw]).filter((f): f is File => f instanceof File);
+}
 
 /** `foo.brisk.example.com` → `foo`. Also supports `foo.localhost` in dev. */
 export function siteFromHost(host: string, baseHost: string): string | null {
@@ -43,6 +50,9 @@ export function createApp(): Hono<AppEnv> {
   // host is the dashboard, which is itself just a site named `home`.
   app.use('*', async (c, next) => {
     const fromHeader = c.req.header('x-brisk-site');
+    if (fromHeader && fromHeader !== 'home' && !isValidSiteName(fromHeader)) {
+      return c.json({ error: 'invalid x-brisk-site header' }, 400);
+    }
     const fromHost = siteFromHost(new URL(c.req.url).host, c.env.BASE_HOST);
     c.set('site', fromHeader || fromHost || 'home');
     return next();
@@ -59,7 +69,7 @@ export function createApp(): Hono<AppEnv> {
   const publish = (
     c: { env: Env; executionCtx: ExecutionContext },
     site: string,
-    event: object,
+    event: DbEvent,
   ) => {
     const room = c.env.ROOMS.get(c.env.ROOMS.idFromName(site));
     c.executionCtx.waitUntil(
@@ -124,9 +134,7 @@ export function createApp(): Hono<AppEnv> {
   // ---- file uploads ------------------------------------------------------
 
   app.post('/api/fs/upload', async (c) => {
-    const body = await c.req.parseBody({ all: true });
-    const raw = body['files'] ?? body['file'];
-    const files = (Array.isArray(raw) ? raw : [raw]).filter((f): f is File => f instanceof File);
+    const files = formFiles(await c.req.parseBody({ all: true }));
     if (!files.length) return c.json({ error: 'no files in form field "files"' }, 400);
 
     const uploaded = await Promise.all(
@@ -138,7 +146,7 @@ export function createApp(): Hono<AppEnv> {
         });
         return {
           name,
-          url: `/files/${c.var.site}/${id}/${name}`,
+          url: `/files/${c.var.site}/${id}/${encodeURIComponent(name)}`,
           size: file.size,
           type: file.type,
         };
@@ -161,17 +169,17 @@ export function createApp(): Hono<AppEnv> {
   // ---- ai ----------------------------------------------------------------
 
   app.post('/api/ai/chat', async (c) => {
+    const req = await c.req.json().catch(() => null);
     try {
-      const req = await c.req.json();
-      // Accept both a bare string and a messages array, Quick-style ergonomics.
-      const messages =
-        typeof req === 'string'
-          ? [{ role: 'user' as const, content: req }]
-          : Array.isArray(req)
-            ? req
-            : (req.messages ?? [{ role: 'user' as const, content: String(req.content ?? '') }]);
-      const opts = typeof req === 'object' && !Array.isArray(req) ? req : {};
-      return c.json(await chat(c.env, { ...opts, messages }));
+      // A bare string is shorthand for one user message — nice from curl.
+      if (typeof req === 'string') {
+        return c.json(await chat(c.env, { messages: [{ role: 'user', content: req }] }));
+      }
+      if (!Array.isArray(req?.messages)) {
+        return c.json({ error: 'expected { messages: [...] } or a string' }, 400);
+      }
+      const { messages, system, model, maxTokens } = req;
+      return c.json(await chat(c.env, { messages, system, model, maxTokens }));
     } catch (err) {
       if (err instanceof AiNotConfiguredError) return c.json({ error: err.message }, 501);
       throw err;
@@ -205,19 +213,16 @@ export function createApp(): Hono<AppEnv> {
   });
 
   app.delete('/api/sites/:name', async (c) => {
-    await removeSite(c.env, c.req.param('name'));
+    await deleteSite(c.env, c.req.param('name'));
     return c.json({ ok: true });
   });
 
-  app.post('/api/deploy/:site', async (c) => {
-    const site = c.req.param('site');
+  app.post('/api/deploy/:name', async (c) => {
+    const site = c.req.param('name');
     if (!isValidSiteName(site)) {
       return c.json({ error: 'site names are lowercase letters, digits, and dashes' }, 400);
     }
-    const body = await c.req.parseBody({ all: true });
-    const raw = body['files'];
-    const files: DeployFile[] = (Array.isArray(raw) ? raw : [raw])
-      .filter((f): f is File => f instanceof File)
+    const files: DeployFile[] = formFiles(await c.req.parseBody({ all: true }))
       .map((file) => ({ path: file.name.replace(/^\/+/, ''), file }))
       .filter(({ path }) => path && !path.split('/').includes('..'));
     if (!files.length) return c.json({ error: 'no files in form field "files"' }, 400);

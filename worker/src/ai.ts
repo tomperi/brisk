@@ -17,6 +17,10 @@ export interface ChatResponse {
 const DEFAULT_ANTHROPIC_MODEL = 'claude-opus-4-8';
 const DEFAULT_OPENAI_MODEL = 'gpt-5.2';
 const DEFAULT_MAX_TOKENS = 4096;
+const MAX_MAX_TOKENS = 16_384;
+
+const cappedMaxTokens = (requested: number | undefined): number =>
+  Math.min(Math.max(1, requested ?? DEFAULT_MAX_TOKENS), MAX_MAX_TOKENS);
 
 /**
  * The zero-API-key trick: keys live on the server as Worker secrets, so any
@@ -28,7 +32,7 @@ export async function chat(env: Env, req: ChatRequest): Promise<ChatResponse> {
     const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
     const response = await client.messages.create({
       model: req.model ?? DEFAULT_ANTHROPIC_MODEL,
-      max_tokens: req.maxTokens ?? DEFAULT_MAX_TOKENS,
+      max_tokens: cappedMaxTokens(req.maxTokens),
       system: req.system,
       messages: req.messages,
     });
@@ -49,7 +53,7 @@ export async function chat(env: Env, req: ChatRequest): Promise<ChatResponse> {
       },
       body: JSON.stringify({
         model,
-        max_completion_tokens: req.maxTokens ?? DEFAULT_MAX_TOKENS,
+        max_completion_tokens: cappedMaxTokens(req.maxTokens),
         messages: [
           ...(req.system ? [{ role: 'system', content: req.system }] : []),
           ...req.messages,

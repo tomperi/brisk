@@ -80,7 +80,8 @@ export async function serveSite(env: Env, site: string, path: string): Promise<R
   const deploy = await activeDeploy(env, site);
   if (!deploy) return null;
 
-  const clean = path.replace(/^\/+/, '').replaceAll('../', '');
+  const clean = path.replace(/^\/+/, '');
+  if (clean.split('/').includes('..')) return null;
   const candidates = clean ? [clean, `${clean}/index.html`, `${clean}.html`] : ['index.html'];
 
   for (const candidate of candidates) {
@@ -130,7 +131,7 @@ export async function deploySite(
   await Promise.all(workers);
 
   const now = new Date().toISOString();
-  await env.DB.prepare(
+  const row = await env.DB.prepare(
     `INSERT INTO sites (name, active_deploy, files, bytes, created_at, updated_at, updated_by)
      VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (name) DO UPDATE SET
@@ -138,16 +139,19 @@ export async function deploySite(
        files = excluded.files,
        bytes = excluded.bytes,
        updated_at = excluded.updated_at,
-       updated_by = excluded.updated_by`,
+       updated_by = excluded.updated_by
+     RETURNING *`,
   )
     .bind(site, deploy, files.length, bytes, now, now, user.email)
-    .run();
+    .first<SiteRow>();
   pointerCache.delete(site);
 
+  // Two simultaneous deploys can orphan the loser's prefix; at internal-tool
+  // scale that's rare and cheap, so we don't coordinate beyond last-write-wins.
   if (previous && previous !== deploy) {
     ctx.waitUntil(deletePrefix(env, deployPrefix(site, previous)));
   }
-  return (await getSite(env, site))!;
+  return toInfo(row!);
 }
 
 export async function listFiles(env: Env, site: string): Promise<{ path: string; size: number }[]> {
@@ -176,10 +180,14 @@ export async function getFile(env: Env, site: string, path: string): Promise<Res
   return new Response(object.body, { headers });
 }
 
-export async function removeSite(env: Env, site: string): Promise<void> {
-  await env.DB.prepare('DELETE FROM sites WHERE name = ?').bind(site).run();
+/** Removes the site and everything namespaced to it: deploys, docs, uploads. */
+export async function deleteSite(env: Env, site: string): Promise<void> {
+  await env.DB.batch([
+    env.DB.prepare('DELETE FROM sites WHERE name = ?').bind(site),
+    env.DB.prepare('DELETE FROM docs WHERE site = ?').bind(site),
+  ]);
   pointerCache.delete(site);
-  await deletePrefix(env, `deploys/${site}/`);
+  await Promise.all([deletePrefix(env, `deploys/${site}/`), deletePrefix(env, `uploads/${site}/`)]);
 }
 
 async function deletePrefix(env: Env, prefix: string): Promise<void> {
