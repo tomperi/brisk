@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { AiNotConfiguredError, chat } from './ai';
-import { auth, authRoutes } from './auth';
+import { auth, authRoutes, cliAuthRoute } from './auth';
 import { DocStore } from './docs';
 import { contentType } from './mime';
 import {
@@ -63,6 +63,9 @@ export function createApp(): Hono<AppEnv> {
   // ---- identity ----------------------------------------------------------
 
   app.get('/api/me', (c) => c.json(c.var.user));
+
+  // Behind the auth gate on purpose: `brisk login` needs the user resolved.
+  app.get('/auth/cli', cliAuthRoute());
 
   // ---- database ----------------------------------------------------------
 

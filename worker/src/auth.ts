@@ -7,6 +7,7 @@ import type { AppEnv, User } from './env';
 const SESSION_COOKIE = 'brisk_session';
 const STATE_COOKIE = 'brisk_oauth_state';
 const SESSION_DAYS = 7;
+const CLI_TOKEN_DAYS = 90;
 
 /** Who you are when auth is off: a trusted-network dev identity. */
 const devUser = (): User => ({ email: 'dev@localhost', name: 'Dev' });
@@ -88,6 +89,59 @@ const b64ToUtf8 = (s: string): string =>
   new TextDecoder().decode(Uint8Array.from(atob(s), (ch) => ch.charCodeAt(0)));
 
 /**
+ * Two kinds of bearer: a personal token from `brisk login` (a JWT carrying
+ * the user's identity, so deploys are attributed to a real person), or the
+ * instance-wide DEPLOY_TOKEN meant for CI.
+ */
+async function userFromBearer(c: Context<AppEnv>, token: string): Promise<User | null> {
+  try {
+    const payload = await verify(token, c.env.SESSION_SECRET!, 'HS256');
+    if (payload.kind === 'cli') {
+      return {
+        email: String(payload.email),
+        name: String(payload.name),
+        picture: payload.picture as string | undefined,
+      };
+    }
+  } catch {
+    /* not a personal token — fall through to the CI token */
+  }
+  if (c.env.DEPLOY_TOKEN && (await tokenMatches(token, c.env.DEPLOY_TOKEN))) {
+    return { email: 'ci@brisk', name: 'CI (deploy token)' };
+  }
+  return null;
+}
+
+/**
+ * The browser half of `brisk login`. The CLI listens on localhost, sends the
+ * user here; the auth middleware has already established who they are, so we
+ * mint a long-lived personal token and bounce it back to the CLI.
+ */
+export function cliAuthRoute(): MiddlewareHandler<AppEnv> {
+  return async (c) => {
+    const port = Number(c.req.query('port'));
+    const state = c.req.query('state') ?? '';
+    if (!Number.isInteger(port) || port < 1024 || port > 65535 || !state || state.length > 128) {
+      return c.text('Bad request: expected ?port= (1024-65535) and ?state=.', 400);
+    }
+    const callback = new URL(`http://127.0.0.1:${port}/callback`);
+    callback.searchParams.set('state', state);
+    if (c.env.AUTH === 'google') {
+      const user = c.var.user;
+      const token = await sign(
+        { ...user, kind: 'cli', exp: Math.floor(Date.now() / 1000) + CLI_TOKEN_DAYS * 86_400 },
+        c.env.SESSION_SECRET!,
+      );
+      callback.searchParams.set('token', token);
+      callback.searchParams.set('email', user.email);
+    } else {
+      callback.searchParams.set('open', '1'); // this instance needs no token
+    }
+    return c.redirect(callback.toString());
+  };
+}
+
+/**
  * Resolves the requesting user. With AUTH=google: session cookie or a CLI
  * bearer token; unauthenticated browsers get bounced to Google, APIs get 401.
  */
@@ -102,13 +156,12 @@ export function auth(): MiddlewareHandler<AppEnv> {
     }
 
     const bearer = c.req.header('authorization');
-    if (
-      bearer?.startsWith('Bearer ') &&
-      c.env.DEPLOY_TOKEN &&
-      (await tokenMatches(bearer.slice(7), c.env.DEPLOY_TOKEN))
-    ) {
-      c.set('user', { email: 'cli@brisk', name: 'CLI (deploy token)' });
-      return next();
+    if (bearer?.startsWith('Bearer ')) {
+      const user = await userFromBearer(c, bearer.slice(7));
+      if (user) {
+        c.set('user', user);
+        return next();
+      }
     }
 
     const user = await readSession(c);
