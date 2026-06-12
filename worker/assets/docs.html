@@ -72,9 +72,10 @@ brisk dev my-site      # redeploy on every save
 brisk list             # everything on this instance
 brisk pull some-site   # download any site's source to remix it</code></pre>
       <p>
-        Deploys are atomic: files upload to a fresh version, then the live pointer swaps. Site names
-        are first come, never owned. Anyone signed in can overwrite anything, including this
-        dashboard (deploy a site called <code>home</code>).
+        Signed-in members can also skip the CLI entirely: drag a folder anywhere onto the dashboard,
+        name it, launch. Deploys are atomic: files upload to a fresh version, then the live pointer
+        swaps. Site names are first come, never owned. Anyone signed in can overwrite anything,
+        including this dashboard (deploy a site called <code>home</code>).
       </p>
       <p>
         <code>brisk login</code> opens the browser, finishes this instance's login, and stores a

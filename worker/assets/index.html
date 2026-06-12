@@ -9,6 +9,7 @@
     <script src="/brisk.js" defer></script>
     <script src="/header.js" defer></script>
     <script src="/app.js" defer></script>
+    <script src="/drop.js" defer></script>
   </head>
   <body>
     <main>
@@ -31,7 +32,49 @@
           Static hosting plus a zero-config backend: database, files, AI, realtime, identity. No
           keys, no pipelines, no permissions. Everything here is visible to everyone, on purpose.
         </p>
+        <p class="drop-hint" id="drop-hint" hidden>
+          literally — drag a folder anywhere on this page to deploy it
+        </p>
       </section>
+
+      <!-- The drag-and-drop deploy flow (members only; armed by drop.js). -->
+      <div class="drop-overlay" id="drop-overlay" hidden>
+        <div class="drop-card" id="drop-card">
+          <section class="drop-stage" id="stage-over">
+            <div class="drop-glyph">↑</div>
+            <h2 id="drop-headline">drop to deploy</h2>
+            <p class="drop-sub">a folder, or loose files — html · css · js</p>
+          </section>
+
+          <form class="drop-stage" id="stage-name" hidden>
+            <h2 id="drop-count"></h2>
+            <div class="launch-row">
+              <label class="namebox" for="site-name">
+                <input
+                  id="site-name"
+                  autocomplete="off"
+                  spellcheck="false"
+                  placeholder="name-your-site"
+                  required
+                />
+                <span class="suffix" id="name-suffix"></span>
+              </label>
+              <button type="submit" class="launch" id="launch">launch</button>
+            </div>
+            <p class="drop-note" id="drop-note" hidden></p>
+            <p class="drop-error" id="drop-error" hidden></p>
+          </form>
+
+          <section class="drop-stage" id="stage-live" hidden>
+            <h2>your site is live!</h2>
+            <p class="live-url">👉 <a id="live-link" target="_blank"></a> 👈</p>
+          </section>
+
+          <button type="button" class="drop-dismiss" id="drop-dismiss" hidden>
+            close <kbd>esc</kbd>
+          </button>
+        </div>
+      </div>
 
       <!-- Empty state doubles as the quickstart; hidden once sites exist. -->
       <ol class="quickstart" id="quickstart" hidden>

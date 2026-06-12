@@ -482,3 +482,211 @@ footer a {
     transition: none;
   }
 }
+
+/* ---- drag & drop deploy --------------------------------------------------- */
+
+.drop-hint {
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+  margin-top: 0.75rem;
+}
+
+.drop-overlay[hidden] {
+  display: none;
+}
+
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: color-mix(in oklab, var(--paper) 88%, transparent);
+  animation: overlay-in 150ms ease-out;
+}
+
+.drop-card {
+  background: var(--paper);
+  border: 1px solid var(--ink);
+  border-radius: 14px;
+  box-shadow: 0.45rem 0.45rem 0 var(--line);
+  padding: 2.5rem 3rem 2rem;
+  width: min(34rem, 100%);
+  text-align: center;
+  animation: card-in 200ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.drop-stage h2 {
+  font-size: 1.15rem;
+  margin: 0;
+}
+
+.drop-glyph {
+  width: 3rem;
+  height: 3rem;
+  margin: 0 auto 1.25rem;
+  display: grid;
+  place-items: center;
+  font-size: 1.3rem;
+  color: var(--accent);
+  border: 1px dashed var(--accent);
+  border-radius: 10px;
+  animation: bob 1.6s ease-in-out infinite;
+}
+
+.drop-sub,
+.drop-note {
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+  margin: 0.5rem 0 0;
+}
+
+.drop-error {
+  color: oklch(52% 0.17 25);
+  font-size: 0.85rem;
+  margin: 0.75rem 0 0;
+}
+
+.launch-row {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+
+.namebox {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  background: var(--paper-raised);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.55rem 0.9rem;
+  cursor: text;
+  transition: border-color 150ms ease;
+}
+
+.namebox:focus-within {
+  border-color: var(--accent);
+}
+
+.namebox input {
+  flex: 1;
+  min-width: 4ch;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 700;
+  color: var(--ink);
+  outline: none;
+  text-align: right;
+}
+
+.namebox .suffix {
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.launch {
+  font: inherit;
+  font-weight: 700;
+  background: var(--accent);
+  color: var(--paper);
+  border: 0;
+  border-radius: 8px;
+  padding: 0.55rem 1.3rem;
+  cursor: pointer;
+  transition:
+    transform 100ms ease,
+    opacity 150ms ease;
+}
+
+.launch:active {
+  transform: scale(0.96);
+}
+
+.launch:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+#stage-live h2 {
+  animation: pop 250ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.live-url {
+  margin: 0.75rem 0 0;
+  font-size: 1rem;
+}
+
+.live-url a {
+  font-weight: 700;
+}
+
+.drop-dismiss {
+  font: inherit;
+  font-size: 0.78rem;
+  color: var(--ink-dim);
+  background: none;
+  border: none;
+  cursor: pointer;
+  margin-top: 1.75rem;
+}
+
+.drop-dismiss kbd {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 0.35em;
+  font-size: 0.9em;
+}
+
+.drop-dismiss:hover {
+  color: var(--accent);
+}
+
+.confetti {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 60;
+  pointer-events: none;
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+
+@keyframes bob {
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+@keyframes pop {
+  from {
+    transform: scale(0.92);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drop-overlay,
+  .drop-card,
+  .drop-glyph,
+  #stage-live h2 {
+    animation: none;
+  }
+  .launch,
+  .namebox {
+    transition: none;
+  }
+}
