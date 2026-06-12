@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>hosting brisk</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/app.css" />
+    <script src="/brisk.js" defer></script>
+    <script src="/header.js" defer></script>
+    <script>
+      document.addEventListener('DOMContentLoaded', () => {
+        document.querySelectorAll('pre').forEach((pre) => {
+          const btn = document.createElement('button');
+          btn.className = 'copy';
+          btn.textContent = 'copy';
+          btn.style.cssText = 'float:right;margin:-0.2rem -0.4rem 0 1rem';
+          btn.onclick = async () => {
+            await navigator.clipboard.writeText(pre.querySelector('code').textContent);
+            btn.textContent = 'copied';
+            btn.classList.add('done');
+            setTimeout(() => {
+              btn.textContent = 'copy';
+              btn.classList.remove('done');
+            }, 1200);
+          };
+          pre.prepend(btn);
+        });
+      });
+    </script>
+  </head>
+  <body>
+    <main class="doc">
+      <header>
+        <a class="wordmark" href="/">brisk<span class="cursor">▮</span></a>
+        <nav>
+          <a href="/docs">docs</a>
+          <a href="/host">hosting</a>
+          <a href="https://github.com/tomperi/brisk">source</a>
+          <a href="/auth/login" id="signin" hidden>sign in</a>
+          <span class="whoami" id="whoami" hidden>
+            <span class="presence" id="presence" hidden></span><span id="who"></span>
+          </span>
+        </nav>
+      </header>
+
+      <h1>Hosting Brisk</h1>
+      <p class="lede">
+        Brisk is one Cloudflare Worker plus R2, D1, and Durable Objects. Stand up your own instance,
+        point it at a domain, and decide who gets in. This is the operator's page — building sites
+        on an instance is in the <a href="/docs">docs</a>.
+      </p>
+
+      <ul class="toc">
+        <li><a href="#setup">stand it up</a></li>
+        <li><a href="#subdomains">wildcard subdomains</a></li>
+        <li><a href="#login">google login</a></li>
+        <li><a href="#ai">ai keys</a></li>
+        <li><a href="#cost">cost</a></li>
+      </ul>
+
+      <h2 id="setup"><a href="#setup">Stand it up</a></h2>
+      <p>
+        From the <a href="https://github.com/tomperi/brisk">repo</a>: create the resources, apply
+        the schema, ship the Worker.
+      </p>
+      <pre><code>cd worker
+npx wrangler d1 create brisk          # paste the id into wrangler.jsonc
+npx wrangler r2 bucket create brisk
+npx wrangler d1 migrations apply brisk --remote
+pnpm --filter @brisk/sdk build        # bundle the SDK into the worker assets
+npx wrangler deploy</code></pre>
+      <p>
+        That alone gives path-mode URLs
+        (<code>https://brisk.&lt;account&gt;.workers.dev/s/foo/</code>) with no auth — fine on a
+        private network. The full experience adds wildcard subdomains and a login.
+      </p>
+
+      <h2 id="subdomains"><a href="#subdomains">Wildcard subdomains</a></h2>
+      <p>
+        Serve <code>foo.brisk.example.com</code> by adding routes on your zone and pointing
+        <code>BASE_HOST</code> at the host your sites hang off of:
+      </p>
+      <pre><code>"routes": [
+  { "pattern": "brisk.example.com", "custom_domain": true },
+  { "pattern": "*.brisk.example.com/*", "zone_name": "example.com" }
+],
+"vars": { "BASE_HOST": "brisk.example.com" }</code></pre>
+      <p>
+        You also need a wildcard DNS record (<code>*.brisk</code> → CNAME to the apex). The matching
+        TLS certificate is the one part that can cost money — see <a href="#cost">Cost</a> for the
+        free path (keep sites one level deep, or use a dedicated domain).
+      </p>
+
+      <h2 id="login"><a href="#login">Google login</a></h2>
+      <p>
+        Optional single sign-on for the whole instance: Google OAuth on the apex, with the session
+        cookie scoped to the parent domain so one login covers every site subdomain.
+      </p>
+      <ol>
+        <li>
+          Create an OAuth client (web application) in Google Cloud Console with redirect URI
+          <code>https://brisk.example.com/auth/callback</code>.
+        </li>
+        <li>
+          Set the secrets:
+          <pre><code>npx wrangler secret put GOOGLE_CLIENT_ID
+npx wrangler secret put GOOGLE_CLIENT_SECRET
+npx wrangler secret put SESSION_SECRET     # any long random string
+npx wrangler secret put DEPLOY_TOKEN       # optional, for CI</code></pre>
+        </li>
+        <li>
+          In <code>wrangler.jsonc</code> set <code>"AUTH": "google"</code> and restrict who gets in:
+          <code>"ALLOWED_EMAIL_DOMAINS": "yourco.com"</code> for a company, or
+          <code>"ALLOWED_EMAILS": "you@gmail.com"</code> for a personal instance (never allowlist
+          all of <code>gmail.com</code>). Either list admits; both empty admits anyone with a Google
+          account.
+        </li>
+      </ol>
+      <p>
+        Browsers get bounced to Google; the CLI logs in as a real person with
+        <code>brisk login brisk.example.com</code>, and deploys are attributed to that email. The
+        <code>DEPLOY_TOKEN</code> secret is the CI credential (<code>BRISK_TOKEN</code>, shows up as
+        <code>ci@brisk</code>). The default <code>"AUTH": "none"</code> skips all of this and treats
+        every visitor as a trusted dev user — only do that on a network you trust.
+      </p>
+
+      <h2 id="ai"><a href="#ai">AI keys</a></h2>
+      <p>
+        Set the provider keys as secrets and <code>brisk.ai</code> works on every site with no
+        per-site setup — keys stay on the server.
+      </p>
+      <pre><code>npx wrangler secret put ANTHROPIC_API_KEY   # and/or OPENAI_API_KEY</code></pre>
+      <p>
+        Usage bills against your own provider account at their rates — see <a href="#cost">Cost</a>.
+      </p>
+
+      <h2 id="cost"><a href="#cost">Cost</a></h2>
+      <p>
+        Brisk is built to run inside Cloudflare's free tier. At personal or small-team scale the
+        whole platform — hosting, database, file storage, and realtime — fits inside it, so it costs
+        nothing. Here's what each piece uses and the free allowance it draws from (per Cloudflare
+        account):
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Product</th>
+            <th>Brisk uses it for</th>
+            <th>Free tier</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Workers</td>
+            <td>every request to every site and API</td>
+            <td>100k requests/day, 10&nbsp;ms CPU/request</td>
+          </tr>
+          <tr>
+            <td>R2</td>
+            <td>site files + <code>brisk.fs</code> uploads</td>
+            <td>10&nbsp;GB stored, 1M writes + 10M reads/mo, zero egress</td>
+          </tr>
+          <tr>
+            <td>D1</td>
+            <td>the site registry + <code>brisk.db</code> documents</td>
+            <td>5&nbsp;GB, 5M row-reads/day, 100k row-writes/day</td>
+          </tr>
+          <tr>
+            <td>Durable Objects</td>
+            <td>one realtime room per site (<code>brisk.channel</code>, db events, presence)</td>
+            <td>included on the free plan (SQLite-backed)</td>
+          </tr>
+        </tbody>
+      </table>
+      <p>
+        <strong>Realtime stays free even idle.</strong> Each site's room is a SQLite-backed Durable
+        Object using WebSocket hibernation, so empty rooms bill nothing — you only pay while
+        messages actually flow. And on a public instance, signed-out static views are edge-cached
+        (<code>max-age=300</code>), so demo traffic mostly never reaches R2 or D1 at all.
+      </p>
+      <p>
+        <strong>When you'd cross into paid.</strong> 100k requests/day is a lot of headroom for an
+        internal instance. Exceed it and you're on
+        <a href="https://developers.cloudflare.com/workers/platform/pricing/">Workers&nbsp;Paid</a>
+        ($5/mo), which turns the daily caps into a forgiving monthly pool (10M requests +
+        30M&nbsp;CPU-ms included, cheap overage after). At that point R2, D1, and Durable Object
+        usage beyond the included amounts also start metering, but for most instances the $5 base is
+        the whole story.
+      </p>
+      <p>
+        <strong>The one catch is wildcard TLS.</strong> Cloudflare's free Universal SSL covers a
+        domain's apex and <em>one</em> level of subdomain. Sites one level deep —
+        <code>foo.example.com</code>, with <code>BASE_HOST=example.com</code> — are covered for
+        free. Nest them under a label — <code>foo.brisk.example.com</code> — and that second-level
+        wildcard needs an
+        <a
+          href="https://developers.cloudflare.com/ssl/edge-certificates/advanced-certificate-manager/"
+          >advanced certificate</a
+        >
+        (~$10/mo). Two ways around it: register a dedicated domain (~$10/<em>year</em> at Cloudflare
+        Registrar, at cost) and point <code>BASE_HOST</code> at its apex so every
+        <code>*.yourdomain</code> site gets free TLS; or skip subdomains entirely and serve
+        path-mode URLs (<code>/s/foo/</code>), which never need a wildcard.
+      </p>
+      <p>
+        <strong>AI is pass-through.</strong> <code>brisk.ai</code> calls bill against the server's
+        own Anthropic or OpenAI key at provider rates — the only cost here with no ceiling, so set a
+        spend limit on the provider side if your sites lean on it.
+      </p>
+      <p>
+        Bottom line for a personal instance: <strong>$0/mo</strong> on path mode with no AI, or
+        about <strong>$10/year</strong> (a dedicated domain) for clean subdomain URLs with free TLS
+        — plus whatever AI tokens your sites spend.
+      </p>
+
+      <footer>
+        <span>brisk</span>
+        <a href="/">home</a>
+        <a href="/docs">docs</a>
+        <a href="https://shopify.engineering/quick">inspired by Shopify's Quick</a>
+      </footer>
+    </main>
+  </body>
+</html>

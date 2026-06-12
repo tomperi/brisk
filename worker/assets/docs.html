@@ -7,6 +7,7 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="/app.css" />
     <script src="/brisk.js" defer></script>
+    <script src="/header.js" defer></script>
     <script>
       document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('pre').forEach((pre) => {
@@ -34,7 +35,12 @@
         <a class="wordmark" href="/">brisk<span class="cursor">▮</span></a>
         <nav>
           <a href="/docs">docs</a>
+          <a href="/host">hosting</a>
           <a href="https://github.com/tomperi/brisk">source</a>
+          <a href="/auth/login" id="signin" hidden>sign in</a>
+          <span class="whoami" id="whoami" hidden>
+            <span class="presence" id="presence" hidden></span><span id="who"></span>
+          </span>
         </nav>
       </header>
 
@@ -52,7 +58,6 @@
         <li><a href="#ai">ai</a></li>
         <li><a href="#files">files</a></li>
         <li><a href="#channels">channels</a></li>
-        <li><a href="#cost">cost</a></li>
         <li><a href="#philosophy">philosophy</a></li>
       </ul>
 
@@ -164,8 +169,9 @@ room.leave();</code></pre>
         usually a demonstration that the six primitives above already cover it.
       </p>
       <p>
-        Self-hosting, Google login, and wildcard subdomains are covered in the
-        <a href="https://github.com/tomperi/brisk#readme">README</a>.
+        Running your own instance — setup, login, subdomains, and cost — is on the
+        <a href="/host">hosting</a> page; the architecture and internals live in the
+        <a href="https://github.com/tomperi/brisk">repo</a>.
       </p>
 
       <footer>
