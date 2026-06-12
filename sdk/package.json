@@ -1,0 +1,16 @@
+{
+  "name": "@brisk/sdk",
+  "version": "0.1.0",
+  "description": "The zero-config browser SDK every Brisk site gets at /brisk.js.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/brisk.ts --bundle --format=iife --global-name=brisk --outfile=dist/brisk.js && node copy-to-worker.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "echo 'covered by worker integration tests'"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0"
+  }
+}

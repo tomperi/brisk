@@ -15,6 +15,15 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
+  sdk:
+    devDependencies:
+      esbuild:
+        specifier: ^0.25.0
+        version: 0.25.4
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
   worker:
     dependencies:
       '@anthropic-ai/sdk':
