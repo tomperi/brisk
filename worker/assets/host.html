@@ -65,6 +65,7 @@
         the schema, ship the Worker.
       </p>
       <pre><code>cd worker
+export CLOUDFLARE_ACCOUNT_ID=...      # or run `wrangler login` (single account)
 npx wrangler d1 create brisk          # paste the id into wrangler.jsonc
 npx wrangler r2 bucket create brisk
 npx wrangler d1 migrations apply brisk --remote
@@ -75,17 +76,32 @@ npx wrangler deploy</code></pre>
         (<code>https://brisk.&lt;account&gt;.workers.dev/s/foo/</code>) with no auth — fine on a
         private network. The full experience adds wildcard subdomains and a login.
       </p>
+      <p>
+        Instance config (<code>BASE_HOST</code>, <code>AUTH</code>, the allowlists,
+        <code>VISIBILITY</code>) isn't committed to <code>wrangler.jsonc</code> — it's
+        deployment-specific. Set it as <strong>Variables</strong> in the dashboard
+        (Workers&nbsp;&amp;&nbsp;Pages → your worker → Settings → Variables and Secrets); every var
+        is optional and defaults to a path-only, no-auth, private instance. Locally,
+        <code>wrangler dev</code> reads them from <code>.dev.vars</code>.
+      </p>
 
       <h2 id="subdomains"><a href="#subdomains">Wildcard subdomains</a></h2>
       <p>
-        Serve <code>foo.brisk.example.com</code> by adding routes on your zone and pointing
-        <code>BASE_HOST</code> at the host your sites hang off of:
+        Serve <code>foo.brisk.example.com</code> by setting the <code>BASE_HOST</code> variable to
+        the host your sites hang off of, then attaching the domain and route
+        <strong>in the dashboard</strong> (Workers&nbsp;&amp;&nbsp;Pages → your worker → Settings →
+        Domains&nbsp;&amp;&nbsp;Routes):
       </p>
-      <pre><code>"routes": [
-  { "pattern": "brisk.example.com", "custom_domain": true },
-  { "pattern": "*.brisk.example.com/*", "zone_name": "example.com" }
-],
-"vars": { "BASE_HOST": "brisk.example.com" }</code></pre>
+      <ul>
+        <li>custom domain: <code>brisk.example.com</code></li>
+        <li>route: <code>*.brisk.example.com/*</code> (zone: <code>example.com</code>)</li>
+      </ul>
+      <p>
+        Don't add these as a <code>routes</code> key in <code>wrangler.jsonc</code>: with routes in
+        the config, <code>wrangler dev</code> rewrites every local request's Host to the production
+        zone, so <code>foo.localhost</code> breaks and the API hands out production URLs from local
+        dev. Dashboard-attached domains persist across deploys, so it's one-time setup.
+      </p>
       <p>
         You also need a wildcard DNS record (<code>*.brisk</code> → CNAME to the apex). The matching
         TLS certificate is the one part that can cost money — see <a href="#cost">Cost</a> for the
@@ -110,10 +126,10 @@ npx wrangler secret put SESSION_SECRET     # any long random string
 npx wrangler secret put DEPLOY_TOKEN       # optional, for CI</code></pre>
         </li>
         <li>
-          In <code>wrangler.jsonc</code> set <code>"AUTH": "google"</code> and restrict who gets in:
-          <code>"ALLOWED_EMAIL_DOMAINS": "yourco.com"</code> for a company, or
-          <code>"ALLOWED_EMAILS": "you@gmail.com"</code> for a personal instance (never allowlist
-          all of <code>gmail.com</code>). Either list admits; both empty admits anyone with a Google
+          Set the auth variables in the dashboard: <code>AUTH=google</code>, and restrict who gets
+          in with <code>ALLOWED_EMAIL_DOMAINS=yourco.com</code> for a company, or
+          <code>ALLOWED_EMAILS=you@gmail.com</code> for a personal instance (never allowlist all of
+          <code>gmail.com</code>). Either list admits; both empty admits anyone with a Google
           account.
         </li>
       </ol>

@@ -80,6 +80,7 @@ You need a Cloudflare account and, for subdomain URLs, a domain on it.
 
 ```sh
 cd worker
+export CLOUDFLARE_ACCOUNT_ID=...      # or run `wrangler login` (single account)
 
 # 1. Create the resources
 npx wrangler d1 create brisk          # paste the id into wrangler.jsonc
@@ -96,11 +97,39 @@ npx wrangler deploy
 That gives you path-mode URLs (`https://brisk.<account>.workers.dev/s/foo/`)
 with no auth, suitable for a private network. For the full experience:
 
+### Configuration
+
+`wrangler.jsonc` carries no deployment-specific config — no account id, no
+domain, no allowlist. That keeps the repo clean and lets you run one codebase
+across many instances. Three places hold the rest:
+
+- **`database_id`** is the one value that must live in `wrangler.jsonc`
+  (wrangler needs it to deploy). Paste it in from step 1. Any value works for
+  local dev and tests; only remote deploys need the real one. To keep your real
+  id from ever being committed: `git update-index --skip-worktree worker/wrangler.jsonc`.
+- **`account_id`** comes from the `CLOUDFLARE_ACCOUNT_ID` environment variable.
+- **Instance vars** are set as **Variables in the Cloudflare dashboard**
+  (Workers & Pages → your worker → Settings → Variables and Secrets). They are
+  read at runtime and every one is optional, defaulting in code to a safe
+  path-only, no-auth, private instance:
+
+  | Variable                | Purpose                                               | Default               |
+  | ----------------------- | ----------------------------------------------------- | --------------------- |
+  | `BASE_HOST`             | host sites hang off (`foo.<BASE_HOST>`)               | path-only (`/s/foo/`) |
+  | `AUTH`                  | `google` for OAuth, else trusted-network dev identity | `none`                |
+  | `ALLOWED_EMAILS`        | exact emails admitted through OAuth (comma-separated) | anyone                |
+  | `ALLOWED_EMAIL_DOMAINS` | whole domains admitted through OAuth                  | anyone                |
+  | `VISIBILITY`            | `public` for view-only demo mode                      | `private`             |
+
+  `keep_vars: true` in `wrangler.jsonc` stops `wrangler deploy` from wiping
+  dashboard-set vars. Locally, `wrangler dev` reads them from `.dev.vars` (see
+  [`.dev.vars.example`](worker/.dev.vars.example)) instead.
+
 ### Wildcard subdomains
 
-Set `"BASE_HOST": "brisk.example.com"` in `wrangler.jsonc`, then attach the
-domain **in the Cloudflare dashboard** (Workers & Pages → your worker →
-Settings → Domains & Routes):
+Set `BASE_HOST` to `brisk.example.com` (a dashboard variable — see
+[Configuration](#configuration)), then attach the domain **in the Cloudflare
+dashboard** (Workers & Pages → your worker → Settings → Domains & Routes):
 
 - custom domain: `brisk.example.com`
 - route: `*.brisk.example.com/*` (zone: `example.com`)
@@ -137,10 +166,10 @@ npx wrangler secret put SESSION_SECRET     # any long random string
 npx wrangler secret put DEPLOY_TOKEN       # token the CLI will use
 ```
 
-3. In `wrangler.jsonc` set `"AUTH": "google"` and restrict who gets in:
-   `"ALLOWED_EMAIL_DOMAINS": "yourco.com"` for a company, or
-   `"ALLOWED_EMAILS": "you@gmail.com"` for a personal instance (never
-   allowlist all of `gmail.com`). Either list admits; both empty admits
+3. Set the auth vars in the dashboard ([Configuration](#configuration)):
+   `AUTH=google`, and restrict who gets in with `ALLOWED_EMAIL_DOMAINS=yourco.com`
+   for a company, or `ALLOWED_EMAILS=you@gmail.com` for a personal instance
+   (never allowlist all of `gmail.com`). Either list admits; both empty admits
    anyone with a Google account.
 
 Browsers get redirected to Google. The CLI logs in as a real person:
@@ -179,7 +208,7 @@ Keys stay on the server; sites call `brisk.ai.chat(...)` with no setup.
 ### Demo mode (public, view-only)
 
 Want strangers to be able to _see_ your instance without being able to touch
-it? Set `"VISIBILITY": "public"` alongside `AUTH: "google"`:
+it? Set `VISIBILITY=public` alongside `AUTH=google` ([Configuration](#configuration)):
 
 - **Visitors (no login)** can browse the dashboard, the docs, and every
   deployed site. Their static requests are edge-cached (`max-age=300`), so a
