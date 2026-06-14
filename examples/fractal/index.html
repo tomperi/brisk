@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>fractal</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: oklch(14% 0.018 290);
+        color: oklch(92% 0.01 90);
+        font:
+          14px/1.5 ui-monospace,
+          Menlo,
+          monospace;
+      }
+      #view {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        display: block;
+        cursor: grab;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-touch-callout: none;
+      }
+      #view.drag {
+        cursor: grabbing;
+      }
+      header,
+      #hud,
+      #hint {
+        position: fixed;
+        text-shadow:
+          0 1px 10px oklch(14% 0.018 290 / 0.9),
+          0 0 3px oklch(14% 0.018 290);
+      }
+      header {
+        top: 1.1rem;
+        left: 1.25rem;
+        pointer-events: none;
+      }
+      h1 {
+        margin: 0;
+        font-size: 1.05rem;
+        font-weight: 400;
+        letter-spacing: 0.05em;
+      }
+      header p {
+        margin: 0.15rem 0 0;
+        font-size: 0.72rem;
+        color: oklch(72% 0.03 290);
+      }
+      #hud {
+        left: 1.25rem;
+        bottom: 1.1rem;
+        display: flex;
+        align-items: center;
+        gap: 0.7rem;
+      }
+      #reset {
+        font: inherit;
+        font-size: 0.75rem;
+        color: inherit;
+        padding: 0.3rem 0.85rem;
+        border: 1px solid oklch(50% 0.04 290 / 0.6);
+        border-radius: 8px;
+        background: oklch(24% 0.025 290 / 0.55);
+        cursor: pointer;
+        backdrop-filter: blur(6px);
+        transition:
+          border-color 0.15s,
+          background 0.15s;
+      }
+      #reset:hover {
+        border-color: oklch(70% 0.06 290 / 0.8);
+        background: oklch(30% 0.03 290 / 0.6);
+      }
+      #zoom {
+        font-size: 0.75rem;
+        color: oklch(80% 0.08 250);
+        font-variant-numeric: tabular-nums;
+      }
+      #hint {
+        right: 1.25rem;
+        bottom: 1.35rem;
+        margin: 0;
+        font-size: 0.72rem;
+        color: oklch(68% 0.02 290);
+        pointer-events: none;
+        transition: opacity 0.8s;
+      }
+      #hint.off {
+        opacity: 0;
+      }
+      @media (max-width: 640px) {
+        #hint {
+          right: auto;
+          left: 1.25rem;
+          bottom: 3.6rem;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="view" role="img" aria-label="interactive mandelbrot set"></canvas>
+    <header>
+      <h1>fractal</h1>
+      <p>z² + c, smooth-colored in oklch — it refines while you look</p>
+    </header>
+    <div id="hud">
+      <button id="reset" type="button">reset</button>
+      <span id="zoom">1.0x</span>
+    </div>
+    <p id="hint">scroll or pinch to zoom · drag to pan · double-tap to dive</p>
+
+    <script>
+      const canvas = document.getElementById('view');
+      const ctx = canvas.getContext('2d');
+      const zoomEl = document.getElementById('zoom');
+      const hintEl = document.getElementById('hint');
+
+      // Past ~1e13x a pixel step falls below one ulp of the coordinates and doubles run out.
+      const ZOOM_MAX = 1e13;
+      const PIXEL_BUDGET = 2.4e6; // cap effective resolution so full-res refines stay quick
+      const FRAME_MS = 9; // per-frame compute budget; the rest of the frame stays interactive
+      const CYCLE = 16; // sqrt(smoothed iterations) per palette cycle
+      const LUT_N = 2048;
+      const BG = 'oklch(14% 0.018 290)';
+
+      // ---- palette: oklch → packed little-endian RGBA, precomputed once ----
+      function oklch(L, C, H) {
+        const h = (H * Math.PI) / 180;
+        const A = C * Math.cos(h);
+        const B = C * Math.sin(h);
+        const l = (L + 0.3963377774 * A + 0.2158037573 * B) ** 3;
+        const m = (L - 0.1055613458 * A - 0.0638541728 * B) ** 3;
+        const s = (L - 0.0894841775 * A - 1.291485548 * B) ** 3;
+        const lin = [
+          4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+          -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+          -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+        ];
+        const [r, g, b] = lin.map((v) => {
+          const c = v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(Math.max(v, 0), 1 / 2.4) - 0.055;
+          return Math.round(255 * Math.min(1, Math.max(0, c)));
+        });
+        return (0xff << 24) | (b << 16) | (g << 8) | r;
+      }
+
+      // One cycle: dark violet valley → azure flank → white-hot crest → gold/ember flank.
+      // Hue jumps at the crest (u=0.5) and the wrap (u=0/1); the chroma floor is
+      // tapered to exactly 0 at both so adjacent LUT entries converge and no seam shows.
+      const lut = new Uint32Array(LUT_N);
+      for (let i = 0; i < LUT_N; i++) {
+        const u = i / LUT_N;
+        const w = 0.5 - 0.5 * Math.cos(2 * Math.PI * u);
+        const L = 0.14 + 0.75 * w;
+        const C = 0.034 * (1 - w ** 6) * (1 - (1 - w) ** 6) + 0.146 * Math.sin(Math.PI * w);
+        const H = u < 0.5 ? 286 - 36 * w : 55 + 25 * w;
+        lut[i] = oklch(L, C, H);
+      }
+      const INTERIOR = oklch(0.08, 0.012, 286);
+
+      // ---- view state (s = complex units per device pixel) ----
+      const HOME = { x: -0.75, y: 0 };
+      const view = { x: HOME.x, y: HOME.y, s: 1 };
+      let W = 0;
+      let H = 0;
+      let fitS = 1;
+      let pxRatio = 1;
+      let iterMax = 150;
+      let coarseDiv = 8;
+      const tcanvas = document.createElement('canvas');
+      const tctx = tcanvas.getContext('2d');
+
+      function clampS(s) {
+        return Math.min(Math.max(s, fitS / ZOOM_MAX), fitS * 4);
+      }
+
+      function iterColor(cx, cy) {
+        const xq = cx - 0.25;
+        const q = xq * xq + cy * cy;
+        if (q * (q + xq) <= 0.25 * cy * cy) return INTERIOR; // main cardioid
+        const x1 = cx + 1;
+        if (x1 * x1 + cy * cy <= 0.0625) return INTERIOR; // period-2 bulb
+        let zx = 0;
+        let zy = 0;
+        let x2 = 0;
+        let y2 = 0;
+        let i = 0;
+        while (x2 + y2 <= 65536 && i < iterMax) {
+          zy = 2 * zx * zy + cy;
+          zx = x2 - y2 + cx;
+          x2 = zx * zx;
+          y2 = zy * zy;
+          i++;
+        }
+        if (i >= iterMax) return INTERIOR;
+        // fractional escape count; large bailout (256²) keeps it seam-free
+        const nu = Math.max(0, i + 1 - Math.log2(0.5 * Math.log2(x2 + y2)));
+        return lut[(((Math.sqrt(nu) / CYCLE) % 1) * LUT_N) | 0];
+      }
+
+      // ---- coarse-to-fine renderer: row chunks under a per-frame time budget ----
+      const cache = new Map(); // div → reusable buffers, rebuilt on resize
+      let queue = [];
+      let pass = null;
+      let ticking = false;
+
+      function makePass(div) {
+        let c = cache.get(div);
+        if (!c) {
+          const lw = Math.ceil(W / div);
+          const lh = Math.ceil(H / div);
+          const img = new ImageData(lw, lh);
+          c = { img, u32: new Uint32Array(img.data.buffer), lw, lh, cnv: null, cctx: null };
+          if (div > 1) {
+            c.cnv = document.createElement('canvas');
+            c.cnv.width = lw;
+            c.cnv.height = lh;
+            c.cctx = c.cnv.getContext('2d');
+          }
+          cache.set(div, c);
+        }
+        return { ...c, div, row: 0 };
+      }
+
+      function renderRow(p, y) {
+        const step = p.div * view.s;
+        const cy = view.y + ((y + 0.5) * p.div - H / 2) * view.s;
+        const x0 = view.x + (0.5 * p.div - W / 2) * view.s;
+        const o = y * p.lw;
+        for (let x = 0; x < p.lw; x++) p.u32[o + x] = iterColor(x0 + x * step, cy);
+      }
+
+      function blit(p, from, to) {
+        if (p.div === 1) {
+          ctx.putImageData(p.img, 0, 0, 0, from, p.lw, to - from);
+        } else {
+          p.cctx.putImageData(p.img, 0, 0, 0, from, p.lw, to - from);
+          ctx.drawImage(p.cnv, 0, 0, p.lw, to, 0, 0, p.lw * p.div, to * p.div);
+        }
+      }
+
+      function tick() {
+        const start = performance.now();
+        while (true) {
+          if (!pass) {
+            if (!queue.length) {
+              ticking = false;
+              return;
+            }
+            pass = makePass(queue.shift());
+          }
+          const from = pass.row;
+          while (pass.row < pass.lh && performance.now() - start < FRAME_MS) {
+            renderRow(pass, pass.row++);
+          }
+          if (pass.row > from) blit(pass, from, pass.row);
+          if (pass.row >= pass.lh) pass = null;
+          if (performance.now() - start >= FRAME_MS) break;
+        }
+        requestAnimationFrame(tick);
+      }
+
+      function requestRender(panOnly) {
+        const zoom = fitS / view.s;
+        iterMax = (90 + 60 * Math.pow(Math.log10(Math.max(zoom, 1)) + 1, 1.4)) | 0;
+        // A pure pan keeps the reprojected image pixel-exact, so skip the blurry
+        // coarse pass and let crisp content persist while margins stream in.
+        queue = panOnly ? [3, 1] : [coarseDiv, 3, 1];
+        pass = null;
+        if (!ticking) {
+          ticking = true;
+          requestAnimationFrame(tick);
+        }
+      }
+
+      function updateHud() {
+        const z = fitS / view.s;
+        let t;
+        if (z < 10) t = z.toFixed(1) + 'x';
+        else if (z < 1e4) t = Math.round(z) + 'x';
+        else t = z.toExponential(1).replace('e+', 'e') + 'x';
+        if (view.s <= (fitS / ZOOM_MAX) * 1.000001) t += ' · max';
+        zoomEl.textContent = t;
+      }
+
+      // Reproject what's on screen to the new view for instant feedback,
+      // then kick off a fresh coarse-to-fine render.
+      function applyView(nx, ny, ns) {
+        nx = Math.min(1, Math.max(-2.5, nx));
+        ny = Math.min(1.5, Math.max(-1.5, ny));
+        if (nx === view.x && ny === view.y && ns === view.s) return;
+        const k = view.s / ns;
+        tctx.drawImage(canvas, 0, 0);
+        ctx.fillStyle = BG;
+        ctx.fillRect(0, 0, W, H);
+        let dx = (view.x - nx) / ns + (W / 2) * (1 - k);
+        let dy = (view.y - ny) / ns + (H / 2) * (1 - k);
+        if (k === 1) {
+          dx = Math.round(dx);
+          dy = Math.round(dy);
+        }
+        ctx.drawImage(tcanvas, dx, dy, W * k, H * k);
+        const panOnly = ns === view.s;
+        view.x = nx;
+        view.y = ny;
+        view.s = ns;
+        updateHud();
+        requestRender(panOnly);
+      }
+
+      function resize() {
+        const cw = canvas.clientWidth || 1;
+        const ch = canvas.clientHeight || 1;
+        let px = Math.min(window.devicePixelRatio || 1, 2);
+        if (cw * ch * px * px > PIXEL_BUDGET) px = Math.sqrt(PIXEL_BUDGET / (cw * ch));
+        const span = W ? view.s * W : 0; // keep the visible width on reflow
+        W = Math.max(1, Math.round(cw * px));
+        H = Math.max(1, Math.round(ch * px));
+        pxRatio = W / cw;
+        canvas.width = W;
+        canvas.height = H;
+        tcanvas.width = W;
+        tcanvas.height = H;
+        cache.clear();
+        coarseDiv = Math.max(4, Math.ceil(Math.sqrt((W * H) / 24000)));
+        fitS = Math.max(3.0 / W, 2.6 / H);
+        view.s = clampS(span ? span / W : fitS);
+        ctx.fillStyle = BG;
+        ctx.fillRect(0, 0, W, H);
+        updateHud();
+        requestRender(false);
+      }
+
+      // ---- interaction ----
+      function dismissHint() {
+        hintEl.classList.add('off');
+      }
+
+      function zoomAt(cssX, cssY, f) {
+        const px = cssX * pxRatio;
+        const py = cssY * pxRatio;
+        const ax = view.x + (px - W / 2) * view.s;
+        const ay = view.y + (py - H / 2) * view.s;
+        const ns = clampS(view.s / f);
+        if (ns === view.s) return;
+        applyView(ax - (px - W / 2) * ns, ay - (py - H / 2) * ns, ns);
+      }
+
+      let animId = 0;
+      let lastDive = -1e9;
+
+      function stopDive() {
+        if (animId) {
+          cancelAnimationFrame(animId);
+          animId = 0;
+        }
+      }
+
+      function dive(cssX, cssY) {
+        const now = performance.now();
+        if (now - lastDive < 400) return; // synthetic double-tap + native dblclick can both fire
+        lastDive = now;
+        stopDive();
+        dismissHint();
+        if (matchMedia('(prefers-reduced-motion: reduce)').matches) return zoomAt(cssX, cssY, 2);
+        const s0 = view.s;
+        const px = cssX * pxRatio;
+        const py = cssY * pxRatio;
+        const ax = view.x + (px - W / 2) * s0;
+        const ay = view.y + (py - H / 2) * s0;
+        const step = (t) => {
+          const u = Math.min(1, (t - now) / 340);
+          const ns = clampS(s0 / Math.pow(2, 1 - (1 - u) ** 3));
+          applyView(ax - (px - W / 2) * ns, ay - (py - H / 2) * ns, ns);
+          animId = u < 1 ? requestAnimationFrame(step) : 0;
+        };
+        animId = requestAnimationFrame(step);
+      }
+
+      canvas.addEventListener(
+        'wheel',
+        (e) => {
+          e.preventDefault();
+          dismissHint();
+          stopDive();
+          const speed = e.deltaMode === 1 ? 0.05 : e.ctrlKey ? 0.005 : 0.0015;
+          zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * speed));
+        },
+        { passive: false },
+      );
+
+      const pts = new Map();
+      let pinch = null;
+      let panX = 0;
+      let panY = 0;
+      let lastTap = { t: -1e9, x: 0, y: 0 };
+
+      function midAndDist() {
+        const [a, b] = [...pts.values()];
+        return { d: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
+      }
+
+      canvas.addEventListener('pointerdown', (e) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        dismissHint();
+        stopDive();
+        canvas.setPointerCapture(e.pointerId);
+        pts.set(e.pointerId, {
+          x: e.clientX,
+          y: e.clientY,
+          sx: e.clientX,
+          sy: e.clientY,
+          t: e.timeStamp,
+        });
+        panX = panY = 0;
+        if (pts.size === 2) pinch = midAndDist();
+        canvas.classList.add('drag');
+      });
+
+      canvas.addEventListener('pointermove', (e) => {
+        const p = pts.get(e.pointerId);
+        if (!p) return;
+        if (pts.size === 1) {
+          // accumulate, pan by whole device pixels: reprojection stays resample-free
+          panX += (e.clientX - p.x) * pxRatio;
+          panY += (e.clientY - p.y) * pxRatio;
+          p.x = e.clientX;
+          p.y = e.clientY;
+          const ix = Math.round(panX);
+          const iy = Math.round(panY);
+          if (ix || iy) {
+            panX -= ix;
+            panY -= iy;
+            applyView(view.x - ix * view.s, view.y - iy * view.s, view.s);
+          }
+        } else {
+          p.x = e.clientX;
+          p.y = e.clientY;
+          if (pts.size === 2 && pinch) {
+            const m = midAndDist();
+            if (pinch.d > 0 && m.d > 0) {
+              const ax = view.x + (pinch.mx * pxRatio - W / 2) * view.s;
+              const ay = view.y + (pinch.my * pxRatio - H / 2) * view.s;
+              const ns = clampS((view.s * pinch.d) / m.d);
+              applyView(ax - (m.mx * pxRatio - W / 2) * ns, ay - (m.my * pxRatio - H / 2) * ns, ns);
+            }
+            pinch = m;
+          }
+        }
+      });
+
+      function endPointer(e) {
+        const p = pts.get(e.pointerId);
+        if (!p) return;
+        pts.delete(e.pointerId);
+        // re-baseline if two fingers remain (e.g. a third finger lifted mid-pinch)
+        pinch = pts.size === 2 ? midAndDist() : null;
+        if (pts.size === 0) canvas.classList.remove('drag');
+        // manual double-tap: dblclick on touch is unreliable across browsers
+        if (
+          e.type === 'pointerup' &&
+          e.pointerType === 'touch' &&
+          pts.size === 0 &&
+          e.timeStamp - p.t < 350 &&
+          Math.hypot(e.clientX - p.sx, e.clientY - p.sy) < 12
+        ) {
+          if (
+            e.timeStamp - lastTap.t < 320 &&
+            Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 40
+          ) {
+            dive(e.clientX, e.clientY);
+            lastTap.t = -1e9;
+          } else {
+            lastTap = { t: e.timeStamp, x: e.clientX, y: e.clientY };
+          }
+        }
+      }
+      canvas.addEventListener('pointerup', endPointer);
+      canvas.addEventListener('pointercancel', endPointer);
+
+      canvas.addEventListener('dblclick', (e) => {
+        e.preventDefault();
+        dive(e.clientX, e.clientY);
+      });
+
+      // Safari trackpad pinch arrives as gesture events, not ctrl+wheel
+      let gScale = 1;
+      canvas.addEventListener('gesturestart', (e) => {
+        e.preventDefault();
+        gScale = e.scale;
+      });
+      canvas.addEventListener('gesturechange', (e) => {
+        e.preventDefault();
+        if (!pts.size && gScale > 0 && e.scale > 0) {
+          stopDive();
+          dismissHint();
+          zoomAt(e.clientX, e.clientY, e.scale / gScale);
+        }
+        gScale = e.scale;
+      });
+      canvas.addEventListener('gestureend', (e) => e.preventDefault());
+
+      document.getElementById('reset').addEventListener('click', () => {
+        stopDive();
+        applyView(HOME.x, HOME.y, fitS);
+      });
+
+      addEventListener('resize', resize);
+      // moving between monitors can change devicePixelRatio without firing resize
+      (function watchDpr() {
+        matchMedia(`(resolution: ${devicePixelRatio}dppx)`).addEventListener(
+          'change',
+          () => {
+            resize();
+            watchDpr();
+          },
+          { once: true },
+        );
+      })();
+      resize();
+    </script>
+  </body>
+</html>
