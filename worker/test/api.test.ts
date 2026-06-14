@@ -114,6 +114,14 @@ describe('deploy and serve', () => {
     }
   });
 
+  it('rejects a deploy over the 10 MB site cap', async () => {
+    const res = await SELF.fetch(`${HOST}/api/deploy/toobig`, {
+      method: 'POST',
+      body: deployForm({ 'index.html': 'x'.repeat(11 * 1024 * 1024) }),
+    });
+    expect(res.status).toBe(413);
+  });
+
   it('lists, exposes raw files, and deletes sites', async () => {
     await SELF.fetch(`${HOST}/api/deploy/temp`, {
       method: 'POST',

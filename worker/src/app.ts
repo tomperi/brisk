@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { AiNotConfiguredError, chat } from './ai';
 import { auth, authRoutes, cliAuthRoute, isVisitor } from './auth';
 import { DocStore } from './docs';
@@ -15,9 +15,14 @@ import {
   type DeployFile,
 } from './sites';
 import type { DbEvent } from './room';
-import type { AppEnv, Env, User } from './env';
+import type { AppEnv, Env } from './env';
 
 const MAX_DEPLOY_FILES = 2000;
+
+/** A site's files (one deploy) and any single upload both cap at 10 MB — keeps
+ *  a leaked token or runaway script from filling the R2 free tier. */
+const MAX_SITE_BYTES = 10 * 1024 * 1024;
+const tooLarge = (bytes: number): boolean => bytes > MAX_SITE_BYTES;
 
 /** Every File in the form's `files` field, whatever Hono parsed it into. */
 function formFiles(body: Record<string, unknown>): File[] {
@@ -53,6 +58,34 @@ export function siteUrl(c: { env: Env; req: { url: string } }, site: string): st
   const base = c.env.BASE_HOST;
   const viaBase = base && (url.host === base || url.host.endsWith(`.${base}`));
   return viaBase ? `${url.protocol}//${site}.${base}/` : `${url.protocol}//${url.host}/s/${site}/`;
+}
+
+/**
+ * Visitors on a public instance get edge-cached responses, so a busy demo
+ * costs ~zero R2/D1 operations; members always see fresh data. The cache key
+ * drops the query string — site files and the sites list don't vary by it, and
+ * keeping it would let `?x=<random>` bust the cache on every request.
+ */
+async function visitorCached(
+  c: Context<AppEnv>,
+  build: () => Promise<Response | null>,
+  maxAge = 300,
+): Promise<Response | null> {
+  if (!isVisitor(c.var.user)) return build();
+  const url = new URL(c.req.raw.url);
+  url.search = '';
+  const key = new Request(url.toString(), { method: 'GET' });
+  const cache = caches.default;
+  const hit = await cache.match(key);
+  if (hit) return hit;
+  const res = await build();
+  if (!res) return null;
+  // Buffer the body so the cached copy doesn't keep the R2 stream open.
+  const body = await res.arrayBuffer();
+  const headers = new Headers(res.headers);
+  headers.set('cache-control', `public, max-age=${maxAge}`);
+  c.executionCtx.waitUntil(cache.put(key, new Response(body.slice(0), { headers })));
+  return new Response(body, { headers });
 }
 
 export function createApp(): Hono<AppEnv> {
@@ -153,6 +186,9 @@ export function createApp(): Hono<AppEnv> {
   app.post('/api/fs/upload', async (c) => {
     const files = formFiles(await c.req.parseBody({ all: true }));
     if (!files.length) return c.json({ error: 'no files in form field "files"' }, 400);
+    if (tooLarge(files.reduce((n, f) => n + f.size, 0))) {
+      return c.json({ error: 'upload too large (max 10 MB)' }, 413);
+    }
 
     const uploaded = await Promise.all(
       files.map(async (file) => {
@@ -205,9 +241,18 @@ export function createApp(): Hono<AppEnv> {
 
   // ---- sites & deploys ---------------------------------------------------
 
+  // The one /api/ route visitors may hit (the dashboard's list). Cache it for
+  // them too — uncached it's a full-table D1 read on every anonymous request.
   app.get('/api/sites', async (c) => {
-    const sites = await listSites(c.env);
-    return c.json({ sites: sites.map((s) => ({ ...s, url: siteUrl(c, s.name) })) });
+    const res = await visitorCached(
+      c,
+      async () => {
+        const sites = await listSites(c.env);
+        return c.json({ sites: sites.map((s) => ({ ...s, url: siteUrl(c, s.name) })) });
+      },
+      60,
+    );
+    return res!; // build() never returns null here
   });
 
   app.get('/api/sites/:name', async (c) => {
@@ -247,6 +292,9 @@ export function createApp(): Hono<AppEnv> {
     if (files.length > MAX_DEPLOY_FILES) {
       return c.json({ error: `too many files (max ${MAX_DEPLOY_FILES})` }, 400);
     }
+    if (tooLarge(files.reduce((n, { file }) => n + file.size, 0))) {
+      return c.json({ error: 'site too large (max 10 MB)' }, 413);
+    }
 
     const info = await deploySite(c.env, c.executionCtx, site, files, c.var.user);
     return c.json({ ...info, url: siteUrl(c, site) });
@@ -269,27 +317,8 @@ export function createApp(): Hono<AppEnv> {
 
   // ---- static serving ----------------------------------------------------
 
-  // Visitors on a public instance get edge-cached responses, so a busy demo
-  // costs ~zero R2/D1 operations. Members always see fresh deploys.
-  const serveSiteFor = async (
-    c: { env: Env; executionCtx: ExecutionContext; req: { raw: Request }; var: { user: User } },
-    site: string,
-    path: string,
-  ): Promise<Response | null> => {
-    if (!isVisitor(c.var.user)) return serveSite(c.env, site, path);
-    const key = new Request(c.req.raw.url, { method: 'GET' });
-    const cache = caches.default;
-    const hit = await cache.match(key);
-    if (hit) return hit;
-    const res = await serveSite(c.env, site, path);
-    if (!res) return null;
-    // Buffer the body so the cached copy doesn't keep the R2 stream open.
-    const body = await res.arrayBuffer();
-    const headers = new Headers(res.headers);
-    headers.set('cache-control', 'public, max-age=300');
-    c.executionCtx.waitUntil(cache.put(key, new Response(body.slice(0), { headers })));
-    return new Response(body, { headers });
-  };
+  const serveSiteFor = (c: Context<AppEnv>, site: string, path: string): Promise<Response | null> =>
+    visitorCached(c, () => serveSite(c.env, site, path));
 
   // Path mode: /s/<site>/... works on any host (workers.dev, local dev).
   app.get('/s/:site/*', async (c) => {
