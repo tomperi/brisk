@@ -4,7 +4,6 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>guestbook</title>
-    <script src="/brisk.js"></script>
     <style>
       body {
         font:
@@ -65,6 +64,7 @@
     </form>
     <ul id="entries"></ul>
 
+    <script src="/brisk.js"></script>
     <script>
       const entries = brisk.db.collection('entries');
       const list = document.getElementById('entries');
