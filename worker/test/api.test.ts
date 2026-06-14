@@ -128,8 +128,12 @@ describe('deploy and serve', () => {
     const raw = await SELF.fetch(`${HOST}/api/sites/temp/raw/index.html`);
     expect(await raw.text()).toBe('temp');
 
-    await SELF.fetch(`${HOST}/api/sites/temp`, { method: 'DELETE' });
+    const deleted = await SELF.fetch(`${HOST}/api/sites/temp`, { method: 'DELETE' });
+    expect(deleted.status).toBe(200);
     expect((await SELF.fetch(`${HOST}/s/temp/`)).status).toBe(404);
+
+    const missing = await SELF.fetch(`${HOST}/api/sites/temp`, { method: 'DELETE' });
+    expect(missing.status).toBe(404);
   });
 });
 

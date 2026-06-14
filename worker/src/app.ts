@@ -230,7 +230,8 @@ export function createApp(): Hono<AppEnv> {
   });
 
   app.delete('/api/sites/:name', async (c) => {
-    await deleteSite(c.env, c.req.param('name'));
+    const existed = await deleteSite(c.env, c.req.param('name'));
+    if (!existed) return c.json({ error: 'site not found' }, 404);
     return c.json({ ok: true });
   });
 

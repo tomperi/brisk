@@ -180,14 +180,18 @@ export async function getFile(env: Env, site: string, path: string): Promise<Res
   return new Response(object.body, { headers });
 }
 
-/** Removes the site and everything namespaced to it: deploys, docs, uploads. */
-export async function deleteSite(env: Env, site: string): Promise<void> {
-  await env.DB.batch([
+/**
+ * Removes the site and everything namespaced to it: deploys, docs, uploads.
+ * Returns whether the site existed, so callers can 404 a no-op delete.
+ */
+export async function deleteSite(env: Env, site: string): Promise<boolean> {
+  const [sites] = await env.DB.batch([
     env.DB.prepare('DELETE FROM sites WHERE name = ?').bind(site),
     env.DB.prepare('DELETE FROM docs WHERE site = ?').bind(site),
   ]);
   pointerCache.delete(site);
   await Promise.all([deletePrefix(env, `deploys/${site}/`), deletePrefix(env, `uploads/${site}/`)]);
+  return sites.meta.changes > 0;
 }
 
 async function deletePrefix(env: Env, prefix: string): Promise<void> {
