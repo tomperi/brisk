@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>2048</title>
+    <style>
+      :root {
+        --gap: clamp(8px, 2.2vw, 12px);
+        --board: min(26rem, 100vw - 2rem);
+        --board: min(26rem, 100vw - 2rem, max(100dvh - 14rem, 17rem));
+        --cell: calc((var(--board) - 5 * var(--gap)) / 4);
+        --ink: oklch(24% 0.015 75);
+        --muted: oklch(48% 0.014 75);
+        --paper: oklch(96.5% 0.012 85);
+        --snow: oklch(98.5% 0.005 85);
+        --accent: oklch(46% 0.19 262);
+      }
+      body {
+        font:
+          16px/1.6 ui-monospace,
+          Menlo,
+          monospace;
+        margin: 0;
+        padding: clamp(1rem, 4vh, 3rem) 1rem 2rem;
+        background: var(--paper);
+        color: var(--ink);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      main {
+        width: var(--board);
+      }
+      header {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 0.75rem 1rem;
+        margin-bottom: 1rem;
+      }
+      h1 {
+        font-size: 1.9rem;
+        line-height: 1.1;
+        margin: 0;
+      }
+      .sub {
+        margin: 0.3rem 0 0;
+        font-size: 0.8rem;
+        color: var(--muted);
+      }
+      .panel {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 0.5rem;
+      }
+      .scores {
+        display: flex;
+        gap: 0.5rem;
+      }
+      .scorebox {
+        position: relative;
+        min-width: 4.5rem;
+        padding: 0.25rem 0.75rem 0.35rem;
+        background: var(--snow);
+        border: 1px solid oklch(88% 0.013 85);
+        border-radius: 8px;
+        font-size: 0.7rem;
+        line-height: 1.4;
+        color: var(--muted);
+        text-align: center;
+      }
+      .scorebox strong {
+        display: block;
+        font-size: 1.1rem;
+        color: var(--ink);
+      }
+      .gain {
+        position: absolute;
+        inset: 0.2rem 0 auto;
+        font-size: 0.8rem;
+        font-weight: 700;
+        color: var(--accent);
+        pointer-events: none;
+        animation: rise 500ms ease-out forwards;
+      }
+      @keyframes rise {
+        to {
+          opacity: 0;
+          transform: translateY(-1.4rem);
+        }
+      }
+      button {
+        font: inherit;
+        font-size: 0.8rem;
+        padding: 0.4rem 0.9rem;
+        border: 1px solid var(--accent);
+        border-radius: 8px;
+        background: var(--accent);
+        color: var(--snow);
+        cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+      }
+      button:active {
+        transform: scale(0.96);
+      }
+      #board {
+        position: relative;
+        box-sizing: border-box;
+        width: var(--board);
+        height: var(--board);
+        padding: var(--gap);
+        display: grid;
+        grid-template: repeat(4, 1fr) / repeat(4, 1fr);
+        gap: var(--gap);
+        background: oklch(88% 0.018 80);
+        border-radius: 12px;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .cell {
+        background: oklch(92.5% 0.012 85);
+        border-radius: 8px;
+      }
+      .tile {
+        position: absolute;
+        top: var(--gap);
+        left: var(--gap);
+        width: var(--cell);
+        height: var(--cell);
+        /* position via custom props so a single transition animates every slide */
+        transform: translate(
+          calc(var(--c) * (var(--cell) + var(--gap))),
+          calc(var(--r) * (var(--cell) + var(--gap)))
+        );
+        transition: transform 120ms ease-in-out;
+        z-index: 1;
+      }
+      .inner {
+        height: 100%;
+        display: grid;
+        place-items: center;
+        border-radius: 8px;
+        font-weight: 700;
+        font-size: calc(var(--cell) * 0.42);
+        line-height: 1;
+      }
+      .tile.d3 .inner {
+        font-size: calc(var(--cell) * 0.34);
+      }
+      .tile.d4 .inner {
+        font-size: calc(var(--cell) * 0.28);
+      }
+      .tile.d5 .inner {
+        font-size: calc(var(--cell) * 0.23);
+      }
+      /* lightness falls and hue sweeps warm → red → violet → accent blue at 2048 */
+      .v2 .inner {
+        background: oklch(91% 0.025 85);
+      }
+      .v4 .inner {
+        background: oklch(87% 0.055 78);
+      }
+      .v8 .inner {
+        background: oklch(79% 0.1 65);
+      }
+      .v16 .inner {
+        background: oklch(72% 0.135 55);
+      }
+      .v32 .inner {
+        background: oklch(66% 0.16 45);
+        color: var(--snow);
+      }
+      .v64 .inner {
+        background: oklch(61% 0.185 35);
+        color: var(--snow);
+      }
+      .v128 .inner {
+        background: oklch(56% 0.19 25);
+        color: var(--snow);
+      }
+      .v256 .inner {
+        background: oklch(52% 0.185 355);
+        color: var(--snow);
+      }
+      .v512 .inner {
+        background: oklch(49% 0.19 325);
+        color: var(--snow);
+      }
+      .v1024 .inner {
+        background: oklch(47% 0.2 295);
+        color: var(--snow);
+      }
+      .v2048 .inner {
+        background: var(--accent);
+        color: var(--snow);
+      }
+      .super .inner {
+        background: oklch(27% 0.03 262);
+        color: var(--snow);
+      }
+      .v1024 .inner,
+      .v2048 .inner,
+      .super .inner {
+        box-shadow: 0 0 calc(var(--cell) / 4) oklch(46% 0.19 262 / 0.4);
+      }
+      @keyframes pop {
+        from {
+          transform: scale(0);
+        }
+      }
+      .tile.new .inner {
+        animation: pop 180ms cubic-bezier(0.3, 1.6, 0.6, 1);
+      }
+      @keyframes pulse {
+        50% {
+          transform: scale(1.18);
+        }
+      }
+      .tile.merged .inner {
+        animation: pulse 200ms ease-in-out;
+      }
+      .tile.merged {
+        z-index: 2;
+      }
+      #overlay {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        text-align: center;
+        background: oklch(96.5% 0.012 85 / 0.85);
+        backdrop-filter: blur(3px);
+        border-radius: 12px;
+        z-index: 5;
+        opacity: 0;
+        visibility: hidden; /* keeps the hidden buttons out of tab order */
+        pointer-events: none;
+        transition:
+          opacity 250ms ease,
+          visibility 250ms ease;
+      }
+      #overlay.show {
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+      }
+      #overlay h2 {
+        font-size: 1.5rem;
+        font-weight: 600;
+        margin: 0 0 1rem;
+      }
+      .actions {
+        display: flex;
+        gap: 0.5rem;
+        justify-content: center;
+      }
+      .hint {
+        margin-top: 1rem;
+        text-align: center;
+        font-size: 0.75rem;
+        color: var(--muted);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation-duration: 1ms !important;
+          transition-duration: 1ms !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>2048</h1>
+          <p class="sub">join the tiles, reach 2048</p>
+        </div>
+        <div class="panel">
+          <div class="scores">
+            <div class="scorebox">score<strong id="score">0</strong></div>
+            <div class="scorebox">best<strong id="best">0</strong></div>
+          </div>
+          <button id="new">new game</button>
+        </div>
+      </header>
+
+      <div id="board">
+        <div id="overlay">
+          <div>
+            <h2 id="overlay-msg"></h2>
+            <div class="actions">
+              <button id="keep">keep going</button>
+              <button id="retry">try again</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="hint">arrow keys · wasd · swipe</p>
+    </main>
+
+    <script>
+      const SIZE = 4;
+      const board = document.getElementById('board');
+      const scoreEl = document.getElementById('score');
+      const bestEl = document.getElementById('best');
+      const overlay = document.getElementById('overlay');
+      const overlayMsg = document.getElementById('overlay-msg');
+      const keepBtn = document.getElementById('keep');
+      const retryBtn = document.getElementById('retry');
+
+      for (let i = 0; i < SIZE * SIZE; i++)
+        board.appendChild(Object.assign(document.createElement('div'), { className: 'cell' }));
+
+      let grid, score, won, locked;
+      let gen = 0; // bumped by newGame() so in-flight move timeouts become no-ops
+      let best = 0;
+      try {
+        best = +localStorage.getItem('2048-best') || 0;
+      } catch {}
+      bestEl.textContent = best;
+
+      function place(t) {
+        t.el.style.setProperty('--r', t.r);
+        t.el.style.setProperty('--c', t.c);
+      }
+
+      function face(t) {
+        t.el.className = `tile ${t.value <= 2048 ? 'v' + t.value : 'super'} d${String(t.value).length}`;
+        t.inner.textContent = t.value;
+      }
+
+      function createTile(value, r, c) {
+        const el = document.createElement('div');
+        const inner = document.createElement('div');
+        inner.className = 'inner';
+        el.appendChild(inner);
+        const t = { value, r, c, el, inner };
+        face(t);
+        place(t);
+        inner.addEventListener('animationend', () => el.classList.remove('new', 'merged'));
+        board.appendChild(el);
+        return t;
+      }
+
+      function spawn() {
+        const empty = [];
+        for (let r = 0; r < SIZE; r++)
+          for (let c = 0; c < SIZE; c++) if (!grid[r][c]) empty.push([r, c]);
+        if (!empty.length) return;
+        const [r, c] = empty[(Math.random() * empty.length) | 0];
+        const t = createTile(Math.random() < 0.1 ? 4 : 2, r, c);
+        t.el.classList.add('new');
+        grid[r][c] = t;
+      }
+
+      function addScore(n) {
+        score += n;
+        scoreEl.textContent = score;
+        if (score > best) {
+          best = score;
+          bestEl.textContent = best;
+          try {
+            localStorage.setItem('2048-best', best);
+          } catch {}
+        }
+        const gain = Object.assign(document.createElement('span'), {
+          className: 'gain',
+          textContent: '+' + n,
+        });
+        gain.addEventListener('animationend', () => gain.remove());
+        scoreEl.parentElement.appendChild(gain);
+      }
+
+      function movesAvailable() {
+        for (let r = 0; r < SIZE; r++)
+          for (let c = 0; c < SIZE; c++) {
+            const t = grid[r][c];
+            if (!t) return true;
+            if (grid[r + 1]?.[c]?.value === t.value) return true;
+            if (grid[r][c + 1]?.value === t.value) return true;
+          }
+        return false;
+      }
+
+      function showOverlay(msg, win) {
+        overlayMsg.textContent = msg;
+        keepBtn.hidden = !win;
+        retryBtn.textContent = win ? 'new game' : 'try again';
+        overlay.classList.add('show');
+      }
+
+      function move(dr, dc) {
+        if (locked || overlay.classList.contains('show')) return;
+        // walk from the edge tiles move toward, so settled tiles are already in place
+        const order = [0, 1, 2, 3];
+        const rows = dr === 1 ? [3, 2, 1, 0] : order;
+        const cols = dc === 1 ? [3, 2, 1, 0] : order;
+        const mergedInto = new Set(); // each tile may absorb only one merge per move
+        const merges = [];
+        let moved = false;
+
+        for (const r of rows)
+          for (const c of cols) {
+            const t = grid[r][c];
+            if (!t) continue;
+            let nr = r,
+              nc = c,
+              target = null;
+            for (;;) {
+              const rr = nr + dr,
+                cc = nc + dc;
+              if (rr < 0 || rr >= SIZE || cc < 0 || cc >= SIZE) break;
+              const o = grid[rr][cc];
+              if (!o) {
+                nr = rr;
+                nc = cc;
+                continue;
+              }
+              if (o.value === t.value && !mergedInto.has(o)) target = o;
+              break;
+            }
+            if (target) {
+              mergedInto.add(target);
+              merges.push([t, target]);
+              grid[r][c] = null;
+              t.r = target.r;
+              t.c = target.c;
+              t.el.style.zIndex = 3; // slide over the tile it merges with
+              place(t);
+              moved = true;
+            } else if (nr !== r || nc !== c) {
+              grid[r][c] = null;
+              grid[nr][nc] = t;
+              t.r = nr;
+              t.c = nc;
+              place(t);
+              moved = true;
+            }
+          }
+
+        if (!moved) return;
+        locked = true;
+        const g = gen;
+        setTimeout(() => {
+          if (g !== gen) return; // a new game started while we slid
+          let gained = 0;
+          let justWon = false;
+          for (const [src, dst] of merges) {
+            src.el.remove();
+            dst.value *= 2;
+            gained += dst.value;
+            if (dst.value === 2048 && !won) {
+              won = true;
+              justWon = true;
+            }
+            face(dst);
+            dst.el.classList.add('merged');
+          }
+          if (gained) addScore(gained);
+          spawn();
+          locked = false;
+          if (justWon) setTimeout(() => g === gen && showOverlay('you win', true), 350);
+          else if (!movesAvailable())
+            setTimeout(() => g === gen && showOverlay('game over', false), 350);
+        }, 140); // just past the 120ms slide
+      }
+
+      function newGame() {
+        gen++;
+        for (const el of board.querySelectorAll('.tile')) el.remove();
+        grid = Array.from({ length: SIZE }, () => Array(SIZE).fill(null));
+        score = 0;
+        scoreEl.textContent = 0;
+        won = false;
+        locked = false;
+        overlay.classList.remove('show');
+        spawn();
+        spawn();
+      }
+
+      document.getElementById('new').addEventListener('click', (e) => {
+        e.currentTarget.blur();
+        newGame();
+      });
+      retryBtn.addEventListener('click', () => {
+        retryBtn.blur();
+        newGame();
+      });
+      keepBtn.addEventListener('click', () => {
+        keepBtn.blur();
+        overlay.classList.remove('show');
+        // the winning move may also have been the last possible one
+        if (!movesAvailable()) showOverlay('game over', false);
+      });
+
+      // physical-key codes, so wasd works on any keyboard layout
+      const KEYS = {
+        ArrowUp: [-1, 0],
+        ArrowDown: [1, 0],
+        ArrowLeft: [0, -1],
+        ArrowRight: [0, 1],
+        KeyW: [-1, 0],
+        KeyS: [1, 0],
+        KeyA: [0, -1],
+        KeyD: [0, 1],
+      };
+      addEventListener('keydown', (e) => {
+        if (e.metaKey || e.ctrlKey || e.altKey) return;
+        const dir = KEYS[e.code];
+        if (!dir) return;
+        e.preventDefault();
+        move(dir[0], dir[1]);
+      });
+
+      let touchStart = null;
+      board.addEventListener(
+        'touchstart',
+        (e) => {
+          if (e.touches.length === 1) touchStart = [e.touches[0].clientX, e.touches[0].clientY];
+        },
+        { passive: true },
+      );
+      board.addEventListener(
+        'touchmove',
+        (e) => {
+          // keep the page from scrolling mid-swipe, but let overlay buttons take taps
+          if (!overlay.classList.contains('show')) e.preventDefault();
+        },
+        { passive: false },
+      );
+      board.addEventListener('touchend', (e) => {
+        if (!touchStart) return;
+        const dx = e.changedTouches[0].clientX - touchStart[0];
+        const dy = e.changedTouches[0].clientY - touchStart[1];
+        touchStart = null;
+        if (Math.max(Math.abs(dx), Math.abs(dy)) < 24) return;
+        if (Math.abs(dx) > Math.abs(dy)) move(0, dx > 0 ? 1 : -1);
+        else move(dy > 0 ? 1 : -1, 0);
+      });
+
+      newGame();
+    </script>
+  </body>
+</html>
