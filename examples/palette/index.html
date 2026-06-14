@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>palette</title>
+    <style>
+      :root {
+        --accent: oklch(46% 0.19 262);
+        --accent-ink: white;
+        --tint: oklch(96.5% 0.012 262);
+      }
+      body {
+        font:
+          16px/1.6 ui-monospace,
+          Menlo,
+          monospace;
+        max-width: 52rem;
+        margin: 3rem auto;
+        padding: 0 1rem;
+        background: var(--tint);
+        color: oklch(24% 0.015 75);
+        accent-color: var(--accent);
+        transition: background-color 250ms;
+      }
+      ::selection {
+        background: var(--accent);
+        color: var(--accent-ink);
+      }
+      h1 {
+        font-size: 1.4rem;
+      }
+      .controls {
+        display: grid;
+        grid-template-columns: max-content 1fr 3.5rem;
+        gap: 0.6rem 1rem;
+        align-items: center;
+        margin: 2rem 0;
+      }
+      label,
+      output {
+        font-size: 0.85rem;
+      }
+      output {
+        text-align: right;
+        color: oklch(48% 0.014 75);
+        font-variant-numeric: tabular-nums;
+      }
+      input[type='range'] {
+        width: 100%;
+        margin: 0;
+      }
+      #ramp {
+        display: flex;
+        gap: 6px;
+        margin: 1.5rem 0;
+      }
+      .swatch {
+        flex: 1;
+        min-width: 0;
+        height: 11.5rem;
+        position: relative;
+        overflow: hidden;
+        border: 0;
+        border-radius: 8px;
+        padding: 0;
+        cursor: pointer;
+        transition:
+          background-color 150ms,
+          transform 150ms;
+      }
+      .swatch:hover {
+        transform: translateY(-3px);
+      }
+      .swatch:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+      .code {
+        font:
+          10px/1.4 ui-monospace,
+          Menlo,
+          monospace;
+        position: absolute;
+        left: 50%;
+        bottom: 0.7rem;
+        white-space: nowrap;
+        /* read bottom-to-top so long oklch() strings fit any swatch width */
+        writing-mode: vertical-rl;
+        transform: translateX(-50%) rotate(180deg);
+      }
+      #copy-css {
+        font: inherit;
+        padding: 0.5rem 1rem;
+        border: 1px solid var(--accent);
+        border-radius: 8px;
+        background: var(--accent);
+        color: var(--accent-ink);
+        cursor: pointer;
+        transition:
+          background-color 200ms,
+          border-color 200ms,
+          color 200ms;
+      }
+      @media (max-width: 560px) {
+        body {
+          margin: 1.5rem auto;
+        }
+        #ramp {
+          flex-direction: column;
+        }
+        .swatch {
+          /* base flex: 1 sets flex-basis: 0%, which beats height on the column main axis */
+          flex: 0 0 3rem;
+          height: 3rem;
+        }
+        .swatch:hover {
+          transform: none;
+        }
+        .code {
+          writing-mode: horizontal-tb;
+          left: 0.75rem;
+          bottom: 50%;
+          transform: translateY(50%);
+          font-size: 11px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>palette</h1>
+    <p>An oklch ramp studio. Chroma eases off toward the ends. Click a swatch to copy it.</p>
+
+    <div class="controls">
+      <label for="hue">hue</label>
+      <input id="hue" type="range" min="0" max="360" step="1" value="262" />
+      <output id="hue-out"></output>
+
+      <label for="chroma">peak chroma</label>
+      <input id="chroma" type="range" min="0" max="0.35" step="0.002" value="0.14" />
+      <output id="chroma-out"></output>
+
+      <label for="steps">steps</label>
+      <input id="steps" type="range" min="3" max="12" step="1" value="7" />
+      <output id="steps-out"></output>
+
+      <label for="lmin">lightness min</label>
+      <input id="lmin" type="range" min="0" max="100" step="1" value="22" />
+      <output id="lmin-out"></output>
+
+      <label for="lmax">lightness max</label>
+      <input id="lmax" type="range" min="0" max="100" step="1" value="96" />
+      <output id="lmax-out"></output>
+
+      <label for="drift">hue drift</label>
+      <input id="drift" type="range" min="-120" max="120" step="1" value="18" />
+      <output id="drift-out"></output>
+    </div>
+
+    <div id="ramp"></div>
+    <button id="copy-css">copy css</button>
+
+    <script>
+      const ids = ['hue', 'chroma', 'steps', 'lmin', 'lmax', 'drift'];
+      const el = Object.fromEntries(ids.map((id) => [id, document.getElementById(id)]));
+      const out = Object.fromEntries(ids.map((id) => [id, document.getElementById(id + '-out')]));
+      const ramp = document.getElementById('ramp');
+      const copyBtn = document.getElementById('copy-css');
+      let colors = [];
+
+      const fmt = (n, d) => String(parseFloat(n.toFixed(d)));
+
+      function build(v) {
+        const hi = Math.max(v.lmin, v.lmax) / 100;
+        const lo = Math.min(v.lmin, v.lmax) / 100;
+        const result = [];
+        for (let i = 0; i < v.steps; i++) {
+          const t = i / (v.steps - 1);
+          const L = hi + (lo - hi) * t;
+          // full chroma near white/black reads as noise, so fade it toward the extremes
+          const c = v.chroma * Math.sin(Math.PI * L) ** 0.8;
+          const h = (((v.hue + v.drift * (t - 0.5)) % 360) + 360) % 360;
+          result.push({ L, c, h, css: `oklch(${fmt(L * 100, 1)}% ${fmt(c, 3)} ${fmt(h, 1)})` });
+        }
+        return result;
+      }
+
+      function writeClipboard(text) {
+        const fallback = () => {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.append(ta);
+          ta.select();
+          document.execCommand('copy');
+          ta.remove();
+        };
+        if (navigator.clipboard?.writeText) {
+          navigator.clipboard.writeText(text).catch(fallback);
+        } else {
+          fallback();
+        }
+      }
+
+      function flash(node, restore) {
+        clearTimeout(node.flashTimer);
+        node.textContent = 'copied';
+        node.flashTimer = setTimeout(() => {
+          node.flashTimer = 0;
+          node.textContent = restore();
+        }, 900);
+      }
+
+      function render() {
+        const v = Object.fromEntries(ids.map((id) => [id, +el[id].value]));
+        out.hue.textContent = v.hue + '°';
+        out.chroma.textContent = v.chroma.toFixed(3);
+        out.steps.textContent = v.steps;
+        out.lmin.textContent = v.lmin + '%';
+        out.lmax.textContent = v.lmax + '%';
+        out.drift.textContent = (v.drift > 0 ? '+' : '') + v.drift + '°';
+
+        colors = build(v);
+        while (ramp.children.length > colors.length) ramp.lastChild.remove();
+        while (ramp.children.length < colors.length) {
+          const b = document.createElement('button');
+          b.className = 'swatch';
+          b.append(Object.assign(document.createElement('span'), { className: 'code' }));
+          b.addEventListener('click', () => {
+            writeClipboard(b.dataset.css);
+            flash(b.firstChild, () => b.dataset.css);
+          });
+          ramp.append(b);
+        }
+        colors.forEach((color, i) => {
+          const b = ramp.children[i];
+          b.dataset.css = color.css;
+          b.style.background = color.css;
+          const code = b.firstChild;
+          if (!code.flashTimer) code.textContent = color.css;
+          code.style.color =
+            color.L > 0.65
+              ? `oklch(25% 0.02 ${fmt(color.h, 1)})`
+              : `oklch(97% 0.01 ${fmt(color.h, 1)})`;
+        });
+
+        // the tool demos itself: page chrome follows the current ramp
+        const accent = colors.reduce((a, b) =>
+          Math.abs(b.L - 0.55) < Math.abs(a.L - 0.55) ? b : a,
+        );
+        const root = document.documentElement.style;
+        root.setProperty('--accent', accent.css);
+        root.setProperty(
+          '--accent-ink',
+          accent.L > 0.65 ? `oklch(22% 0.02 ${fmt(accent.h, 1)})` : 'white',
+        );
+        root.setProperty('--tint', `oklch(96.5% 0.012 ${v.hue})`);
+      }
+
+      copyBtn.addEventListener('click', () => {
+        const css =
+          ':root {\n' + colors.map((c, i) => `  --color-${i + 1}: ${c.css};`).join('\n') + '\n}\n';
+        writeClipboard(css);
+        flash(copyBtn, () => 'copy css');
+      });
+
+      let raf = 0;
+      for (const id of ids) {
+        el[id].addEventListener('input', () => {
+          cancelAnimationFrame(raf);
+          raf = requestAnimationFrame(render);
+        });
+      }
+      render();
+    </script>
+  </body>
+</html>
