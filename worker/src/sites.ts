@@ -191,7 +191,7 @@ export async function deleteSite(env: Env, site: string): Promise<boolean> {
   ]);
   pointerCache.delete(site);
   await Promise.all([deletePrefix(env, `deploys/${site}/`), deletePrefix(env, `uploads/${site}/`)]);
-  return sites.meta.changes > 0;
+  return (sites?.meta.changes ?? 0) > 0;
 }
 
 async function deletePrefix(env: Env, prefix: string): Promise<void> {
