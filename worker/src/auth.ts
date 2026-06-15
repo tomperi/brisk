@@ -160,32 +160,92 @@ async function userFromBearer(c: Context<AppEnv>, token: string): Promise<User |
   return null;
 }
 
+const CLI_CSRF_COOKIE = 'brisk_cli_csrf';
+
+const escapeHtml = (s: string): string =>
+  s.replace(
+    /[&<>"']/g,
+    (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!,
+  );
+
+/** The localhost callback the CLI is listening on, or null if the request is malformed. */
+function cliCallback(c: Context<AppEnv>): URL | null {
+  const port = Number(c.req.query('port'));
+  const state = c.req.query('state') ?? '';
+  if (!Number.isInteger(port) || port < 1024 || port > 65535 || !state || state.length > 128) {
+    return null;
+  }
+  const callback = new URL(`http://127.0.0.1:${port}/callback`);
+  callback.searchParams.set('state', state);
+  return callback;
+}
+
+async function mintCliToken(c: Context<AppEnv>, callback: URL): Promise<Response> {
+  const user = c.var.user;
+  const token = await sign(
+    { ...user, kind: 'cli', exp: Math.floor(Date.now() / 1000) + CLI_TOKEN_DAYS * 86_400 },
+    c.env.SESSION_SECRET!,
+  );
+  callback.searchParams.set('token', token);
+  callback.searchParams.set('email', user.email);
+  return c.redirect(callback.toString());
+}
+
+function consentPage(email: string, action: string, csrf: string): string {
+  return `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Authorize the Brisk CLI</title>
+<style>body{font:15px/1.6 ui-monospace,Menlo,monospace;display:grid;place-items:center;min-height:100vh;margin:0;background:oklch(96.5% 0.012 85);color:oklch(24% 0.015 75)}main{max-width:24rem;padding:2rem;text-align:center}h1{font-size:1.2rem}.who{color:oklch(46% 0.19 262);font-weight:700}button{font:inherit;margin-top:1.25rem;padding:.55rem 1.25rem;border:1px solid oklch(46% 0.19 262);border-radius:8px;background:oklch(46% 0.19 262);color:#fff;cursor:pointer}@media(prefers-color-scheme:dark){body{background:oklch(21% 0.012 75);color:oklch(89% 0.012 85)}}</style>
+<main><h1>Authorize the Brisk CLI?</h1><p>This signs the CLI in as <span class="who">${escapeHtml(email)}</span> for 90 days on this device.</p><form method="POST" action="${escapeHtml(action)}"><input type="hidden" name="csrf" value="${csrf}"><button type="submit">Authorize</button></form></main>`;
+}
+
 /**
- * The browser half of `brisk login`. The CLI listens on localhost, sends the
- * user here; the auth middleware has already established who they are, so we
- * mint a long-lived personal token and bounce it back to the CLI.
+ * GET half of `brisk login`. A bearer caller (CI token or an existing CLI
+ * token) can't be CSRF'd — browsers never attach an Authorization header
+ * cross-site — so it mints directly. A browser cookie session is the CSRF-able
+ * case, so it gets a consent page whose POST carries a CSRF token; a forged
+ * cross-site navigation can't silently mint a 90-day act-as-you credential.
  */
-export function cliAuthRoute(): MiddlewareHandler<AppEnv> {
+export function cliConsent(): MiddlewareHandler<AppEnv> {
   return async (c) => {
-    const port = Number(c.req.query('port'));
-    const state = c.req.query('state') ?? '';
-    if (!Number.isInteger(port) || port < 1024 || port > 65535 || !state || state.length > 128) {
-      return c.text('Bad request: expected ?port= (1024-65535) and ?state=.', 400);
-    }
-    const callback = new URL(`http://127.0.0.1:${port}/callback`);
-    callback.searchParams.set('state', state);
-    if (c.env.AUTH === 'google') {
-      const user = c.var.user;
-      const token = await sign(
-        { ...user, kind: 'cli', exp: Math.floor(Date.now() / 1000) + CLI_TOKEN_DAYS * 86_400 },
-        c.env.SESSION_SECRET!,
-      );
-      callback.searchParams.set('token', token);
-      callback.searchParams.set('email', user.email);
-    } else {
+    const callback = cliCallback(c);
+    if (!callback) return c.text('Bad request: expected ?port= (1024-65535) and ?state=.', 400);
+    if (c.env.AUTH !== 'google') {
       callback.searchParams.set('open', '1'); // this instance needs no token
+      return c.redirect(callback.toString());
     }
-    return c.redirect(callback.toString());
+    if (c.req.header('authorization')?.startsWith('Bearer ')) {
+      return mintCliToken(c, callback);
+    }
+    const csrf = crypto.randomUUID();
+    setCookie(c, CLI_CSRF_COOKIE, csrf, {
+      path: '/auth/cli',
+      httpOnly: true,
+      secure: new URL(c.req.url).protocol === 'https:',
+      sameSite: 'Strict',
+      maxAge: 600,
+    });
+    const action = `/auth/cli?port=${Number(c.req.query('port'))}&state=${encodeURIComponent(c.req.query('state')!)}`;
+    return c.html(consentPage(c.var.user.email, action, csrf));
+  };
+}
+
+/** POST half of `brisk login`: mints the token after the consent page's
+ *  same-origin, CSRF-checked submit. */
+export function cliMint(): MiddlewareHandler<AppEnv> {
+  return async (c) => {
+    const callback = cliCallback(c);
+    if (!callback) return c.text('Bad request: expected ?port= (1024-65535) and ?state=.', 400);
+    if (c.env.AUTH !== 'google') {
+      callback.searchParams.set('open', '1');
+      return c.redirect(callback.toString());
+    }
+    const cookie = getCookie(c, CLI_CSRF_COOKIE);
+    const body = await c.req.parseBody();
+    const field = typeof body['csrf'] === 'string' ? body['csrf'] : '';
+    if (!cookie || !field || cookie !== field) {
+      return c.text('Authorization failed (CSRF check). Restart `brisk login`.', 403);
+    }
+    deleteCookie(c, CLI_CSRF_COOKIE, { path: '/auth/cli' });
+    return mintCliToken(c, callback);
   };
 }
 

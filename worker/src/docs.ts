@@ -12,9 +12,14 @@ export interface CollectionInfo {
 
 const MAX_LIMIT = 500;
 
-/** `id` / `createdAt` / `updatedAt` are ours; user fields can't shadow them. */
+/**
+ * `id` / `createdAt` / `updatedAt` are ours; user fields can't shadow them. We
+ * also drop a `__proto__` key: writes are shallow-spread / JSON-only today so
+ * prototype pollution is inert, but stripping it here keeps that safe if anyone
+ * ever introduces a recursive deep-merge over these fields.
+ */
 function ownFields(fields: Record<string, unknown>): Record<string, unknown> {
-  const { id: _id, createdAt: _c, updatedAt: _u, ...rest } = fields;
+  const { id: _id, createdAt: _c, updatedAt: _u, ['__proto__']: _p, ...rest } = fields;
   return rest;
 }
 

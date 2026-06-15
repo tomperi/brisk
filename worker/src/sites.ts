@@ -173,7 +173,9 @@ export async function listFiles(env: Env, site: string): Promise<{ path: string;
 export async function getFile(env: Env, site: string, path: string): Promise<Response | null> {
   const deploy = await activeDeploy(env, site);
   if (!deploy) return null;
-  const object = await env.BUCKET.get(deployPrefix(site, deploy) + path);
+  const clean = path.replace(/^\/+/, '');
+  if (clean.split('/').includes('..')) return null; // parity with serveSite
+  const object = await env.BUCKET.get(deployPrefix(site, deploy) + clean);
   if (!object) return null;
   const headers = new Headers();
   object.writeHttpMetadata(headers);

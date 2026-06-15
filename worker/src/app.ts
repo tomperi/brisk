@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { AiNotConfiguredError, chat } from './ai';
-import { auth, authRoutes, cliAuthRoute, isVisitor } from './auth';
+import { auth, authRoutes, cliConsent, cliMint, isVisitor } from './auth';
 import { DocStore } from './docs';
 import { contentType } from './mime';
 import {
@@ -110,6 +110,17 @@ export function createApp(): Hono<AppEnv> {
     return next();
   });
 
+  // Harden the JSON API and auth surfaces: never sniff, never be framed. (User
+  // sites are deliberately excluded — serving arbitrary framable HTML is the
+  // product; the dashboard assets get their own headers in the catch-all.)
+  const denyFrameNoSniff = async (c: Context<AppEnv>, next: () => Promise<void>) => {
+    c.header('X-Content-Type-Options', 'nosniff');
+    c.header('X-Frame-Options', 'DENY');
+    await next();
+  };
+  app.use('/api/*', denyFrameNoSniff);
+  app.use('/auth/*', denyFrameNoSniff);
+
   app.use('*', auth());
 
   // ---- identity ----------------------------------------------------------
@@ -117,7 +128,9 @@ export function createApp(): Hono<AppEnv> {
   app.get('/api/me', (c) => c.json(c.var.user));
 
   // Behind the auth gate on purpose: `brisk login` needs the user resolved.
-  app.get('/auth/cli', cliAuthRoute());
+  // GET confirms (consent page for browser sessions); POST mints the token.
+  app.get('/auth/cli', cliConsent());
+  app.post('/auth/cli', cliMint());
 
   // ---- database ----------------------------------------------------------
 
@@ -221,6 +234,11 @@ export function createApp(): Hono<AppEnv> {
     object.writeHttpMetadata(headers);
     headers.set('etag', object.httpEtag);
     headers.set('cache-control', 'public, max-age=31536000, immutable');
+    // Uploads carry a client-supplied Content-Type and are served from the apex
+    // origin. Never let one render inline as a document: don't sniff, and force
+    // a download. Subresource use (<img>, <script src>) is unaffected.
+    headers.set('x-content-type-options', 'nosniff');
+    headers.set('content-disposition', 'attachment');
     return new Response(object.body, { headers });
   });
 
@@ -314,8 +332,12 @@ export function createApp(): Hono<AppEnv> {
     const headers = new Headers(c.req.raw.headers);
     headers.set('x-brisk-user', JSON.stringify(c.var.user));
     // Browsers can't set headers on websocket connects, so path-mode pages
-    // pass their site as a query param instead.
-    const site = c.req.query('site') || c.var.site;
+    // pass their site as a query param instead — validated like the header.
+    const fromQuery = c.req.query('site');
+    if (fromQuery && !isValidSiteName(fromQuery)) {
+      return c.json({ error: 'invalid site' }, 400);
+    }
+    const site = fromQuery || c.var.site;
     const room = c.env.ROOMS.get(c.env.ROOMS.idFromName(site));
     return room.fetch(new Request(c.req.raw.url, { headers }));
   });
@@ -348,17 +370,34 @@ export function createApp(): Hono<AppEnv> {
 
     if (site === 'home') {
       const asset = await c.env.ASSETS.fetch(new URL(path, 'https://assets.local'));
-      if (asset.ok) return asset;
+      if (asset.ok) return securedAsset(asset);
     }
     // The SDK is available on every site, deployed or not.
     if (path === '/brisk.js') {
       const asset = await c.env.ASSETS.fetch(new URL('/brisk.js', 'https://assets.local'));
-      if (asset.ok) return asset;
+      if (asset.ok) return securedAsset(asset);
     }
     return notFoundPage(site);
   });
 
   return app;
+}
+
+/**
+ * Dashboard assets (the `home` site UI, docs, brisk.js) are served from the
+ * apex origin and hold the session, so they must never be framed or sniffed.
+ * Asset responses have immutable headers, so re-wrap to add them.
+ */
+function securedAsset(asset: Response): Response {
+  const headers = new Headers(asset.headers);
+  headers.set('X-Content-Type-Options', 'nosniff');
+  headers.set('X-Frame-Options', 'DENY');
+  headers.set('Content-Security-Policy', "frame-ancestors 'none'");
+  return new Response(asset.body, {
+    status: asset.status,
+    statusText: asset.statusText,
+    headers,
+  });
 }
 
 function notFoundPage(site: string): Response {

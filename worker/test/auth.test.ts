@@ -1,4 +1,5 @@
 import { createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:test';
+import { sign } from 'hono/jwt';
 import { describe, expect, it } from 'vitest';
 import { createApp } from '../src/app';
 import { isAllowedEmail } from '../src/auth';
@@ -62,6 +63,43 @@ describe('auth=google', () => {
     });
     expect(me.status).toBe(200);
     expect(await me.json()).toMatchObject({ email: 'ci@brisk' }); // whoever minted it
+  });
+
+  it('requires a CSRF-checked POST to mint a token for a browser cookie session', async () => {
+    const session = await sign(
+      { email: 'tom@yourco.com', name: 'Tom', exp: Math.floor(Date.now() / 1000) + 3600 },
+      'test-secret',
+    );
+    const cookie = `brisk_session=${session}`;
+
+    // GET returns a consent page (not a token) and sets a CSRF cookie.
+    const consent = await fetchAs(googleEnv, '/auth/cli?port=4444&state=abc', {
+      headers: { cookie },
+    });
+    expect(consent.status).toBe(200);
+    expect(consent.headers.get('set-cookie')).toContain('brisk_cli_csrf');
+    const csrf = (await consent.text()).match(/name="csrf" value="([^"]+)"/)?.[1];
+    expect(csrf).toBeTruthy();
+
+    // A forged POST without the CSRF token is refused.
+    const forged = await fetchAs(googleEnv, '/auth/cli?port=4444&state=abc', {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+      body: '',
+    });
+    expect(forged.status).toBe(403);
+
+    // The consent page's own submit (matching CSRF cookie + field) mints.
+    const minted = await fetchAs(googleEnv, '/auth/cli?port=4444&state=abc', {
+      method: 'POST',
+      headers: {
+        cookie: `${cookie}; brisk_cli_csrf=${csrf}`,
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      body: `csrf=${csrf}`,
+    });
+    expect(minted.status).toBe(302);
+    expect(new URL(minted.headers.get('location')!).searchParams.get('token')).toBeTruthy();
   });
 
   it('rejects garbage bearers and bad callback ports', async () => {
