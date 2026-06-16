@@ -1,4 +1,4 @@
-import { Hono, type Context } from 'hono';
+import { Hono, type Context, type Handler, type MiddlewareHandler } from 'hono';
 import { AiNotConfiguredError, chat } from './ai';
 import { auth, authRoutes, cliConsent, cliMint, isVisitor } from './auth';
 import { DocStore } from './docs';
@@ -93,7 +93,10 @@ async function visitorCached(
   return new Response(body, { headers });
 }
 
-export function createApp(makePlatform: (c: Context<AppEnv>) => Platform): Hono<AppEnv> {
+export function createApp(
+  makePlatform: (c: Context<AppEnv>) => Platform,
+  wsRoute?: MiddlewareHandler<AppEnv>,
+): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
   // Inject the platform first so every route — including the mounted auth
@@ -325,7 +328,11 @@ export function createApp(makePlatform: (c: Context<AppEnv>) => Platform): Hono<
 
   // ---- realtime ----------------------------------------------------------
 
-  app.get('/api/ws', (c) => {
+  // The websocket route is the one genuinely platform-specific handler: on
+  // Cloudflare the upgrade is answered in-band (101 Response); on Node it arrives
+  // on the HTTP 'upgrade' event and is handled by an upgradeWebSocket middleware.
+  // Cloudflare uses this default; the Node entry passes an override.
+  const defaultWsRoute: Handler<AppEnv> = (c) => {
     if (c.req.header('upgrade')?.toLowerCase() !== 'websocket') {
       return c.json({ error: 'expected a websocket upgrade' }, 426);
     }
@@ -337,7 +344,8 @@ export function createApp(makePlatform: (c: Context<AppEnv>) => Platform): Hono<
     }
     const site = fromQuery || c.var.site;
     return c.var.platform.rooms.connect(site, c.req.raw, c.var.user);
-  });
+  };
+  app.get('/api/ws', wsRoute ?? defaultWsRoute);
 
   // ---- static serving ----------------------------------------------------
 
