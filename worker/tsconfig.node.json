@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node", "@cloudflare/workers-types"],
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts", "test/**/*.node.test.ts", "test/parity/**/*.ts"],
+  "exclude": ["src/room.ts", "src/index.cf.ts", "src/platform/cloudflare"]
+}

@@ -1,4 +1,5 @@
-import { serve, type ServerType } from '@hono/node-server';
+import { serve } from '@hono/node-server';
+import type { Server } from 'node:http';
 import { WebSocketServer } from 'ws';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -21,15 +22,17 @@ const { app, rooms } = buildNodeApp({
 
 const wss = new WebSocketServer({ noServer: true });
 const port = Number(process.env.PORT ?? 8787);
-const server: ServerType = serve(
+// serve() with the default options builds a plain node:http Server; narrow to it
+// so the graceful-shutdown helpers (http-only) are typed.
+const server = serve(
   { fetch: app.fetch, websocket: { server: wss }, port, hostname: '0.0.0.0' },
   (info) => console.log(`brisk(node) listening on http://${info.address}:${info.port}`),
-);
+) as Server;
 void rooms; // rooms fan-out is wired via app's wsRoute + the websocket server
 
 const shutdown = (): void => {
-  server.closeIdleConnections?.();
-  setTimeout(() => server.closeAllConnections?.(), 10_000).unref();
+  server.closeIdleConnections();
+  setTimeout(() => server.closeAllConnections(), 10_000).unref();
   server.close(() => process.exit(0));
 };
 process.on('SIGTERM', shutdown);

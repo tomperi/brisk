@@ -6,10 +6,12 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
+    "dev:node": "node --disable-warning=ExperimentalWarning --experimental-strip-types src/index.node.ts",
     "deploy": "wrangler deploy",
-    "build": "tsc -p tsconfig.json --noEmit",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "build": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "start": "NODE_OPTIONS=--disable-warning=ExperimentalWarning node dist/index.node.js",
+    "test": "vitest run && vitest run --config vitest.node.config.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.60.0",
