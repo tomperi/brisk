@@ -1,5 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { Env, User } from './env';
+import type { DbEvent } from './platform/types';
 
 /** What each socket remembers across hibernation. */
 interface Attachment {
@@ -8,13 +9,6 @@ interface Attachment {
   subs: string[];
   /** Channels this socket joined for messages + presence. */
   channels: string[];
-}
-
-export interface DbEvent {
-  collection: string;
-  event: 'create' | 'update' | 'delete';
-  doc?: Record<string, unknown>;
-  id?: string;
 }
 
 type ClientMessage =
