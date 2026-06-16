@@ -61,11 +61,13 @@ typechecks core + `platform/node` under Node/DOM globals (`lib: DOM`,
 `Response.json<T>()` / `Env` binding types the shared core uses). `pnpm
 typecheck` and `pnpm build` run both.
 
-`pnpm test` runs two vitest projects: the workers pool (the integration suite,
-incl. the import boundary's CF half) and a node project (`vitest.node.config.ts`)
-that boots the Node assembly (filesystem storage + temp SQLite, `AUTH=none`)
-and runs the cross-runtime parity suite (`test/parity/suite.ts`) — identity,
-deploy+serve, db CRUD, and a realtime round-trip over a real `WebSocket`.
+`pnpm test` runs two vitest projects: the workers pool (the integration suite)
+and a node project (`vitest.node.config.ts`) that boots the Node assembly
+(filesystem storage + temp SQLite, `AUTH=none`) and runs the cross-runtime
+parity suite (`test/parity/suite.ts`) — identity, deploy+serve, db CRUD, and a
+realtime round-trip over a real `WebSocket`. The import-boundary test
+(`test/import-boundary.node.test.ts`) also runs in the node project; it only
+reads source text (no imports), so it is runtime-agnostic.
 
 Run the Node server locally: `pnpm dev:node` (env: `STORAGE`, `SQLITE_PATH`,
 `S3_*`/`FS_ROOT`, `PORT`). Realtime is single-replica (in-process rooms); Redis
