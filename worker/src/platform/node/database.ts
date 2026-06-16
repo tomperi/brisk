@@ -30,6 +30,12 @@ class NodeStatement implements PreparedStatement {
   }
 
   async run(): Promise<{ meta: { changes: number } }> {
+    return this.runSync();
+  }
+
+  /** Synchronous run, used inside batch() so the BEGIN..COMMIT transaction
+   *  never yields the microtask queue mid-flight (see NodeDatabase.batch). */
+  runSync(): { meta: { changes: number } } {
     const { changes } = this.stmt.run(...(this.args as never[]));
     return { meta: { changes: Number(changes) } }; // changes can be bigint
   }
@@ -43,12 +49,17 @@ export class NodeDatabase implements Database {
   }
 
   // D1.batch() runs all statements in one implicit transaction. node:sqlite has
-  // no batch(); emulate with BEGIN/COMMIT and ROLLBACK on throw.
+  // no batch(); emulate with BEGIN/COMMIT and ROLLBACK on throw. The whole
+  // transaction runs synchronously (runSync, no awaits) on the shared sync
+  // connection: a single `await s.run()` here would yield the microtask queue
+  // mid-transaction, letting a concurrent batch() interleave its own BEGIN
+  // (which then throws "transaction within a transaction") and ROLLBACK (which
+  // would unwind this in-flight transaction). D1.batch() is isolated; this keeps
+  // the Node path equivalent without an external mutex.
   async batch(statements: PreparedStatement[]): Promise<BatchResult[]> {
     this.db.exec('BEGIN');
     try {
-      const results: BatchResult[] = [];
-      for (const s of statements) results.push(await s.run());
+      const results = statements.map((s) => (s as NodeStatement).runSync());
       this.db.exec('COMMIT');
       return results;
     } catch (err) {
