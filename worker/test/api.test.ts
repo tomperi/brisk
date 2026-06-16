@@ -242,3 +242,64 @@ describe('ai', () => {
     expect(res.status).toBe(501);
   });
 });
+
+describe('content-type response headers', () => {
+  it('serves each file with the Content-Type its extension implies', async () => {
+    // deployForm hardcodes text/html on every File, but deploySite always
+    // derives the stored Content-Type from the path extension — so the served
+    // header must match contentType(), not the form's File.type.
+    await SELF.fetch(`${HOST}/api/deploy/mimes`, {
+      method: 'POST',
+      body: deployForm({
+        'index.html': '<h1>hi</h1>',
+        'about.html': '<h1>about</h1>',
+        'style.css': 'body{color:red}',
+        'app.js': 'console.log(1)',
+        'logo.svg': '<svg></svg>',
+      }),
+    });
+
+    const cases: [string, string][] = [
+      ['/s/mimes/', 'text/html; charset=utf-8'],
+      ['/s/mimes/index.html', 'text/html; charset=utf-8'],
+      ['/s/mimes/style.css', 'text/css; charset=utf-8'],
+      ['/s/mimes/app.js', 'text/javascript; charset=utf-8'],
+      ['/s/mimes/logo.svg', 'image/svg+xml'],
+    ];
+    for (const [path, type] of cases) {
+      const res = await SELF.fetch(`${HOST}${path}`);
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toBe(type);
+    }
+
+    // extensionless resolution still lands on about.html as text/html
+    const about = await SELF.fetch(`${HOST}/s/mimes/about`);
+    expect(about.status).toBe(200);
+    expect(about.headers.get('content-type')).toBe('text/html; charset=utf-8');
+    expect(await about.text()).toBe('<h1>about</h1>');
+
+    // raw endpoint serves the exact file with its content-type
+    const raw = await SELF.fetch(`${HOST}/api/sites/mimes/raw/style.css`);
+    expect(raw.status).toBe(200);
+    expect(raw.headers.get('content-type')).toBe('text/css; charset=utf-8');
+    expect(await raw.text()).toBe('body{color:red}');
+  });
+
+  it('round-trips an upload Content-Type and keeps its safety headers', async () => {
+    const form = new FormData();
+    form.append('files', new File(['png-bytes'], 'pic.png', { type: 'image/png' }));
+    const res = await SELF.fetch(`${HOST}/api/fs/upload`, {
+      method: 'POST',
+      headers: { 'x-brisk-site': 'mime-uploads' },
+      body: form,
+    });
+    const { files } = await res.json<{ files: { url: string }[] }>();
+
+    const served = await SELF.fetch(`${HOST}${files[0]!.url}`);
+    expect(served.status).toBe(200);
+    expect(served.headers.get('content-type')).toBe('image/png');
+    // The refactor must preserve the download-safety headers on apex uploads.
+    expect(served.headers.get('content-disposition')).toBe('attachment');
+    expect(served.headers.get('x-content-type-options')).toBe('nosniff');
+  });
+});
