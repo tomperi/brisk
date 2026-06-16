@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "brisk",
-  "main": "src/index.ts",
+  "main": "src/index.cf.ts",
   "compatibility_date": "2025-09-06",
 
   // account_id is intentionally not committed — set the CLOUDFLARE_ACCOUNT_ID
