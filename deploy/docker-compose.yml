@@ -1,0 +1,53 @@
+# Local / single-VM self-host. Default: filesystem storage + SQLite on a volume,
+# no external services. Enable the `s3` profile to run MinIO and switch STORAGE=s3.
+services:
+  brisk:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: usebrisk/brisk:dev
+    restart: unless-stopped
+    ports:
+      - '${PORT:-8787}:8787'
+    environment:
+      AUTH: ${AUTH:-none}
+      BASE_HOST: ${BASE_HOST:-}
+      VISIBILITY: ${VISIBILITY:-private}
+      ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
+      ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      DEPLOY_TOKEN: ${DEPLOY_TOKEN:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # storage: filesystem by default (one volume). Override to s3 with the profile below.
+      STORAGE: ${STORAGE:-fs}
+      FS_ROOT: /data/objects
+      SQLITE_PATH: /data/brisk.sqlite
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+    volumes:
+      - brisk-data:/data
+
+  # `docker compose --profile s3 up` to run MinIO and back STORAGE=s3.
+  minio:
+    image: minio/minio:latest
+    profiles: ['s3']
+    command: server /data --console-address ':9001'
+    restart: unless-stopped
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-minioadmin}
+    volumes:
+      - minio-data:/data
+
+volumes:
+  brisk-data:
+  minio-data:
