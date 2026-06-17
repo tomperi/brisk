@@ -305,9 +305,11 @@ plus the storage/runtime knobs):
 
 Realtime is **single-replica** on Node: rooms live in the process, so fan-out
 works within one pod. That's the right default for an internal instance; a
-Redis-backed `Rooms` for multiple replicas is a later opt-in. The container
-image, Helm chart, and Docker Compose (with optional MinIO/Redis) land in a
-follow-up.
+Redis-backed `Rooms` for multiple replicas is a later opt-in.
+
+To package and ship it — a multi-stage Docker image, a Docker Compose stack
+(with optional MinIO), and a Helm chart (single replica, PVC, ingress) — see
+[deploy/README.md](deploy/README.md).
 
 ## The CLI
 
