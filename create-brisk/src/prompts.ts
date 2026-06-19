@@ -1,4 +1,5 @@
-import { createInterface } from 'node:readline/promises';
+import { createInterface as createPromisesInterface } from 'node:readline/promises';
+import { createInterface } from 'node:readline';
 import { stdin, stdout } from 'node:process';
 import {
   DEFAULT_IMAGE,
@@ -8,8 +9,49 @@ import {
   type Target,
 } from './answers.js';
 
+/**
+ * A single source of prompt answers. The TTY path reads one line at a time
+ * interactively; the non-TTY path reads all of stdin up front and replays it.
+ *
+ * readline/promises' question() drops every buffered line but the first when
+ * stdin hits EOF on a fast pipe (Node 20–24), so sequential question() calls
+ * silently hang on `printf … | create-brisk`. Buffering the whole stream first
+ * keeps the advertised non-interactive / CI usage working.
+ */
+interface Reader {
+  question(prompt: string): Promise<string>;
+  close(): void;
+}
+
+function ttyReader(): Reader {
+  const rl = createPromisesInterface({ input: stdin, output: stdout });
+  return {
+    question: (prompt) => rl.question(prompt),
+    close: () => rl.close(),
+  };
+}
+
+async function bufferedReader(): Promise<Reader> {
+  const lines: string[] = await new Promise((resolve) => {
+    const collected: string[] = [];
+    const rl = createInterface({ input: stdin });
+    rl.on('line', (l) => collected.push(l));
+    rl.on('close', () => resolve(collected));
+  });
+  let i = 0;
+  return {
+    question: (prompt) => {
+      stdout.write(prompt);
+      const line = lines[i++] ?? '';
+      stdout.write(`${line}\n`);
+      return Promise.resolve(line);
+    },
+    close: () => {},
+  };
+}
+
 async function choose<T extends string>(
-  rl: ReturnType<typeof createInterface>,
+  rl: Reader,
   label: string,
   options: { value: T; hint: string }[],
   def: T,
@@ -25,7 +67,7 @@ async function choose<T extends string>(
 }
 
 export async function ask(): Promise<Answers> {
-  const rl = createInterface({ input: stdin, output: stdout });
+  const rl = stdin.isTTY ? ttyReader() : await bufferedReader();
   try {
     const target = await choose<Target>(
       rl,
