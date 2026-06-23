@@ -229,6 +229,10 @@ describe('AUTH unset (secure by default)', () => {
   it('fails closed on a public host', async () => {
     const res = await fetchUrl(unsetEnv, 'https://brisk.example.com/api/me');
     expect(res.status).toBe(503);
+    // the 503 must point operators at the secure path, not just say "no".
+    const body = await res.text();
+    expect(body).toContain('Refusing to serve an open backend');
+    expect(body).toContain('AUTH=google');
   });
 
   it('still grants the dev identity on localhost', async () => {
