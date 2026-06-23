@@ -24,10 +24,12 @@ ${bold('Options')}
   --site <name>                override the site name (default: brisk.json or folder name)
   --server <url>               target instance directly, e.g. brisk.example.com
   --profile <name>             use a specific profile for this command
+  --yes, -f                    skip the open-public-instance deploy confirmation (CI)
 
 ${bold('Environment')}
   BRISK_PROFILE                like --profile
   BRISK_SERVER, BRISK_TOKEN    direct server + bearer token (CI)
+  BRISK_YES                    like --yes
 `;
 
 async function main(): Promise<void> {
@@ -36,6 +38,7 @@ async function main(): Promise<void> {
       site: { type: 'string' },
       server: { type: 'string' },
       profile: { type: 'string' },
+      yes: { type: 'boolean', short: 'f' },
       help: { type: 'boolean', short: 'h' },
     },
     allowPositionals: true,
@@ -47,7 +50,12 @@ async function main(): Promise<void> {
     return;
   }
 
-  const flags = { site: values.site, server: values.server, profile: values.profile };
+  const flags = {
+    site: values.site,
+    server: values.server,
+    profile: values.profile,
+    yes: values.yes,
+  };
   switch (command) {
     case 'init':
       return commands.init(args[0], flags);

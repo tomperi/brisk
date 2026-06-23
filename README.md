@@ -169,8 +169,10 @@ npx wrangler secret put DEPLOY_TOKEN       # token the CLI will use
 3. Set the auth vars in the dashboard ([Configuration](#configuration)):
    `AUTH=google`, and restrict who gets in with `ALLOWED_EMAIL_DOMAINS=yourco.com`
    for a company, or `ALLOWED_EMAILS=you@gmail.com` for a personal instance
-   (never allowlist all of `gmail.com`). Either list admits; both empty admits
-   anyone with a Google account.
+   (never allowlist all of `gmail.com`). Either list admits.
+
+   > ⚠️ **With both lists empty, anyone who completes a Google login is admitted.**
+   > Always set one before going public.
 
 Browsers get redirected to Google. The CLI logs in as a real person:
 
@@ -181,7 +183,10 @@ brisk login brisk.example.com    # opens the browser, stores a personal token
 Deploys are then attributed to your email on the dashboard. The
 `DEPLOY_TOKEN` secret is for CI (`BRISK_TOKEN=<DEPLOY_TOKEN>`, shows up as
 `ci@brisk`). With `AUTH: "none"` (the default) everyone is a trusted dev
-user — only do that on a network you trust.
+user — only do that on a network you trust. The worker refuses to serve when
+`AUTH` is unset on a public host, warns loudly if you run an explicit
+`AUTH=none` there, and `brisk deploy` confirms before pushing to an open
+instance — so you can't expose one silently.
 
 #### Auth at a glance
 

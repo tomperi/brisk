@@ -18,6 +18,22 @@ function isLocalHost(host: string): boolean {
   return h === 'localhost' || h === '127.0.0.1' || h.endsWith('.localhost');
 }
 
+let warnedOpenPublic = false;
+/**
+ * AUTH=none on a public host serves an anonymously-writable backend on purpose —
+ * but that must never be silent. Log the blast radius once per isolate so an
+ * operator who set it (or inherited it) sees what they're exposing.
+ */
+function warnOpenPublicOnce(host: string): void {
+  if (warnedOpenPublic) return;
+  warnedOpenPublic = true;
+  console.warn(
+    `[brisk] SECURITY: AUTH=none on public host ${host} — this instance is OPEN. ` +
+      `Anyone who reaches it is a full member who can deploy over or delete every ` +
+      `site here and spend its AI/storage budget. Set AUTH=google to require login.`,
+  );
+}
+
 /** Who you are on a VISIBILITY=public instance before signing in. */
 export const VISITOR: User = { email: 'visitor', name: 'Visitor' };
 
@@ -256,18 +272,33 @@ export function cliMint(): MiddlewareHandler<AppEnv> {
 export function auth(): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     if (c.env.AUTH !== 'google') {
+      const host = new URL(c.req.url).host;
+      const local = isLocalHost(host);
       // AUTH=none is "trusted network", fine locally. But Workers are public by
       // default, so an *unset* AUTH on a public host is almost always a forgotten
-      // config that ships an open backend. Fail closed there; require an explicit
-      // AUTH=none to run open on purpose.
-      if (!c.env.AUTH && !isLocalHost(new URL(c.req.url).host)) {
+      // config that would ship an open, anonymously-writable backend. Fail closed
+      // there and point at the secure setup; require an explicit AUTH=none to run
+      // open on purpose.
+      if (!c.env.AUTH && !local) {
         return c.text(
-          'Misconfigured: AUTH is not set. Set AUTH=google to require login, or ' +
-            'AUTH=none to deliberately run an open instance on a trusted network. ' +
-            'Refusing to serve an open backend on a public host.',
+          'Refusing to serve an open backend on a public host.\n\n' +
+            'Set AUTH=google to require login (recommended). Without it, anyone who\n' +
+            'reaches this host is a full member who can deploy over or delete every\n' +
+            'site here and spend its AI/storage budget. From the worker directory:\n' +
+            '  npx wrangler secret put SESSION_SECRET        # any long random string\n' +
+            '  npx wrangler secret put GOOGLE_CLIENT_ID\n' +
+            '  npx wrangler secret put GOOGLE_CLIENT_SECRET\n' +
+            'then set AUTH=google and an ALLOWED_EMAILS / ALLOWED_EMAIL_DOMAINS\n' +
+            'allowlist. Add VISIBILITY=public to let strangers view (not touch) it.\n\n' +
+            'To run an open instance on purpose (a trusted/local network only), set\n' +
+            'AUTH=none explicitly.',
           503,
         );
       }
+      // An explicit AUTH=none on a public host is open "on purpose" — but it serves
+      // an anonymously-writable backend to the whole internet, so never let it be
+      // silent.
+      if (c.env.AUTH === 'none' && !local) warnOpenPublicOnce(host);
       c.set('user', devUser());
       return next();
     }
