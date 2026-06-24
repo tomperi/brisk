@@ -1,0 +1,43 @@
+{
+  "name": "create-brisk",
+  "version": "0.1.0",
+  "description": "Scaffold a Brisk self-host deployment (Docker, Kubernetes, or Cloudflare).",
+  "engines": {
+    "node": ">=20.12"
+  },
+  "license": "MIT",
+  "type": "module",
+  "homepage": "https://github.com/tomperi/brisk/tree/main/create-brisk",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tomperi/brisk.git",
+    "directory": "create-brisk"
+  },
+  "bugs": "https://github.com/tomperi/brisk/issues",
+  "keywords": [
+    "brisk",
+    "create",
+    "scaffold",
+    "kubernetes",
+    "docker"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "create-brisk": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

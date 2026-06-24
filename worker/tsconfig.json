@@ -7,5 +7,11 @@
     "lib": ["ES2023"],
     "types": ["@cloudflare/workers-types"]
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": [
+    "src/platform/node",
+    "src/index.node.ts",
+    "test/**/*.node.test.ts",
+    "vitest.node.config.ts"
+  ]
 }

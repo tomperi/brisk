@@ -7,4 +7,5 @@ data/
 worker/assets/brisk.js
 .dev.vars
 .wrangler/
+.brisk-dev/
 .claude/worktrees/

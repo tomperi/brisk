@@ -2,3 +2,4 @@ packages:
   - worker
   - sdk
   - cli
+  - create-brisk

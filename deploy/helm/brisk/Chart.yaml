@@ -1,0 +1,9 @@
+apiVersion: v2
+name: brisk
+description: Brisk — drop a folder, get a site. Self-hosted on Kubernetes.
+type: application
+version: 0.1.0
+appVersion: '0.1.0'
+home: https://github.com/usebrisk/brisk
+sources:
+  - https://github.com/usebrisk/brisk

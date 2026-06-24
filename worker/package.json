@@ -6,18 +6,27 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
+    "build:node": "esbuild src/index.node.ts --bundle --platform=node --format=esm --packages=external --outfile=dist/index.node.js",
+    "dev:node": "pnpm run build:node && STORAGE=fs FS_ROOT=.brisk-dev/objects SQLITE_PATH=.brisk-dev/brisk.sqlite AUTH=none node --disable-warning=ExperimentalWarning dist/index.node.js",
     "deploy": "wrangler deploy",
-    "build": "tsc -p tsconfig.json --noEmit",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "build": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "start": "NODE_OPTIONS=--disable-warning=ExperimentalWarning node dist/index.node.js",
+    "test": "vitest run && vitest run --config vitest.node.config.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.60.0",
-    "hono": "^4.7.0"
+    "@hono/node-server": "^2.0.5",
+    "aws4fetch": "^1.0.20",
+    "hono": "^4.7.0",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.8.0",
     "@cloudflare/workers-types": "^4.20250100.0",
+    "@types/node": "^24.0.0",
+    "@types/ws": "^8.5.12",
+    "esbuild": "^0.25.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0",
     "wrangler": "^4.0.0"

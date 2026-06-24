@@ -5,6 +5,8 @@ export default defineWorkersConfig(async () => {
   const migrations = await readD1Migrations(path.join(__dirname, 'migrations'));
   return {
     test: {
+      include: ['test/**/*.test.ts'],
+      exclude: ['test/**/*.node.test.ts', 'node_modules/**'],
       setupFiles: ['./test/apply-migrations.ts'],
       poolOptions: {
         workers: {

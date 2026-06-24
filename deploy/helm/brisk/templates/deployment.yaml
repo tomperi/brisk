@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "brisk.fullname" . }}
+  labels:
+    {{- include "brisk.labels" . | nindent 4 }}
+spec:
+  # Single replica: realtime is in-process. >1 needs the Redis backplane (Phase 6).
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate # RWO PVC can't be mounted by two pods during a rollout
+  selector:
+    matchLabels:
+      {{- include "brisk.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "brisk.selectorLabels" . | nindent 8 }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: brisk
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8787
+          env:
+            - { name: PORT, value: "8787" }
+            - { name: BASE_HOST, value: {{ .Values.config.baseHost | quote }} }
+            {{- if .Values.config.auth }}
+            - { name: AUTH, value: {{ .Values.config.auth | quote }} }
+            {{- end }}
+            - { name: VISIBILITY, value: {{ .Values.config.visibility | quote }} }
+            - { name: ALLOWED_EMAILS, value: {{ .Values.config.allowedEmails | quote }} }
+            - { name: ALLOWED_EMAIL_DOMAINS, value: {{ .Values.config.allowedEmailDomains | quote }} }
+            - { name: STORAGE, value: {{ .Values.config.storage | quote }} }
+            - { name: SQLITE_PATH, value: {{ .Values.config.sqlitePath | quote }} }
+            - { name: FS_ROOT, value: {{ .Values.config.fsRoot | quote }} }
+            {{- if eq .Values.config.storage "s3" }}
+            - { name: S3_ENDPOINT, value: {{ .Values.s3.endpoint | quote }} }
+            - { name: S3_BUCKET, value: {{ .Values.s3.bucket | quote }} }
+            - { name: S3_REGION, value: {{ .Values.s3.region | quote }} }
+            {{- end }}
+          envFrom:
+            - secretRef:
+                name: {{ include "brisk.secretName" . }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          # /auth/login always 302s (redirects to / under AUTH=none, to Google
+          # under AUTH=google) for a non-document GET, so the probe gets a 3xx
+          # in every AUTH mode — unlike /, which 401s a probe under AUTH=google.
+          readinessProbe:
+            httpGet: { path: {{ .Values.healthcheck.path | quote }}, port: http }
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: {{ .Values.healthcheck.path | quote }}, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "brisk.fullname" . }}-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}

@@ -273,6 +273,51 @@ question entirely.
 key at provider rates — the only cost here with no ceiling, so set a spend limit
 on the provider side if your sites lean on it.
 
+## Self-hosting on Node / Kubernetes
+
+Cloudflare is the reference target, but the same Hono core also runs as a plain
+Node server (`worker/src/index.node.ts`) for self-hosting on a VM or
+Kubernetes. The six primitives are backed by portable adapters: `node:sqlite`
+for the database (D1's schema, applied by a built-in migration runner),
+S3-compatible object storage **or** a filesystem directory, an in-process
+realtime room, disk-served assets, and an in-memory response cache. Everything
+above the storage layer is byte-identical to the Cloudflare build.
+
+Run it with Node 24 (`node:sqlite` is flag-free; global `fetch`/`WebSocket`
+exist):
+
+```sh
+cd worker
+pnpm dev:node          # ts via --experimental-strip-types; or `pnpm start` from dist
+```
+
+Configuration is environment variables (the same instance vars as Cloudflare,
+plus the storage/runtime knobs):
+
+| Var                                                                                                                                              | What                                         | Default                             |
+| ------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------- | ----------------------------------- |
+| `PORT`                                                                                                                                           | HTTP + websocket port                        | `8787`                              |
+| `STORAGE`                                                                                                                                        | `s3` or `fs`                                 | `s3`                                |
+| `S3_ENDPOINT` / `S3_BUCKET` / `S3_REGION` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY`                                                          | object storage (AWS S3 or MinIO, path-style) | — / — / `us-east-1` / — / —         |
+| `FS_ROOT`                                                                                                                                        | object directory when `STORAGE=fs`           | `/data/objects`                     |
+| `SQLITE_PATH`                                                                                                                                    | SQLite database file                         | `/data/brisk.sqlite`                |
+| `BASE_HOST` / `AUTH` / `VISIBILITY` / `ALLOWED_EMAIL*` / `SESSION_SECRET` / `GOOGLE_*` / `DEPLOY_TOKEN` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | identical to the Cloudflare instance vars    | see [Configuration](#configuration) |
+
+Realtime is **single-replica** on Node: rooms live in the process, so fan-out
+works within one pod. That's the right default for an internal instance; a
+Redis-backed `Rooms` for multiple replicas is a later opt-in.
+
+To package and ship it — a multi-stage Docker image, a Docker Compose stack
+(with optional MinIO), and a Helm chart (single replica, PVC, ingress) — see
+[deploy/README.md](deploy/README.md).
+
+`npm create brisk@latest` scaffolds the deployment glue for you: it asks a
+handful of questions (target, auth, base host, storage) and writes a Docker
+Compose stack + `.env`, a Helm `brisk-values.yaml`, or a Cloudflare `.dev.vars`
+
+- checklist. It generates **config against the published image/chart** — it
+  does not fork the source — and leaves secrets as placeholders for you to fill.
+
 ## The CLI
 
 ```sh

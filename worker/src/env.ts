@@ -1,3 +1,5 @@
+import type { Platform } from './platform/types';
+
 export interface Env {
   DB: D1Database;
   BUCKET: R2Bucket;
@@ -39,12 +41,14 @@ export interface User {
   picture?: string;
 }
 
-/** Hono app environment: bindings plus per-request site + user. */
+/** Hono app environment: bindings plus per-request site + user + platform. */
 export type AppEnv = {
   Bindings: Env;
   Variables: {
     /** Site this request belongs to (subdomain, /s/<site> prefix, or header). */
     site: string;
     user: User;
+    /** Storage/db/rooms/assets/cache/waitUntil, wired by the entry point. */
+    platform: Platform;
   };
 };

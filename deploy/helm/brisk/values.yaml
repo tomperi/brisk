@@ -1,0 +1,83 @@
+# Default: a single pod, filesystem storage + SQLite on one PVC, no external
+# services. Realtime is in-process (single replica); scaling >1 needs Redis (not
+# yet shipped). Switch storage to S3 by setting config.storage=s3 + s3.*.
+replicaCount: 1
+
+image:
+  repository: ghcr.io/usebrisk/brisk
+  tag: '' # defaults to .Chart.appVersion
+  pullPolicy: IfNotPresent
+
+# Non-secret instance config (maps to env vars; see README → Configuration).
+config:
+  baseHost: '' # e.g. brisk.example.com
+  # Empty by default: the worker fails closed (503) on a public host until you
+  # make a deliberate choice. Set `google` for login, or `none` to run open on a
+  # trusted network on purpose. Never leave empty for a public Ingress.
+  auth: '' # google | none
+  visibility: private # or: public
+  allowedEmails: ''
+  allowedEmailDomains: ''
+  storage: fs # fs | s3
+  sqlitePath: /data/brisk.sqlite
+  fsRoot: /data/objects
+
+# S3 (when config.storage=s3). Credentials go in `secrets` below.
+s3:
+  endpoint: ''
+  bucket: ''
+  region: us-east-1
+
+# Sensitive values → a Secret. Leave blank to omit. For production, prefer
+# `existingSecret` (a Secret you manage) over inlining these in values.
+secrets:
+  sessionSecret: ''
+  googleClientId: ''
+  googleClientSecret: ''
+  deployToken: ''
+  anthropicApiKey: ''
+  openaiApiKey: ''
+  s3AccessKeyId: ''
+  s3SecretAccessKey: ''
+existingSecret: '' # name of a pre-created Secret with the same keys; overrides `secrets`
+
+persistence:
+  enabled: true
+  size: 8Gi
+  storageClass: '' # '' = cluster default
+  # accessMode ReadWriteOnce suits the single-replica model.
+  accessMode: ReadWriteOnce
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ''
+  annotations: {}
+  # The apex host plus a wildcard for site subdomains (see README → Wildcard subdomains).
+  host: brisk.example.com
+  wildcard: true # also route *.{host}
+  tls:
+    enabled: false
+    secretName: brisk-tls
+
+# Liveness/readiness probe path. /auth/login 302s for a probe (non-document GET)
+# in every AUTH mode; / returns 401 to a probe under AUTH=google. Don't change
+# this to / unless you run AUTH=none.
+healthcheck:
+  path: /auth/login
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+podSecurityContext:
+  fsGroup: 1000 # node user — lets the pod write the PVC
+nodeSelector: {}
+tolerations: []
+affinity: {}

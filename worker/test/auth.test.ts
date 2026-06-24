@@ -3,8 +3,9 @@ import { sign } from 'hono/jwt';
 import { describe, expect, it } from 'vitest';
 import { createApp } from '../src/app';
 import { isAllowedEmail } from '../src/auth';
+import { buildCloudflarePlatform } from '../src/platform/cloudflare/platform';
 
-const app = createApp();
+const app = createApp((c) => buildCloudflarePlatform(c.env, c.executionCtx));
 
 /** The deployed test env runs AUTH=none; override per request to test google mode. */
 const googleEnv = {

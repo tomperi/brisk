@@ -1,3 +1,5 @@
+import type { Database } from './platform/types';
+
 export interface Doc {
   id: string;
   createdAt: string;
@@ -45,7 +47,7 @@ function toDoc(row: DocRow): Doc {
  * like a big persisted JSON store.
  */
 export class DocStore {
-  constructor(private readonly db: D1Database) {}
+  constructor(private readonly db: Database) {}
 
   async list(
     site: string,
