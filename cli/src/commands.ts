@@ -102,7 +102,7 @@ async function confirmOpenTarget(conn: Connection, flags: Flags): Promise<void> 
     `${yellow('warning:')} ${bold(conn.server)} runs ${bold('open')} (${dim('AUTH=none')}) on a ` +
       `public host —\n  anyone who reaches it is a full member who can overwrite or delete every site there.`,
   );
-  if (flags.yes || process.env.BRISK_YES) return;
+  if (flags.yes || ['1', 'true'].includes(process.env.BRISK_YES ?? '')) return;
   if (!process.stdin.isTTY) {
     throw new Error(
       'refusing to deploy to an open public instance non-interactively — pass --yes (-y) or BRISK_YES=1 to confirm',
