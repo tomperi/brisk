@@ -40,6 +40,10 @@ releases are published to
 - Closed a visitor cache-poisoning hole — static pages resolve the site from
   the host only, never a client header — and an unset `AUTH` on a public host
   now fails closed instead of serving an open backend.
+- An open (`AUTH=none`) public instance can no longer ship silently: the
+  fail-closed 503 now spells out the secure setup, the worker warns once when
+  open on purpose, and `brisk deploy` warns and confirms before pushing to an
+  open host (bypass with `--yes` / `BRISK_YES=1`).
 - Generated assets (`/brisk.js` and the `/changelog` page) are now built
   during `wrangler deploy`, so they ship with the worker instead of 404ing.
 - Dashboard mobile layout: compact site rows, tighter headings, and a header
