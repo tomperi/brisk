@@ -60,7 +60,31 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      # CHANGELOG.md is the single source of truth for release notes. Pull the
+      # pushed version's section out of it (the ### groups + bullets, without the
+      # `## [x] - date` heading, which the tag already is).
+      - name: Extract release notes
+        run: |
+          node -e '
+            const fs = require("fs");
+            const version = process.argv[1];
+            const lines = fs.readFileSync("CHANGELOG.md", "utf8").split("\n");
+            const start = lines.findIndex((l) => l.startsWith(`## [${version}]`));
+            if (start === -1) throw new Error(`no CHANGELOG.md section for ${version}`);
+            // Stop at the next release, or the link-reference block at the foot.
+            let end = lines.findIndex((l, i) => i > start && (l.startsWith("## ") || /^\[[^\]]+\]:\s/.test(l)));
+            if (end === -1) end = lines.length;
+            const notes = lines.slice(start + 1, end).join("\n").trim() + "\n";
+            fs.writeFileSync("RELEASE_NOTES.md", notes);
+          ' "${{ steps.v.outputs.version }}"
+
       - name: GitHub release
-        run: gh release create "${{ steps.v.outputs.tag }}" --target "$GITHUB_SHA" --title "${{ steps.v.outputs.tag }}" --generate-notes
+        run: |
+          TAG="${{ steps.v.outputs.tag }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TAG" --notes-file RELEASE_NOTES.md
+          else
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes-file RELEASE_NOTES.md
+          fi
         env:
           GH_TOKEN: ${{ github.token }}

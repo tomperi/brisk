@@ -1,0 +1,43 @@
+name: changelog
+
+# Every PR that touches product source (worker/sdk/cli src) must add a
+# CHANGELOG.md entry. Apply the `no-changelog` label to skip pure-internal
+# churn — labeling re-runs this check immediately.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  require-entry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Require a CHANGELOG.md entry for source changes
+        env:
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ' ') }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          for label in $LABELS; do
+            if [ "$label" = "no-changelog" ]; then
+              echo "no-changelog label present — skipping."
+              exit 0
+            fi
+          done
+          changed="$(git diff --name-only "$BASE...$HEAD")"
+          if ! printf '%s\n' "$changed" | grep -qE '^(worker|sdk|cli)/src/'; then
+            echo "No worker/sdk/cli source changes — a CHANGELOG.md entry is not required."
+            exit 0
+          fi
+          if printf '%s\n' "$changed" | grep -qx 'CHANGELOG.md'; then
+            echo "CHANGELOG.md updated — thanks."
+            exit 0
+          fi
+          echo "::error::This PR changes worker/sdk/cli source but does not update CHANGELOG.md. Add a line under '## [Unreleased]' (Keep a Changelog format), or apply the 'no-changelog' label to skip."
+          exit 1

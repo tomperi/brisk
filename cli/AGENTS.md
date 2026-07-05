@@ -33,3 +33,9 @@ then run as `node cli/dist/cli.js …`.
   `BRISK_SERVER=http://localhost:8787 node cli/dist/cli.js deploy examples/guestbook`.
 - Deploy file paths travel as the `File.name` of each multipart part —
   forward slashes, relative, validated server-side.
+- **Deploy ownership is a footgun guard, not a permission.** `deploy` asserts
+  an identity via `x-brisk-username` (resolved `--username` > `BRISK_USERNAME` >
+  profile `username`; spoofable by design). Overwriting a site owned by someone
+  else 409s with `code: 'owned'`; the CLI then prompts on a TTY, or errors and
+  tells you to `--force`/`BRISK_FORCE=1` when non-interactive (agents/CI never
+  hang on stdin). It labels sites, never gates reads or other writes.

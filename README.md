@@ -113,13 +113,14 @@ across many instances. Three places hold the rest:
   read at runtime and every one is optional, defaulting in code to a safe
   path-only, no-auth, private instance:
 
-  | Variable                | Purpose                                               | Default               |
-  | ----------------------- | ----------------------------------------------------- | --------------------- |
-  | `BASE_HOST`             | host sites hang off (`foo.<BASE_HOST>`)               | path-only (`/s/foo/`) |
-  | `AUTH`                  | `google` for OAuth, else trusted-network dev identity | `none`                |
-  | `ALLOWED_EMAILS`        | exact emails admitted through OAuth (comma-separated) | anyone                |
-  | `ALLOWED_EMAIL_DOMAINS` | whole domains admitted through OAuth                  | anyone                |
-  | `VISIBILITY`            | `public` for view-only demo mode                      | `private`             |
+  | Variable                | Purpose                                                       | Default               |
+  | ----------------------- | ------------------------------------------------------------- | --------------------- |
+  | `BASE_HOST`             | host sites hang off (`foo.<BASE_HOST>`)                       | path-only (`/s/foo/`) |
+  | `AUTH`                  | `google` for OAuth, else trusted-network dev identity         | `none`                |
+  | `ALLOWED_EMAILS`        | exact emails admitted through OAuth (comma-separated)         | anyone                |
+  | `ALLOWED_EMAIL_DOMAINS` | whole domains admitted through OAuth                          | anyone                |
+  | `VISIBILITY`            | `public` for view-only demo mode                              | `private`             |
+  | `DEPLOY_HISTORY`        | `on` keeps every published version (history, future rollback) | `off`                 |
 
   `keep_vars: true` in `wrangler.jsonc` stops `wrangler deploy` from wiping
   dashboard-set vars. Locally, `wrangler dev` reads them from `.dev.vars` (see
@@ -338,8 +339,10 @@ brisk.example.com ─────┘    │
 ```
 
 - **Deploys are atomic**: files upload under a fresh version prefix in R2, then
-  the site's pointer row in D1 swaps. A site is never served half-updated, and
-  the previous version is cleaned up after the swap.
+  the site's pointer row in D1 swaps. A site is never served half-updated. By
+  default the previous version is deleted after the swap, keeping storage
+  bounded; set `DEPLOY_HISTORY=on` to retain every version for history and
+  future rollback.
 - **Realtime is one Durable Object per site** (websocket hibernation, so idle
   rooms cost nothing). It fans out db change events, channel messages, and
   presence.
@@ -363,13 +366,14 @@ brisk.example.com ─────┘    │
 
 ### Storage layout
 
-| Where                             | What                                                           |
-| --------------------------------- | -------------------------------------------------------------- |
-| R2 `deploys/<site>/<version>/…`   | site files; one immutable prefix per deploy                    |
-| R2 `uploads/<site>/<id>/<name>`   | `brisk.fs` uploads, immutable URLs                             |
-| D1 `sites`                        | one row per site: live-deploy pointer, size, who deployed last |
-| D1 `docs`                         | the document store: `(site, collection, id) → JSON`            |
-| Durable Object `SiteRoom(<site>)` | websocket fan-out: db events, channel messages, presence       |
+| Where                             | What                                                                                                            |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| R2 `deploys/<site>/<version>/…`   | site files; one immutable prefix per deploy                                                                     |
+| R2 `uploads/<site>/<id>/<name>`   | `brisk.fs` uploads, immutable URLs                                                                              |
+| D1 `sites`                        | one row per site: live-deploy pointer, size, who deployed last                                                  |
+| D1 `deploys`                      | one row per published version: version number, size, who; pruned to the live version unless `DEPLOY_HISTORY=on` |
+| D1 `docs`                         | the document store: `(site, collection, id) → JSON`                                                             |
+| Durable Object `SiteRoom(<site>)` | websocket fan-out: db events, channel messages, presence                                                        |
 
 Nothing else persists. Deleting a site removes its row, docs, deploys, and
 uploads.

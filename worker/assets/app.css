@@ -368,8 +368,7 @@ td code {
 
 /* ---- docs ---------------------------------------------------------------------- */
 /* `.doc` is a <main>, so it inherits the 56rem page width — same as the dashboard,
-   so navigating between them doesn't shift the layout. Prose stays readable via the
-   per-element ch caps below. */
+   so navigating between them doesn't shift the layout. Prose fills that full width. */
 
 .doc h1 {
   font-size: 1.5rem;
@@ -392,12 +391,7 @@ td code {
   color: var(--accent);
 }
 
-.doc p {
-  max-width: 65ch;
-}
-
 .doc ol {
-  max-width: 65ch;
   padding-left: 1.2rem;
 }
 
@@ -447,6 +441,41 @@ td code {
   margin: 1rem 0 0;
   list-style: none;
   font-size: 0.85rem;
+}
+
+/* ---- changelog ------------------------------------------------------------------- */
+/* Generated from CHANGELOG.md by worker/scripts/build-changelog.mjs. Scoped to
+   .changelog so it can't restyle the plain lists in the docs/hosting prose that
+   share .doc. Version headings reuse `.doc h2`; the date and group labels sit
+   on top of that. */
+
+.changelog h2 .date {
+  color: var(--ink-dim);
+  font-weight: 400;
+  font-size: 0.85rem;
+  margin-left: 0.5rem;
+}
+
+.changelog h3 {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  margin: 1.5rem 0 0.5rem;
+}
+
+.changelog ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.changelog li {
+  margin: 0.35rem 0;
+}
+
+.changelog .empty {
+  color: var(--ink-dim);
 }
 
 /* ---- footer ---------------------------------------------------------------------- */

@@ -28,6 +28,8 @@ export interface Profile {
   /** Personal token from `brisk login`. Absent on AUTH=none instances. */
   token?: string;
   email?: string;
+  /** Self-asserted deploy identity sent as `x-brisk-username` (owner label). */
+  username?: string;
 }
 
 export interface GlobalConfig {
@@ -126,10 +128,37 @@ export function resolveConnection(
   return { server: 'http://localhost:8787', token: process.env.BRISK_TOKEN };
 }
 
+/**
+ * The identity a deploy asserts (`x-brisk-username`). Spoofable by design — a
+ * trust-based owner label, never a permission. Precedence:
+ *   --username flag  >  BRISK_USERNAME env  >  the resolved profile's username.
+ */
+export function resolveUsername(
+  flags: { username?: string },
+  conn: Connection,
+): string | undefined {
+  if (flags.username) return flags.username;
+  if (process.env.BRISK_USERNAME) return process.env.BRISK_USERNAME;
+  return conn.profile ? loadGlobal().profiles[conn.profile]?.username : undefined;
+}
+
 // ---- http ------------------------------------------------------------------------
 
 export function authHeaders(conn: Connection): Record<string, string> {
   return conn.token ? { authorization: `Bearer ${conn.token}` } : {};
+}
+
+/** A non-2xx response, carrying the status and parsed body so callers can react
+ *  (e.g. the 409 `owned` deploy guard). Extends Error so existing catches hold. */
+export class ApiError extends Error {
+  status: number;
+  body: unknown;
+  constructor(message: string, status: number, body: unknown) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.body = body;
+  }
 }
 
 export async function api<T>(conn: Connection, route: string, init: RequestInit = {}): Promise<T> {
@@ -138,18 +167,22 @@ export async function api<T>(conn: Connection, route: string, init: RequestInit 
     headers: { ...authHeaders(conn), ...(init.headers as Record<string, string>) },
   });
   if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    let message = body;
+    const text = await res.text().catch(() => '');
+    let body: unknown = text;
+    let message = text;
     try {
-      message = (JSON.parse(body) as { error?: string }).error ?? body;
+      body = JSON.parse(text);
+      message = (body as { error?: string }).error ?? text;
     } catch {
       /* not json */
     }
     if (res.status === 401) {
       message = `unauthenticated — run: brisk login ${conn.server}`;
     }
-    throw new Error(
+    throw new ApiError(
       `${init.method ?? 'GET'} ${route} → ${res.status}${message ? `: ${message}` : ''}`,
+      res.status,
+      body,
     );
   }
   return res.json() as Promise<T>;

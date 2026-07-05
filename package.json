@@ -19,5 +19,10 @@
   "devDependencies": {
     "prettier": "^3.5.0",
     "typescript": "^5.7.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "undici": "^7.28.0"
+    }
   }
 }

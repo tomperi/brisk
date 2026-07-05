@@ -5,6 +5,7 @@ data/
 .DS_Store
 .env
 worker/assets/brisk.js
+worker/assets/changelog.html
 .dev.vars
 .wrangler/
 .claude/worktrees/

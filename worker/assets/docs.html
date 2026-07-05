@@ -59,6 +59,7 @@
         <nav>
           <a href="/docs">docs</a>
           <a href="/host">hosting</a>
+          <a href="/changelog">changelog</a>
           <a href="https://github.com/tomperi/brisk">source</a>
           <a href="/auth/login" id="signin" hidden>sign in</a>
           <span class="whoami" id="whoami" hidden>
@@ -99,6 +100,13 @@ brisk pull some-site   # download any site's source to remix it</code></pre>
         name it, launch. Deploys are atomic: files upload to a fresh version, then the live pointer
         swaps. Site names are first come, never owned. Anyone signed in can overwrite anything,
         including this dashboard (deploy a site called <code>home</code>).
+      </p>
+      <p>
+        Every publish is a versioned snapshot. Only the current version is ever served; by default
+        the previous one is cleaned up once the pointer swaps, so storage stays bounded. The person
+        running the instance can set
+        <code>DEPLOY_HISTORY=on</code> to retain every version instead — groundwork for rollback,
+        which isn't exposed yet.
       </p>
       <p>
         <code>brisk login</code> opens the browser, finishes this instance's login, and stores a

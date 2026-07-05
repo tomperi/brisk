@@ -15,6 +15,16 @@
     "run_worker_first": true
   },
 
+  // Cloudflare Workers Builds installs deps but never runs our build, so the
+  // generated assets — the SDK at /brisk.js and the /changelog page — would be
+  // absent from the deploy. Build the whole workspace (cwd = repo root) before
+  // every `wrangler deploy`. It also runs ahead of `wrangler dev`, so local runs
+  // no longer need a manual `pnpm build` first.
+  "build": {
+    "command": "pnpm -r build",
+    "cwd": ".."
+  },
+
   "d1_databases": [
     {
       "binding": "DB",
@@ -41,11 +51,12 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SiteRoom"] }],
 
   // Instance config (BASE_HOST, AUTH, ALLOWED_EMAILS, ALLOWED_EMAIL_DOMAINS,
-  // VISIBILITY) is deliberately NOT here. It's deployment-specific, so it lives
-  // in the Cloudflare dashboard (Workers & Pages → brisk → Settings → Variables
-  // and Secrets), and in `.dev.vars` for local `wrangler dev`. Every var
-  // defaults safely in code when unset: path-only, no-auth, private. See the
-  // README ("Configuration") for the full list.
+  // VISIBILITY, DEPLOY_HISTORY) is deliberately NOT here. It's
+  // deployment-specific, so it lives in the Cloudflare dashboard (Workers &
+  // Pages → brisk → Settings → Variables and Secrets), and in `.dev.vars` for
+  // local `wrangler dev`. Every var defaults safely in code when unset:
+  // path-only, no-auth, private (DEPLOY_HISTORY off, keeping only the live
+  // version). See the README ("Configuration") for the full list.
   //
   // keep_vars stops `wrangler deploy` from deleting the vars you set in the
   // dashboard (without it, a deploy wipes any var not present in this file).

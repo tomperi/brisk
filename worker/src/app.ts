@@ -319,7 +319,25 @@ export function createApp(): Hono<AppEnv> {
       return c.json({ error: 'site too large (max 10 MB)' }, 413);
     }
 
-    const info = await deploySite(c.env, c.executionCtx, site, files, c.var.user);
+    // The self-asserted deployer identity (spoofable by design). On AUTH=none
+    // everyone is 'Dev', so ownership only has teeth on AUTH=google.
+    const who = c.req.header('x-brisk-username') || c.var.user.name || c.var.user.email;
+    const force = ['1', 'true'].includes(c.req.query('force') ?? '');
+    // A trust-based footgun guard, never a permission: deploying over someone
+    // else's site needs an explicit --force. NULL/unowned sites never block.
+    const existing = await getSite(c.env, site);
+    if (existing?.owner && existing.owner !== who && !force) {
+      return c.json(
+        {
+          error: `site "${site}" is owned by ${existing.owner} — pass --force to overwrite`,
+          code: 'owned',
+          owner: existing.owner,
+        },
+        409,
+      );
+    }
+
+    const info = await deploySite(c.env, c.executionCtx, site, files, c.var.user, who);
     return c.json({ ...info, url: siteUrl(c, site) });
   });
 

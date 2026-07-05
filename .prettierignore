@@ -2,6 +2,7 @@ node_modules/
 dist/
 .wrangler/
 worker/assets/brisk.js
+worker/assets/changelog.html
 examples/*/vendor/
 pnpm-lock.yaml
 docs/superpowers/

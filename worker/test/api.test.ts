@@ -1,7 +1,7 @@
-import { SELF } from 'cloudflare:test';
+import { SELF, createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { siteFromHost, siteUrl } from '../src/app';
-import { isValidSiteName } from '../src/sites';
+import { createApp, siteFromHost, siteUrl } from '../src/app';
+import { isValidSiteName, listDeploys } from '../src/sites';
 
 const HOST = 'http://localhost';
 
@@ -11,6 +11,24 @@ function deployForm(files: Record<string, string>): FormData {
     form.append('files', new File([content], path, { type: 'text/html' }));
   }
   return form;
+}
+
+const app = createApp();
+
+/**
+ * Deploy through the app with DEPLOY_HISTORY=on so retention is exercised; the
+ * default test env leaves it unset (off). The override keeps the same DB/R2
+ * bindings, so `listDeploys(env, site)` and `SELF.fetch` still see the rows.
+ */
+async function deployWithHistory(site: string, files: Record<string, string>): Promise<Response> {
+  const ctx = createExecutionContext();
+  const res = await app.fetch(
+    new Request(`${HOST}/api/deploy/${site}`, { method: 'POST', body: deployForm(files) }),
+    { ...env, DEPLOY_HISTORY: 'on' as const },
+    ctx,
+  );
+  await waitOnExecutionContext(ctx);
+  return res;
 }
 
 describe('site name rules', () => {
@@ -104,6 +122,68 @@ describe('deploy and serve', () => {
     expect((await SELF.fetch(`${HOST}/s/swap/old.txt`)).status).toBe(404);
   });
 
+  it('retains every publish as an immutable version, newest first', async () => {
+    // DEPLOY_HISTORY=on: both publishes are kept (this also covers the on-retains knob).
+    await deployWithHistory('ver', { 'index.html': 'first' });
+    await deployWithHistory('ver', { 'index.html': 'second' });
+
+    const deploys = await listDeploys(env, 'ver');
+    expect(deploys).toHaveLength(2);
+    expect(deploys.map((d) => d.version)).toEqual([2, 1]);
+
+    // Serving still follows the live pointer, which names the latest publish.
+    expect(await (await SELF.fetch(`${HOST}/s/ver/`)).text()).toBe('second');
+  });
+
+  it('keeps versions sequential and distinct under concurrent deploys', async () => {
+    // Only the retaining (on) path leaves all versions to inspect deterministically.
+    await Promise.all(
+      Array.from({ length: 3 }, (_, i) => deployWithHistory('race', { 'index.html': `v${i}` })),
+    );
+    // The UNIQUE(site,version) index plus the retry-on-collision insert must
+    // yield contiguous, non-duplicated versions no matter how the writes interleave.
+    const deploys = await listDeploys(env, 'race');
+    expect(deploys).toHaveLength(3);
+    expect(deploys.map((d) => d.version).sort((a, b) => a - b)).toEqual([1, 2, 3]);
+  });
+
+  it('prunes the superseded version when DEPLOY_HISTORY is off (default)', async () => {
+    await SELF.fetch(`${HOST}/api/deploy/bounded`, {
+      method: 'POST',
+      body: deployForm({ 'index.html': 'first', 'v1.txt': 'only-in-first' }),
+    });
+    await SELF.fetch(`${HOST}/api/deploy/bounded`, {
+      method: 'POST',
+      body: deployForm({ 'index.html': 'second' }),
+    });
+
+    // The superseded row is deleted synchronously, so history holds only v2.
+    const deploys = await listDeploys(env, 'bounded');
+    expect(deploys).toHaveLength(1);
+    expect(deploys[0]!.version).toBe(2);
+
+    // Serving follows the live pointer, so the first deploy's unique file is gone.
+    expect((await SELF.fetch(`${HOST}/s/bounded/v1.txt`)).status).toBe(404);
+  });
+
+  it('drops version history on delete so a re-created site restarts at version 1', async () => {
+    await SELF.fetch(`${HOST}/api/deploy/reborn`, {
+      method: 'POST',
+      body: deployForm({ 'index.html': 'first' }),
+    });
+    const del = await SELF.fetch(`${HOST}/api/sites/reborn`, { method: 'DELETE' });
+    expect(del.status).toBe(200);
+    expect(await listDeploys(env, 'reborn')).toHaveLength(0);
+
+    await SELF.fetch(`${HOST}/api/deploy/reborn`, {
+      method: 'POST',
+      body: deployForm({ 'index.html': 'again' }),
+    });
+    const deploys = await listDeploys(env, 'reborn');
+    expect(deploys).toHaveLength(1);
+    expect(deploys.map((d) => d.version)).toEqual([1]);
+  });
+
   it('rejects reserved and malformed names', async () => {
     for (const name of ['api', 'Bad.Name']) {
       const res = await SELF.fetch(`${HOST}/api/deploy/${name}`, {
@@ -142,6 +222,52 @@ describe('deploy and serve', () => {
 
     const missing = await SELF.fetch(`${HOST}/api/sites/temp`, { method: 'DELETE' });
     expect(missing.status).toBe(404);
+  });
+});
+
+describe('site ownership', () => {
+  const deployAs = (name: string, who: string | undefined, force = false) =>
+    SELF.fetch(`${HOST}/api/deploy/${name}${force ? '?force=1' : ''}`, {
+      method: 'POST',
+      headers: who ? { 'x-brisk-username': who } : {},
+      body: deployForm({ 'index.html': `<h1>${name}</h1>` }),
+    });
+
+  const ownerOf = async (name: string): Promise<string | null> =>
+    (await (await SELF.fetch(`${HOST}/api/sites/${name}`)).json<{ owner: string | null }>()).owner;
+
+  it('records the deployer as owner and guards overwrites by others', async () => {
+    // alice claims the site — she becomes its owner.
+    expect((await deployAs('own', 'alice')).status).toBe(200);
+    expect(await ownerOf('own')).toBe('alice');
+
+    // alice redeploys her own site: silent, no confirmation.
+    expect((await deployAs('own', 'alice')).status).toBe(200);
+
+    // bob can't overwrite without forcing.
+    const blocked = await deployAs('own', 'bob');
+    expect(blocked.status).toBe(409);
+    expect(await blocked.json()).toMatchObject({ code: 'owned', owner: 'alice' });
+    expect(await ownerOf('own')).toBe('alice'); // untouched
+
+    // bob forces it through; owner is set-once, so it stays alice.
+    expect((await deployAs('own', 'bob', true)).status).toBe(200);
+    expect(await ownerOf('own')).toBe('alice');
+  });
+
+  it('never blocks a deploy over an unowned (NULL-owner) site', async () => {
+    // A site from before ownership existed: owner column is NULL.
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      `INSERT INTO sites (name, active_deploy, files, bytes, created_at, updated_at, updated_by, owner)
+       VALUES ('legacy', 'seed', 1, 1, ?, ?, 'old', NULL)`,
+    )
+      .bind(now, now)
+      .run();
+
+    // Anyone may deploy over it, and a plain update never auto-claims it.
+    expect((await deployAs('legacy', 'bob')).status).toBe(200);
+    expect(await ownerOf('legacy')).toBeNull();
   });
 });
 

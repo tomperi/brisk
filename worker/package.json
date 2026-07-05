@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "build": "tsc -p tsconfig.json --noEmit",
+    "build": "node scripts/build-changelog.mjs && tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },
@@ -20,6 +20,6 @@
     "@cloudflare/workers-types": "^4.20250100.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0",
-    "wrangler": "^4.0.0"
+    "wrangler": "^4.107.0"
   }
 }

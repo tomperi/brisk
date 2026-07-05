@@ -6,6 +6,7 @@
 # Flip on real auth / public mode to exercise that behavior locally:
 # AUTH=google
 # VISIBILITY=public
+# DEPLOY_HISTORY=on                # keep every deploy (version history + rollback); unset = delete previous, bounded storage
 # BASE_HOST=                       # leave empty for /s/<site>/ URLs locally
 # ALLOWED_EMAILS=                  # exact emails, comma-separated
 # ALLOWED_EMAIL_DOMAINS=           # whole domains, comma-separated

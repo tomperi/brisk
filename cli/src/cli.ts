@@ -19,16 +19,21 @@ ${bold('Accounts')}
   brisk whoami                 who you are on the current instance
   brisk profiles               list profiles (● marks the active one)
   brisk profile use <name>     switch the active profile
+  brisk profile set-username <name>  set your deploy identity on the active profile
 
 ${bold('Options')}
   --site <name>                override the site name (default: brisk.json or folder name)
   --server <url>               target instance directly, e.g. brisk.example.com
   --profile <name>             use a specific profile for this command
-  --yes, -f                    skip the open-public-instance deploy confirmation (CI)
+  --username <name>            deploy identity / owner label (default: profile username)
+  -f, --force                  overwrite a site owned by someone else
+  -y, --yes                    confirm deploying to an open (AUTH=none) public instance
 
 ${bold('Environment')}
   BRISK_PROFILE                like --profile
   BRISK_SERVER, BRISK_TOKEN    direct server + bearer token (CI)
+  BRISK_USERNAME               like --username
+  BRISK_FORCE                  like --force (agents / CI)
   BRISK_YES                    like --yes
 `;
 
@@ -38,7 +43,9 @@ async function main(): Promise<void> {
       site: { type: 'string' },
       server: { type: 'string' },
       profile: { type: 'string' },
-      yes: { type: 'boolean', short: 'f' },
+      username: { type: 'string' },
+      force: { type: 'boolean', short: 'f' },
+      yes: { type: 'boolean', short: 'y' },
       help: { type: 'boolean', short: 'h' },
     },
     allowPositionals: true,
@@ -54,7 +61,9 @@ async function main(): Promise<void> {
     site: values.site,
     server: values.server,
     profile: values.profile,
-    yes: values.yes,
+    username: values.username,
+    force: Boolean(values.force),
+    yes: Boolean(values.yes),
   };
   switch (command) {
     case 'init':
@@ -82,8 +91,11 @@ async function main(): Promise<void> {
       return commands.profiles();
     case 'profile':
       if (args[0] === 'use' && args[1]) return commands.profileUse(args[1]);
+      if (args[0] === 'set-username' && args[1]) return commands.profileSetUsername(args[1]);
       if (args[0] === 'list' || !args[0]) return commands.profiles();
-      throw new Error('usage: brisk profile use <name> | brisk profiles');
+      throw new Error(
+        'usage: brisk profile use <name> | brisk profile set-username <name> | brisk profiles',
+      );
     default:
       console.log(`${yellow('unknown command:')} ${command}\n\n${HELP}`);
       process.exitCode = 1;

@@ -19,6 +19,13 @@ export interface Env {
    */
   VISIBILITY?: 'private' | 'public';
   /**
+   * "on" retains every deploy, so version history (and future rollback) works;
+   * unset/"off" deletes the previous deploy after each publish, keeping R2
+   * bounded. Default: off — opt in per instance. (A number could later mean
+   * keep-last-N; only "on" is honored for now.)
+   */
+  DEPLOY_HISTORY?: 'on' | 'off';
+  /**
    * Who gets through OAuth: comma-separated email domains and/or exact
    * emails. Both empty/unset = allow anyone who can complete the Google login.
    */

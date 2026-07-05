@@ -6,6 +6,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { spawn } from 'node:child_process';
 import {
+  ApiError,
   api,
   authHeaders,
   globalConfigPath,
@@ -13,6 +14,7 @@ import {
   loadGlobal,
   normalizeServer,
   resolveConnection,
+  resolveUsername,
   saveGlobal,
   type Connection,
 } from './config.js';
@@ -23,6 +25,8 @@ export interface Flags {
   site?: string;
   server?: string;
   profile?: string;
+  username?: string;
+  force?: boolean;
   yes?: boolean;
 }
 
@@ -32,6 +36,7 @@ interface SiteInfo {
   bytes: number;
   updatedAt: string;
   updatedBy: string | null;
+  owner: string | null;
   url: string;
 }
 
@@ -100,7 +105,7 @@ async function confirmOpenTarget(conn: Connection, flags: Flags): Promise<void> 
   if (flags.yes || process.env.BRISK_YES) return;
   if (!process.stdin.isTTY) {
     throw new Error(
-      'refusing to deploy to an open public instance non-interactively — pass --yes (-f) to confirm',
+      'refusing to deploy to an open public instance non-interactively — pass --yes (-y) or BRISK_YES=1 to confirm',
     );
   }
   const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
@@ -133,11 +138,20 @@ export async function init(name: string | undefined, flags: Flags): Promise<void
   console.log(`\nNext: ${bold(`brisk deploy${name ? ` ${name}` : ''}`)}`);
 }
 
-export async function deploy(dirArg: string | undefined, flags: Flags): Promise<SiteInfo> {
+export async function deploy(
+  dirArg: string | undefined,
+  flags: Flags,
+  // Invoked when a deploy overwrites someone else's site after an interactive
+  // confirm — lets `dev` make the rest of the watch session force silently.
+  onOverwrite?: () => void,
+): Promise<SiteInfo | undefined> {
   const dir = path.resolve(dirArg ?? '.');
   const site = resolveSite(dir, flags);
   const conn = resolveConnection(flags, dir);
+  // Open-instance gate first (are we shipping to a public AUTH=none host?),
+  // independent of the ownership overwrite gate below.
   await confirmOpenTarget(conn, flags);
+  const username = resolveUsername(flags, conn);
 
   const files = await collectFiles(dir);
   if (!files.length) throw new Error(`nothing to deploy in ${dir}`);
@@ -147,26 +161,83 @@ export async function deploy(dirArg: string | undefined, flags: Flags): Promise<
     form.append('files', new File([await fsp.readFile(abs)], rel));
   }
 
-  const started = Date.now();
-  const spin = spinner(`Deploying ${bold(site)}…`);
-  let info: SiteInfo;
+  const headers: Record<string, string> = username ? { 'x-brisk-username': username } : {};
+
+  const send = async (force: boolean): Promise<SiteInfo> => {
+    const started = Date.now();
+    const spin = spinner(`Deploying ${bold(site)}…`);
+    let info: SiteInfo;
+    try {
+      info = await api<SiteInfo>(conn, `/api/deploy/${site}${force ? '?force=1' : ''}`, {
+        method: 'POST',
+        body: form,
+        headers,
+      });
+    } finally {
+      spin.stop();
+    }
+    console.log(
+      `${green('✓')} ${bold(site)} ${dim(`· ${info.files} ${info.files === 1 ? 'file' : 'files'} · ${humanBytes(info.bytes)} · ${Date.now() - started}ms`)}`,
+    );
+    console.log(`  ${cyan(info.url)}`);
+    return info;
+  };
+
+  const forced = Boolean(flags.force) || ['1', 'true'].includes(process.env.BRISK_FORCE ?? '');
   try {
-    info = await api<SiteInfo>(conn, `/api/deploy/${site}`, { method: 'POST', body: form });
-  } finally {
-    spin.stop();
+    return await send(forced);
+  } catch (err) {
+    const owner = err instanceof ApiError && err.status === 409 ? ownedBy(err.body) : null;
+    if (owner === null) throw err;
+    // Deploying over someone else's site: confirm interactively, but never read
+    // stdin when it isn't a TTY — an agent or CI job must not hang on a prompt.
+    if (process.stdin.isTTY && process.stdout.isTTY) {
+      const ok = await confirm(`site "${site}" is owned by ${owner}. overwrite? [y/N] `);
+      if (ok) {
+        onOverwrite?.();
+        return await send(true);
+      }
+      console.log(dim('aborted — nothing deployed'));
+      return undefined;
+    }
+    throw new Error(
+      `site "${site}" is owned by ${owner}; pass --force (or BRISK_FORCE=1) to overwrite`,
+    );
   }
-  console.log(
-    `${green('✓')} ${bold(site)} ${dim(`· ${info.files} ${info.files === 1 ? 'file' : 'files'} · ${humanBytes(info.bytes)} · ${Date.now() - started}ms`)}`,
+}
+
+/** The owner named by a 409 `owned` deploy response, or null for anything else. */
+function ownedBy(body: unknown): string | null {
+  if (body && typeof body === 'object' && (body as { code?: unknown }).code === 'owned') {
+    const owner = (body as { owner?: unknown }).owner;
+    return typeof owner === 'string' ? owner : 'someone else';
+  }
+  return null;
+}
+
+/** Single yes/no prompt on the TTY. Only `y`/`yes` (any case) confirm. */
+function confirm(question: string): Promise<boolean> {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) =>
+    rl.question(question, (answer) => {
+      rl.close();
+      resolve(/^y(es)?$/i.test(answer.trim()));
+    }),
   );
-  console.log(`  ${cyan(info.url)}`);
-  return info;
 }
 
 /** Deploy on every save — the whole "dev server" Brisk needs. */
 export async function dev(dirArg: string | undefined, flags: Flags): Promise<void> {
   const dir = path.resolve(dirArg ?? '.');
-  await deploy(dirArg, flags);
-  flags = { ...flags, yes: true }; // confirmed once; don't re-prompt on every save
+  // Owner is set-once, so overwriting another owner's site would re-prompt on
+  // every save. Confirm (or --force) once, then force the rest of the session.
+  let force = Boolean(flags.force) || ['1', 'true'].includes(process.env.BRISK_FORCE ?? '');
+  const stick = (): void => {
+    force = true;
+  };
+  await deploy(dirArg, { ...flags, force }, stick);
+  // The open-instance confirm likewise happens once; skip it on every re-deploy.
+  flags = { ...flags, yes: true };
   console.log(dim('\nwatching for changes — ctrl-c to stop'));
 
   let timer: NodeJS.Timeout | null = null;
@@ -180,7 +251,7 @@ export async function dev(dirArg: string | undefined, flags: Flags): Promise<voi
     }
     deploying = true;
     try {
-      await deploy(dirArg, flags);
+      await deploy(dirArg, { ...flags, force }, stick);
     } catch (err) {
       console.error(yellow(`deploy failed: ${(err as Error).message}`));
     } finally {
@@ -332,6 +403,8 @@ export async function whoami(flags: Flags): Promise<void> {
   const me = await api<{ email: string; name: string }>(conn, '/api/me');
   const via = conn.profile ? `profile ${bold(conn.profile)}` : dim('(no profile)');
   console.log(`${me.name} ${dim(`<${me.email}>`)} on ${cyan(conn.server)} via ${via}`);
+  const username = resolveUsername(flags, conn);
+  if (username) console.log(dim(`deploy username: ${username}`));
 }
 
 export function profiles(): void {
@@ -362,4 +435,15 @@ export function profileUse(name: string): void {
   console.log(
     `${green('✓')} active profile: ${bold(name)} ${dim(`(${cfg.profiles[name]!.server})`)}`,
   );
+}
+
+/** The deploy identity ships as a per-profile label, so it follows the instance
+ *  you're pointed at. Sets it on the active profile. */
+export function profileSetUsername(name: string): void {
+  const cfg = loadGlobal();
+  const active = cfg.current ? cfg.profiles[cfg.current] : undefined;
+  if (!active) throw new Error('no active profile — run `brisk login` first');
+  active.username = name;
+  saveGlobal(cfg);
+  console.log(`${green('✓')} deploy username on ${bold(cfg.current!)} → ${bold(name)}`);
 }
