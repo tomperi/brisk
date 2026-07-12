@@ -208,7 +208,7 @@ At minimum:
 - Snapshot the volume on a schedule (VolumeSnapshot, or your cloud's disk
   snapshots).
 - To back up while running, copy the DB with `sqlite3 /data/brisk.sqlite ".backup
-  /tmp/brisk.bak"` (safe against a live writer — plain `cp` of a WAL database is
+/tmp/brisk.bak"` (safe against a live writer — plain `cp` of a WAL database is
   not) and archive `/data/objects` alongside it.
 
 `storage=s3` moves the objects out of the volume, which shrinks the blast radius
