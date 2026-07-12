@@ -79,6 +79,29 @@ resources:
 
 podSecurityContext:
   fsGroup: 1000 # node user — lets the pod write the PVC
+  # Only chown the volume when its root isn't already group-owned. The default
+  # (Always) recursively chowns every file on every pod start — and this volume
+  # holds the object store, so that walk grows with each site you deploy until it
+  # starts eating into the readiness window.
+  fsGroupChangePolicy: OnRootMismatch
+
+# Deny egress to the cluster's own network. Brisk hosts arbitrary uploaded
+# content and proxies AI calls, so a deployed site is untrusted code with a
+# network; this stops it reaching other pods or the node's metadata endpoint
+# (IMDS) while still allowing DNS and the public internet. Off by default
+# because it is only meaningful on a CNI that enforces NetworkPolicy — and
+# because it would block an S3 endpoint that lives *inside* the cluster (an
+# in-cluster MinIO); see README → Locking down egress.
+networkPolicy:
+  enabled: false
+  # Ranges Brisk may not open connections to. RFC1918 is where other pods live;
+  # 169.254.0.0/16 is link-local, which on AWS is the IMDS credential endpoint.
+  denyCIDRs:
+    - 10.0.0.0/8
+    - 172.16.0.0/12
+    - 192.168.0.0/16
+    - 169.254.0.0/16
+
 nodeSelector: {}
 tolerations: []
 affinity: {}

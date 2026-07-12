@@ -130,6 +130,12 @@ the old pod is torn down before the new one starts (a few seconds of downtime on
 upgrade). Scaling beyond one replica needs a Redis backplane for `Rooms`, which
 is a later opt-in; do not raise `replicaCount` until then.
 
+The chart refuses to render with `replicaCount > 1` rather than trusting you to
+read this. A second pod would not fail loudly — it would come up healthy, serve
+its own in-process rooms (so two users on different pods silently stop seeing
+each other's messages, presence, and db events) and, on `storage=s3`, open its
+own SQLite file. A template error beats discovering that in production.
+
 ### Storage: filesystem vs S3
 
 - `config.storage=fs` (default): SQLite **and** the deployed objects live under
@@ -168,3 +174,43 @@ and Kubernetes treats 3xx as healthy. Probing `/` instead would crash-loop under
 `Sec-Fetch-Dest: document` or an `Accept: text/html`), and a kube-probe sends
 neither, so it gets a `401` — a probe failure. Keep the default unless you run
 `AUTH=none`, where `/` returns `200`.
+
+### Locking down egress
+
+Brisk serves folders that other people dropped on it and proxies AI calls for
+them, so the pod is best treated as untrusted code that happens to have a
+network. `networkPolicy.enabled=true` emits an **egress-only** NetworkPolicy that
+allows DNS and the public internet (so `brisk.ai` still works) and denies the
+RFC1918 ranges where the rest of your cluster lives, plus `169.254.0.0/16` — the
+link-local range that on AWS is the IMDS credential endpoint. Ingress is left
+alone, so the ingress controller and kube-probes still reach the pod.
+
+It is off by default: it does nothing on a CNI that doesn't enforce
+NetworkPolicy, and it would **block an S3 endpoint that lives inside the
+cluster** — if you run `storage=s3` against an in-cluster MinIO, either leave
+this off or drop that range from `networkPolicy.denyCIDRs`. Same if you move AI
+to a provider reached over link-local metadata credentials (e.g. Bedrock via
+IRSA): remove `169.254.0.0/16` or the credential fetch fails.
+
+### Backups
+
+**The volume is the database.** SQLite (`/data/brisk.sqlite`) holds every site
+record, and under `storage=fs` `/data/objects` holds every file of every
+deployed site. Nothing here replicates it and the chart ships no backup job — if
+that PVC is lost, every site is lost. SQLite runs in WAL mode, so it survives a
+crash; it does not survive a deleted volume.
+
+At minimum:
+
+- Use a StorageClass with `reclaimPolicy: Retain`, so deleting the PVC (or the
+  Helm release) doesn't take the underlying disk with it. A `Delete` policy —
+  the default on many clusters — makes `helm uninstall` unrecoverable.
+- Snapshot the volume on a schedule (VolumeSnapshot, or your cloud's disk
+  snapshots).
+- To back up while running, copy the DB with `sqlite3 /data/brisk.sqlite ".backup
+  /tmp/brisk.bak"` (safe against a live writer — plain `cp` of a WAL database is
+  not) and archive `/data/objects` alongside it.
+
+`storage=s3` moves the objects out of the volume, which shrinks the blast radius
+to SQLite alone — but SQLite is still the index that maps sites to those objects,
+so it still needs backing up.

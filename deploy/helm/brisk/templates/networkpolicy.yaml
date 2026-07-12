@@ -1,0 +1,35 @@
+{{- if .Values.networkPolicy.enabled }}
+# Egress lock. Brisk's whole job is serving folders that someone else dropped on
+# it, and it proxies AI calls on their behalf — so treat the pod as untrusted
+# code that happens to have a network. This confines outbound traffic to DNS and
+# the public internet, and denies the ranges where the rest of the cluster lives
+# (RFC1918) plus link-local (169.254.0.0/16 — the IMDS credential endpoint on AWS).
+#
+# Egress only: ingress is deliberately unrestricted, so the Ingress controller and
+# kubelet probes still reach the pod, and replies on inbound connections are
+# unaffected. Needs a CNI that enforces NetworkPolicy; on one that doesn't, this
+# object is silently inert.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "brisk.fullname" . }}-egress
+  labels:
+    {{- include "brisk.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "brisk.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    # DNS gets its own rule: CoreDNS's ClusterIP sits inside the denied range
+    # below, so folding it into the ipBlock would break name resolution.
+    - ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              {{- toYaml .Values.networkPolicy.denyCIDRs | nindent 14 }}
+{{- end }}

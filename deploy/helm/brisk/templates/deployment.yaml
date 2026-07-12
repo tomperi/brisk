@@ -1,3 +1,6 @@
+{{- if gt (int .Values.replicaCount) 1 }}
+{{- fail "replicaCount must be 1: rooms are in-process, so a second pod gets its own realtime (channels, presence, db events silently stop crossing pods) and its own SQLite. Scaling out needs a shared backplane, which Brisk doesn't ship yet." }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -6,6 +9,7 @@ metadata:
     {{- include "brisk.labels" . | nindent 4 }}
 spec:
   # Single replica: realtime is in-process. >1 needs the Redis backplane (Phase 6).
+  # Enforced above — a silent split-brain is worse than a failed render.
   replicas: {{ .Values.replicaCount }}
   strategy:
     type: Recreate # RWO PVC can't be mounted by two pods during a rollout
