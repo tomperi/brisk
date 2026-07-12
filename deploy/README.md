@@ -207,9 +207,14 @@ At minimum:
   the default on many clusters — makes `helm uninstall` unrecoverable.
 - Snapshot the volume on a schedule (VolumeSnapshot, or your cloud's disk
   snapshots).
-- To back up while running, copy the DB with `sqlite3 /data/brisk.sqlite ".backup
-/tmp/brisk.bak"` (safe against a live writer — plain `cp` of a WAL database is
-  not) and archive `/data/objects` alongside it.
+- To back up a running instance, take the DB with SQLite's own backup command and
+  archive `/data/objects` alongside it. A plain `cp` of a live WAL database can
+  copy a torn page; `.backup` can't.
+
+```sh
+kubectl exec deploy/brisk -- sqlite3 /data/brisk.sqlite ".backup /tmp/brisk.bak"
+kubectl cp brisk-<pod>:/tmp/brisk.bak ./brisk.bak
+```
 
 `storage=s3` moves the objects out of the volume, which shrinks the blast radius
 to SQLite alone — but SQLite is still the index that maps sites to those objects,
