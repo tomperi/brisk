@@ -1,6 +1,6 @@
 {
   "name": "@usebrisk/worker",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "The Brisk worker: static hosting plus a zero-config backend API, all on Cloudflare.",
   "license": "MIT",
   "type": "module",

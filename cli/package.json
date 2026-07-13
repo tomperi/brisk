@@ -1,6 +1,6 @@
 {
   "name": "@usebrisk/cli",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "The brisk CLI: init, deploy, dev, list, open, pull.",
   "engines": {
     "node": ">=20.12"

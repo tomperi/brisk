@@ -2,6 +2,8 @@
 
 **Drop a folder, get a site.**
 
+![Deploying to Brisk: dragging a folder onto the dashboard names the site, records who shipped it, and puts it live at my-site.usebrisk.dev — or do the same from the terminal with the brisk CLI.](docs/media/brisk-launch.gif)
+
 Brisk is an open-source internal hosting platform inspired by Shopify's
 [Quick](https://shopify.engineering/quick). Anyone on your team can upload a
 folder of HTML and get a live URL in seconds, plus a zero-config browser API
@@ -21,9 +23,13 @@ for the things every little site eventually wants:
 </script>
 ```
 
-No frameworks, no deploy pipelines, no config files, no permissions. It runs
-entirely on Cloudflare (one Worker + R2 + D1 + Durable Objects) and costs
-[approximately nothing](#cost).
+No frameworks, no deploy pipelines, no config files, no permissions.
+
+It runs two ways from the same code: on **Cloudflare** (one Worker + R2 + D1 +
+Durable Objects), which costs [approximately nothing](#cost), or
+**[self-hosted](#self-hosting-docker-compose-kubernetes)** on any Node box —
+Docker, Compose, or Kubernetes — with SQLite plus a disk or an S3 bucket. Same
+folder, same six APIs, no code changes.
 
 **What you get:**
 
@@ -241,6 +247,45 @@ requests:
 Also leave `DEPLOY_TOKEN` unset unless you have CI — an unset secret means
 that authentication path simply doesn't exist.
 
+## Self-hosting (Docker, Compose, Kubernetes)
+
+Cloudflare is the reference target, not a requirement. The same Hono core runs
+as a plain Node server, with the platform's seams — storage, database, rooms,
+assets, cache — bound to SQLite, the filesystem or S3, and in-process
+websockets instead. Nothing above the seam knows which one it's on, so the SDK,
+the dashboard, and every deployed site behave identically.
+
+The fastest way in is the wizard, which asks four questions and writes the
+config for whichever target you picked:
+
+![npm create brisk: the wizard asks where Brisk will run, which auth mode, an allowed Google email domain, and a storage backend — then writes docker-compose.yml and .env.](docs/media/create-brisk.gif)
+
+```sh
+npm create brisk
+```
+
+Or go straight to the artifacts in [`deploy/`](deploy):
+
+```sh
+# a single VM
+cp deploy/.env.example deploy/.env      # set AUTH, BASE_HOST, secrets…
+docker compose -f deploy/docker-compose.yml up -d
+
+# Kubernetes
+helm install brisk deploy/helm/brisk \
+  --set config.baseHost=brisk.example.com \
+  --set config.auth=google \
+  --set secrets.sessionSecret=$(openssl rand -hex 32)
+```
+
+Storage is filesystem-plus-SQLite on one volume by default (no external
+services); set `config.storage=s3` to put objects in any S3-compatible bucket.
+Realtime lives in-process, so the chart pins a single replica and refuses to
+render with more — a second pod would come up healthy and silently serve its
+own rooms. [`deploy/README.md`](deploy/README.md) has the full environment
+variable reference, the egress lock, and the backup story (**the volume is the
+database** — nothing here replicates it for you).
+
 ## Cost
 
 Brisk is built to live inside Cloudflare's free tier. At personal or small-team
@@ -324,7 +369,8 @@ to another, purely as a convenience (it's all one happy trust bubble).
 
 ## Architecture
 
-The whole platform is one Worker and four Cloudflare primitives:
+The whole platform is one app behind six seams. On Cloudflare those seams are
+a Worker and four Cloudflare primitives:
 
 ![Brisk architecture: site subdomains pass through optional Google OAuth into one Cloudflare Worker, which serves static files from R2 and routes /api/* to D1, R2, Durable Objects, the AI proxy, identity, and hosting.](worker/assets/architecture.png)
 
@@ -349,6 +395,13 @@ brisk.example.com ─────┘    │
 - **Identity is platform-level**: Google OAuth on the apex, JWT session cookie
   scoped to the parent domain, every request arrives pre-authenticated — the
   same trick as putting a VM behind an identity-aware proxy.
+- **The runtime is a seam, not an assumption.** Storage, database, rooms,
+  assets, cache, and background work each sit behind an interface
+  ([`worker/src/platform`](worker/src/platform)); the core imports the
+  interface, never a vendor. The Cloudflare assembly binds them to R2, D1, and
+  Durable Objects; the Node assembly binds them to S3-or-disk, SQLite, and
+  in-process websockets. The same integration suite runs against both, so
+  "works on Cloudflare" and "works self-hosted" are the same claim.
 
 ### Request flow
 
@@ -395,13 +448,15 @@ Stolen proudly from Quick:
 ```sh
 pnpm install
 pnpm build          # sdk → worker assets, cli → dist
-pnpm test           # worker integration tests (vitest + workers pool)
-pnpm typecheck
+pnpm test           # every package: worker (workers pool + Node parity), create-brisk
+pnpm typecheck      # both runtimes — the workers and Node tsconfigs
 pnpm format
 ```
 
-The repo is a pnpm workspace: [`worker/`](worker) (the platform),
-[`sdk/`](sdk) (browser client served at `/brisk.js`), [`cli/`](cli), and
+The repo is a pnpm workspace: [`worker/`](worker) (the platform — both
+assemblies), [`sdk/`](sdk) (browser client served at `/brisk.js`),
+[`cli/`](cli), [`create-brisk/`](create-brisk) (the `npm create brisk`
+wizard), [`deploy/`](deploy) (Dockerfile, Compose stack, Helm chart), and
 [`examples/`](examples).
 
 ### Releasing

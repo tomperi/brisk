@@ -8,6 +8,8 @@ releases are published to
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-13
+
 ### Added
 
 - A provider-agnostic platform abstraction (storage, database, rooms, assets,
@@ -121,6 +123,7 @@ releases are published to
 - `@usebrisk/cli` and `@usebrisk/sdk` published to npm, cut in lockstep by a
   tag-driven release workflow.
 
-[unreleased]: https://github.com/tomperi/brisk/compare/v0.2.0...HEAD
+[unreleased]: https://github.com/tomperi/brisk/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/tomperi/brisk/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/tomperi/brisk/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/tomperi/brisk/releases/tag/v0.1.0

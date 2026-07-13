@@ -1,7 +1,7 @@
 {
   "name": "brisk",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Drop a folder, get a site. An open-source internal hosting platform with a zero-config backend API.",
   "license": "MIT",
   "engines": {

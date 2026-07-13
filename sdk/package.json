@@ -1,6 +1,6 @@
 {
   "name": "@usebrisk/sdk",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "The zero-config browser SDK every Brisk site gets at /brisk.js.",
   "license": "MIT",
   "type": "module",
