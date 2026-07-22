@@ -59,7 +59,7 @@ function visitorAllowed(method: string, pathname: string): boolean {
   if (method !== 'GET' && method !== 'HEAD') return false;
   if (pathname === '/api/sites') return true;
   if (pathname.startsWith('/api/') || pathname.startsWith('/files/')) return false;
-  if (pathname.startsWith('/auth/')) return false;
+  if (pathname.startsWith('/auth/') || pathname.startsWith('/_plugins/')) return false;
   return true; // static site files, dashboard assets, /brisk.js, /docs
 }
 

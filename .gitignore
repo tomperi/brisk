@@ -6,6 +6,7 @@ data/
 .env
 worker/assets/brisk.js
 worker/assets/changelog.html
+worker/assets/plugins/
 .dev.vars
 .wrangler/
 .brisk-dev/

@@ -86,4 +86,7 @@ room.on('presence', (members) => {});                 // fires on join/leave
 - All \`brisk.*\` calls require a signed-in viewer. On public (view-only)
   instances, signed-out visitors get 401s — degrade gracefully if this site
   will be demoed publicly.
+- Plugins add optional features per site via \`brisk.json\` \`"plugins"\` (e.g.
+  \`"plugins": { "comments": false }\` to opt out). Comments is on by default —
+  teammates can leave feedback on any element. See \`brisk plugin --help\`.
 `;

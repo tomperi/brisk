@@ -38,6 +38,7 @@ interface SiteInfo {
   updatedBy: string | null;
   owner: string | null;
   url: string;
+  plugins: string[];
 }
 
 const SKIP = new Set(['.git', 'node_modules', '.DS_Store', 'brisk.json']);
@@ -161,7 +162,11 @@ export async function deploy(
     form.append('files', new File([await fsp.readFile(abs)], rel));
   }
 
-  const headers: Record<string, string> = username ? { 'x-brisk-username': username } : {};
+  const requested = loadConfig(dir).plugins;
+  const headers: Record<string, string> = {
+    ...(username ? { 'x-brisk-username': username } : {}),
+    ...(requested ? { 'x-brisk-plugins': JSON.stringify(requested) } : {}),
+  };
 
   const send = async (force: boolean): Promise<SiteInfo> => {
     const started = Date.now();
@@ -180,6 +185,9 @@ export async function deploy(
       `${green('✓')} ${bold(site)} ${dim(`· ${info.files} ${info.files === 1 ? 'file' : 'files'} · ${humanBytes(info.bytes)} · ${Date.now() - started}ms`)}`,
     );
     console.log(`  ${cyan(info.url)}`);
+    if (info.plugins.length) {
+      console.log(`  ${dim(`plugins: ${info.plugins.map((p) => `${p} ✓`).join('  ')}`)}`);
+    }
     return info;
   };
 
@@ -446,4 +454,139 @@ export function profileSetUsername(name: string): void {
   active.username = name;
   saveGlobal(cfg);
   console.log(`${green('✓')} deploy username on ${bold(cfg.current!)} → ${bold(name)}`);
+}
+
+// ---- plugins ----------------------------------------------------------------
+
+interface PluginSummary {
+  id: string;
+  name: string;
+  description: string;
+  requirement: string;
+}
+interface ActionManifest {
+  summary: string;
+  args: { name: string; required?: boolean; help?: string }[];
+  render: 'table' | 'markdown' | 'json' | 'text';
+  columns?: string[];
+}
+interface PluginManifest {
+  id: string;
+  name: string;
+  description: string;
+  requirement: string;
+  actions: Record<string, ActionManifest>;
+}
+
+/**
+ * The one CLI command that knows nothing about any specific plugin: it reads
+ * each plugin's manifest from the server and dispatches actions generically, so
+ * a fork can add plugins without touching the CLI. Args are scanned by hand (not
+ * parseArgs) so free-text values that begin with '-' pass through as positionals.
+ */
+export async function plugin(argv: string[]): Promise<void> {
+  const flags: { server?: string; profile?: string } = {};
+  const positionals: string[] = [];
+  let help = false;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]!;
+    if (a === '--server') flags.server = argv[++i];
+    else if (a === '--profile') flags.profile = argv[++i];
+    else if (a === '--site' || a === '--username')
+      i++; // global flags irrelevant here
+    else if (a === '-h' || a === '--help') help = true;
+    else if (a === '--') {
+      positionals.push(...argv.slice(i + 1));
+      break;
+    } else positionals.push(a);
+  }
+  const conn = resolveConnection(flags, process.cwd());
+  const [id, action, ...rest] = positionals;
+
+  if (!id || id === 'list') {
+    const { plugins } = await api<{ plugins: PluginSummary[] }>(conn, '/api/plugins');
+    if (!plugins.length) {
+      console.log(`No plugins installed on ${cyan(conn.server)}.`);
+      return;
+    }
+    const width = Math.max(...plugins.map((p) => p.id.length)) + 2;
+    for (const p of plugins) {
+      console.log(`${bold(p.id.padEnd(width))}${dim(p.requirement.padEnd(11))}${p.description}`);
+    }
+    console.log(dim(`\nrun: brisk plugin <id> --help`));
+    return;
+  }
+
+  const manifest = await api<PluginManifest>(conn, `/api/plugins/${id}`);
+
+  if (!action || help) {
+    printPluginHelp(manifest);
+    return;
+  }
+
+  const act = manifest.actions[action];
+  if (!act) {
+    console.log(`${yellow('unknown action:')} ${action}`);
+    printPluginHelp(manifest);
+    process.exitCode = 1;
+    return;
+  }
+
+  const named: Record<string, string> = {};
+  act.args.forEach((spec, i) => {
+    if (rest[i] !== undefined) named[spec.name] = rest[i]!;
+  });
+  for (const spec of act.args) {
+    if (spec.required && !(spec.name in named)) {
+      throw new Error(`missing argument: ${spec.name}\n  ${usageLine(id, action, act)}`);
+    }
+  }
+
+  const { result } = await api<{ result: unknown }>(conn, `/api/plugins/${id}/actions/${action}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ args: named }),
+  });
+  renderResult(act, result);
+}
+
+function usageLine(id: string, action: string, act: ActionManifest): string {
+  const args = act.args.map((a) => (a.required ? `<${a.name}>` : `[${a.name}]`)).join(' ');
+  return `brisk plugin ${id} ${action} ${args}`.trimEnd();
+}
+
+function printPluginHelp(manifest: PluginManifest): void {
+  console.log(`${bold(manifest.id)} — ${manifest.description}\n`);
+  const names = Object.keys(manifest.actions);
+  const width = Math.max(...names.map((n) => n.length)) + 2;
+  for (const [name, act] of Object.entries(manifest.actions)) {
+    console.log(`  ${bold(name.padEnd(width))}${act.summary}`);
+    console.log(`  ${' '.repeat(width)}${dim(usageLine(manifest.id, name, act))}`);
+  }
+}
+
+function renderResult(act: ActionManifest, result: unknown): void {
+  if (act.render === 'table' && Array.isArray(result)) {
+    printTable(act.columns ?? [], result as Record<string, unknown>[]);
+    return;
+  }
+  if (act.render === 'markdown' || act.render === 'text') {
+    console.log(String(result ?? ''));
+    return;
+  }
+  console.log(JSON.stringify(result, null, 2));
+}
+
+function printTable(columns: string[], rows: Record<string, unknown>[]): void {
+  if (!rows.length) {
+    console.log(dim('(none)'));
+    return;
+  }
+  const widths = columns.map((col) =>
+    Math.max(col.length, ...rows.map((r) => String(r[col] ?? '').length)),
+  );
+  console.log(dim(columns.map((c, i) => c.padEnd(widths[i]!)).join('  ')));
+  for (const row of rows) {
+    console.log(columns.map((c, i) => String(row[c] ?? '').padEnd(widths[i]!)).join('  '));
+  }
 }

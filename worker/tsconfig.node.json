@@ -8,5 +8,10 @@
     "noEmit": true
   },
   "include": ["src/**/*.ts", "test/**/*.node.test.ts", "test/parity/**/*.ts"],
-  "exclude": ["src/room.ts", "src/index.cf.ts", "src/platform/cloudflare"]
+  "exclude": [
+    "src/room.ts",
+    "src/index.cf.ts",
+    "src/platform/cloudflare",
+    "src/plugins/**/widget.ts"
+  ]
 }

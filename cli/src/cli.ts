@@ -21,6 +21,11 @@ ${bold('Accounts')}
   brisk profile use <name>     switch the active profile
   brisk profile set-username <name>  set your deploy identity on the active profile
 
+${bold('Plugins')}
+  brisk plugin list                    installed plugins on the instance
+  brisk plugin <id> --help             a plugin's actions (loaded from the server)
+  brisk plugin <id> <action> [args…]   run an action, e.g. brisk plugin comments list <site>
+
 ${bold('Options')}
   --site <name>                override the site name (default: brisk.json or folder name)
   --server <url>               target instance directly, e.g. brisk.example.com
@@ -38,6 +43,20 @@ ${bold('Environment')}
 `;
 
 async function main(): Promise<void> {
+  // `plugin` action args can be arbitrary free text (comment bodies, dashes),
+  // which the strict global parseArgs would reject. Intercept it here — skipping
+  // any leading global flags to find the command — and let commands.plugin do
+  // its own lenient parsing. Leading --server/--profile pass through to it.
+  const raw = process.argv.slice(2);
+  const valueFlags = new Set(['--server', '--profile', '--site', '--username']);
+  let pi = 0;
+  while (pi < raw.length && raw[pi]!.startsWith('-')) {
+    pi += valueFlags.has(raw[pi]!) ? 2 : 1;
+  }
+  if (raw[pi] === 'plugin') {
+    return commands.plugin([...raw.slice(0, pi), ...raw.slice(pi + 1)]);
+  }
+
   const { values, positionals } = parseArgs({
     options: {
       site: { type: 'string' },
