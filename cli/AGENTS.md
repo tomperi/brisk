@@ -20,6 +20,11 @@ then run as `node cli/dist/cli.js …`.
   teaches coding agents the `brisk.*` API inside every initialized site
   folder. Any SDK surface change must be reflected there (and in
   `worker/assets/docs.html` and `skills/brisk/references/sdk.md`).
+- **`brisk plugin` is generic — no per-plugin code.** It reads each plugin's
+  action manifest from the server (`/api/plugins[/:id]`) and dispatches
+  actions by name, so a fork adds plugins without touching the CLI. It's
+  intercepted in `cli.ts` before the strict global `parseArgs` (action args can
+  be arbitrary free text) and parses its own argv in `commands.plugin`.
 - **Connection resolution lives in one place** (`resolveConnection` in
   `config.ts`): `--profile`/`BRISK_PROFILE` > `--server`/`BRISK_SERVER` >
   `brisk.json` `server` > active profile > localhost. When a server is given

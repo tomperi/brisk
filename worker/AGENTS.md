@@ -13,7 +13,8 @@ router, dashboard. Request flow and storage layout: README → Architecture.
 | `src/room.ts`  | `SiteRoom` Durable Object: db events, channels, presence ([protocol](../docs/realtime-protocol.md)) |
 | `src/auth.ts`  | Google OAuth, session cookies, dev identity, personal CLI tokens (`/auth/cli`) + CI deploy token    |
 | `src/ai.ts`    | Anthropic/OpenAI proxy; provider picked by configured key                                           |
-| `assets/`      | The dashboard (the built-in `home` site) + generated `brisk.js`                                     |
+| `src/plugins/` | Curated, forkable plugin layer (registry, `/api/plugins`, HTML injection) + the `comments` plugin   |
+| `assets/`      | The dashboard (the built-in `home` site) + generated `brisk.js` + built plugin widgets (`plugins/`) |
 | `migrations/`  | D1 schema; add new numbered files, never edit applied ones                                          |
 
 ## Two assemblies, one core

@@ -367,6 +367,41 @@ Full reference lives on your instance at `/docs`. The shape of it:
 Everything is namespaced per site. Docs and channels of one site are invisible
 to another, purely as a convenience (it's all one happy trust bubble).
 
+## Plugins
+
+Brisk ships a small, curated set of **plugins** — first-party features any site
+can switch on, injected into its pages automatically. They're a platform layer,
+not a seventh primitive: sites _consume_ them, and you can't upload your own
+(that would be the "custom backend" Brisk exists to avoid). Extending the set is
+a _fork_ concern — a new directory under `worker/src/plugins/` and one registry
+line lights it up everywhere, including a `brisk plugin` CLI verb, with no
+changes to the worker core or the CLI.
+
+Sites opt in via `brisk.json`; each plugin is `mandatory`, on-by-`default`, or
+`optional`:
+
+```json
+{ "name": "my-site", "plugins": { "comments": false } }
+```
+
+**The comments plugin** (on by default) is `html-grab` made native: click any
+element, leave a note. Comments start as **local drafts** (localStorage — copy
+them as markdown to hand an agent, zero server writes), and you **publish** when
+you want to share. Published comments are teammate-visible with realtime updates
+and an append-only audit trail, and they're reachable from the CLI so an agent
+can close the loop:
+
+```sh
+brisk plugin comments list   my-site        # open feedback, as a table
+brisk plugin comments export my-site        # markdown an agent can act on
+brisk plugin comments reply  my-site <id> "fixed — sentence-cased the heading"
+brisk plugin comments resolve my-site <id>
+```
+
+The widget minimizes to a corner bubble you click to reopen; `Shift+C` fully
+hides it. `brisk plugin list` shows what's installed; `brisk plugin <id> --help`
+lists a plugin's verbs, loaded live from the server.
+
 ## Architecture
 
 The whole platform is one app behind six seams. On Cloudflare those seams are

@@ -8,6 +8,19 @@ releases are published to
 
 ## [Unreleased]
 
+### Added
+
+- **Plugins** — a curated, forkable layer of first-party features a site opts
+  into (`brisk.json` `"plugins": { … }`), injected into served pages and driven
+  from a generic `brisk plugin` CLI whose verbs load from the server. Adding a
+  plugin in a fork is one directory under `worker/src/plugins/` plus a registry
+  line — no worker-core or CLI changes.
+- **Comments plugin** (on by default) — leave feedback on any element. Drafts
+  are local-first (localStorage; `copy as markdown` to hand an agent), publish
+  to share via `brisk.db` with realtime + an append-only audit trail. Resolve,
+  reply, and soft-delete from the widget or the CLI (`brisk plugin comments …`).
+  Minimize it to a corner bubble (click to reopen); `Shift+C` fully hides it.
+
 ## [0.3.0] - 2026-07-13
 
 ### Added
