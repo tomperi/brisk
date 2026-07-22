@@ -4,6 +4,12 @@ import type { DbEvent, Platform } from '../platform/types';
 export type PluginRequirement = 'mandatory' | 'default' | 'optional';
 export type RenderHint = 'table' | 'markdown' | 'json' | 'text';
 
+/** Every plugin's db collections live under this reserved namespace (e.g.
+ *  `_plugin:comments`). The generic db API refuses direct writes to it — a
+ *  plugin reaches its own collections through its action handlers, which
+ *  server-stamp authorship and keep the audit trail append-only. */
+export const PLUGIN_COLLECTION_PREFIX = '_plugin:';
+
 export interface ActionArg {
   name: string;
   required?: boolean;

@@ -1,13 +1,17 @@
 import { DocStore, type Doc } from '../../docs';
 import type { User } from '../../env';
-import type { Plugin, PluginActionCtx } from '../types';
+import { PLUGIN_COLLECTION_PREFIX, type Plugin, type PluginActionCtx } from '../types';
 
-export const COMMENTS = '_plugin:comments';
-export const EVENTS = '_plugin:comments:events';
+export const COMMENTS = `${PLUGIN_COLLECTION_PREFIX}comments`;
+export const EVENTS = `${PLUGIN_COLLECTION_PREFIX}comments:events`;
 
 /** Display identity for attribution — mirrors how deploys attribute an owner. */
 const authorOf = (user: User): string => user.name || user.email;
 
+/** Append an audit event. Best-effort: the mutation it records has already
+ *  committed, so a failed event write must not fail the action (that would
+ *  report a false error and make a retry duplicate the mutation). The trail
+ *  stays append-only — it just misses this entry on a rare write failure. */
 async function record(
   ctx: PluginActionCtx,
   site: string,
@@ -15,7 +19,11 @@ async function record(
   action: string,
   by: string,
 ): Promise<void> {
-  await new DocStore(ctx.platform.db).create(site, EVENTS, { commentId, action, by });
+  try {
+    await new DocStore(ctx.platform.db).create(site, EVENTS, { commentId, action, by });
+  } catch (err) {
+    console.warn(`[comments] audit write failed (${action} ${site}/${commentId}):`, err);
+  }
 }
 
 async function requireComment(store: DocStore, site: string, id: string): Promise<Doc> {

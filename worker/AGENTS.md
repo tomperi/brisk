@@ -89,6 +89,12 @@ is a later opt-in.
   segment there too.
 - **`home` is just a site.** The dashboard in `assets/` serves only while no
   deployed site named `home` exists. Don't special-case it beyond that.
+- **Plugin collections (`_plugin:*`) are write-guarded.** The generic db
+  routes reject direct writes to the reserved namespace (`isPluginCollection`
+  in `app.ts`); a plugin mutates its own collections through its action
+  handlers, which server-stamp the author and keep the audit trail append-only.
+  Reads stay open (the widget subscribes that way). Not a permission — everyone
+  uses the plugin equally through its actions.
 - **The visitor gate is one function.** On `VISIBILITY=public` instances,
   `visitorAllowed` in `auth.ts` decides what anonymous users may touch
   (static views + `GET /api/sites`, nothing else). New routes under `/api/`,

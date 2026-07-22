@@ -38,7 +38,8 @@ interface SiteInfo {
   updatedBy: string | null;
   owner: string | null;
   url: string;
-  plugins: string[];
+  /** Resolved enabled plugin ids, or null for a legacy site (registry defaults). */
+  plugins: string[] | null;
 }
 
 const SKIP = new Set(['.git', 'node_modules', '.DS_Store', 'brisk.json']);
@@ -185,7 +186,7 @@ export async function deploy(
       `${green('✓')} ${bold(site)} ${dim(`· ${info.files} ${info.files === 1 ? 'file' : 'files'} · ${humanBytes(info.bytes)} · ${Date.now() - started}ms`)}`,
     );
     console.log(`  ${cyan(info.url)}`);
-    if (info.plugins.length) {
+    if (info.plugins?.length) {
       console.log(`  ${dim(`plugins: ${info.plugins.map((p) => `${p} ✓`).join('  ')}`)}`);
     }
     return info;

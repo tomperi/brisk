@@ -5,7 +5,7 @@ import { buildCloudflarePlatform } from '../src/platform/cloudflare/platform';
 import type { AppEnv } from '../src/env';
 import type { Context } from 'hono';
 import { comments } from '../src/plugins/comments';
-import { resolveEnabled } from '../src/plugins/resolve';
+import { resolveEnabled, withMandatory } from '../src/plugins/resolve';
 import { toManifest, type Plugin } from '../src/plugins/types';
 
 const cfMake = (c: Context<AppEnv>) => buildCloudflarePlatform(c.env, c.executionCtx);
@@ -33,6 +33,17 @@ describe('resolveEnabled', () => {
 
   it('ignores unknown requested ids', () => {
     expect(resolveEnabled(registry, { ghost: true }).sort()).toEqual(['def', 'mand']);
+  });
+});
+
+describe('withMandatory', () => {
+  it('folds mandatory ids into a stored set, keeping the rest', () => {
+    expect(withMandatory(registry, []).sort()).toEqual(['mand']);
+    expect(withMandatory(registry, ['opt']).sort()).toEqual(['mand', 'opt']);
+  });
+
+  it('is idempotent when mandatory is already present', () => {
+    expect(withMandatory(registry, ['mand', 'def']).sort()).toEqual(['def', 'mand']);
   });
 });
 
@@ -173,6 +184,73 @@ describe('plugin API', () => {
   });
 });
 
+describe('reserved plugin collections', () => {
+  const json = (method: string, body?: unknown) => ({
+    method,
+    headers: { 'content-type': 'application/json' },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+
+  it('refuses direct writes to _plugin:* but keeps reads and normal writes open', async () => {
+    // A forged author must not reach the plugin's collection through the front door.
+    const forged = await call('/api/db/_plugin:comments', json('POST', { createdBy: 'spoofed' }));
+    expect(forged.status).toBe(403);
+
+    // Reads stay open — the widget subscribes to the collection this way.
+    expect((await call('/api/db/_plugin:comments')).status).toBe(200);
+
+    // The guard is prefix-scoped: an ordinary collection still writes fine.
+    expect((await call('/api/db/notes', json('POST', { text: 'hi' }))).status).toBe(201);
+  });
+
+  it('refuses PATCH and DELETE on _plugin:* collections', async () => {
+    expect(
+      (await call('/api/db/_plugin:comments/x', json('PATCH', { resolved: true }))).status,
+    ).toBe(403);
+    expect((await call('/api/db/_plugin:comments/x', json('DELETE'))).status).toBe(403);
+  });
+});
+
+describe('mandatory plugins reach already-deployed sites', () => {
+  const widget = (requirement: Plugin['requirement']): Plugin => ({
+    id: 'wid',
+    name: 'Wid',
+    description: 'a widget plugin',
+    requirement,
+    widget: 'widget.js',
+  });
+
+  const run = (app: ReturnType<typeof createApp>, req: Request) => {
+    const ctx = createExecutionContext();
+    return app.fetch(req, env, ctx).then(async (res) => {
+      await waitOnExecutionContext(ctx);
+      return res;
+    });
+  };
+
+  it('injects a now-mandatory plugin a site deployed without', async () => {
+    // Deploy while `wid` is merely optional and unrequested → stored set is [].
+    const form = new FormData();
+    form.append(
+      'files',
+      new File(['<!doctype html><html><body>x</body></html>'], 'index.html', {
+        type: 'text/html',
+      }),
+    );
+    await run(
+      createApp(cfMake, undefined, [widget('optional')]),
+      new Request('http://localhost/api/deploy/mand-site', { method: 'POST', body: form }),
+    );
+
+    // `wid` is mandatory now. Serving must fold it in without a re-deploy.
+    const page = await run(
+      createApp(cfMake, undefined, [widget('mandatory')]),
+      new Request('http://localhost/s/mand-site/'),
+    );
+    expect(await page.text()).toContain('/_plugins/wid/widget.js');
+  });
+});
+
 describe('widget injection', () => {
   const deployHtml = (name: string, html: string) => {
     const form = new FormData();
@@ -223,6 +301,12 @@ describe('widget injection', () => {
     );
     const html = await (await call('/s/legacyui/')).text();
     expect(html).toContain('/_plugins/echo/widget.js');
+
+    // ...and the API reports its plugins as null (defaults resolved at serve
+    // time), not [] — the latter would read as "plugins off" for a site that is
+    // in fact injecting the default widget.
+    const info = await (await call('/api/sites/legacyui')).json<{ plugins: string[] | null }>();
+    expect(info.plugins).toBeNull();
   });
 
   it('respects an explicit empty set (opt-out is not treated as legacy)', async () => {

@@ -18,10 +18,10 @@ import {
 import type { AppEnv, Env } from './env';
 import type { DbEvent, Platform } from './platform/types';
 import { PLUGINS } from './plugins';
-import { resolveEnabled } from './plugins/resolve';
+import { resolveEnabled, withMandatory } from './plugins/resolve';
 import { registerPluginRoutes } from './plugins/routes';
 import { injectWidgets } from './plugins/inject';
-import type { Plugin } from './plugins/types';
+import { PLUGIN_COLLECTION_PREFIX, type Plugin } from './plugins/types';
 
 const MAX_DEPLOY_FILES = 2000;
 
@@ -186,8 +186,19 @@ export function createApp(
     return c.json({ docs });
   });
 
+  // Plugin-owned collections (`_plugin:*`) are writable only through their
+  // plugin's action handlers, which server-stamp the author and keep the audit
+  // trail append-only. The generic db routes may read them — the widget
+  // subscribes that way — but refuse direct writes, or any teammate could forge
+  // an author, hard-delete past the soft-delete, or fabricate audit events. A
+  // namespace reservation, not a permission: everyone uses the plugin equally
+  // through its actions.
+  const isPluginCollection = (name: string) => name.startsWith(PLUGIN_COLLECTION_PREFIX);
+  const reservedCollection = (c: Context<AppEnv>) => c.json({ error: 'reserved collection' }, 403);
+
   app.post('/api/db/:collection', async (c) => {
     const collection = c.req.param('collection');
+    if (isPluginCollection(collection)) return reservedCollection(c);
     const fields = await c.req.json<Record<string, unknown>>();
     const doc = await new DocStore(c.var.platform.db).create(c.var.site, collection, fields);
     publish(c, c.var.site, { collection, event: 'create', doc });
@@ -205,6 +216,7 @@ export function createApp(
 
   app.patch('/api/db/:collection/:id', async (c) => {
     const collection = c.req.param('collection');
+    if (isPluginCollection(collection)) return reservedCollection(c);
     const fields = await c.req.json<Record<string, unknown>>();
     const doc = await new DocStore(c.var.platform.db).update(
       c.var.site,
@@ -219,6 +231,7 @@ export function createApp(
 
   app.delete('/api/db/:collection/:id', async (c) => {
     const collection = c.req.param('collection');
+    if (isPluginCollection(collection)) return reservedCollection(c);
     const id = c.req.param('id');
     const deleted = await new DocStore(c.var.platform.db).delete(c.var.site, collection, id);
     if (!deleted) return c.json({ error: 'not found' }, 404);
@@ -413,7 +426,10 @@ export function createApp(
         // A legacy site (plugins column NULL) never had a set resolved; fall back
         // to the registry defaults so default-on plugins appear without a
         // re-deploy. An explicit stored [] (opt-out) is respected as-is.
-        const enabled = (await enabledPlugins(c.var.platform, site)) ?? resolveEnabled(plugins, {});
+        const stored = (await enabledPlugins(c.var.platform, site)) ?? resolveEnabled(plugins, {});
+        // Fold in any (now-)mandatory plugin the stored set predates, so
+        // "mandatory is always on" holds without a redeploy.
+        const enabled = withMandatory(plugins, stored);
         return injectWidgets(res, plugins, enabled, site);
       },
       300,

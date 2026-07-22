@@ -19,3 +19,19 @@ export function resolveEnabled(
     })
     .map((plugin) => plugin.id);
 }
+
+/**
+ * Fold every currently-mandatory plugin into an already-resolved id list.
+ * A site's enabled set is resolved and stored at deploy time, so a plugin that
+ * becomes mandatory afterwards (a fork adds one, or upgrades a requirement)
+ * would never reach already-deployed sites. Applying this at serve time keeps
+ * `resolveEnabled`'s "mandatory is always on" contract true without a redeploy,
+ * while the stored list stays authoritative for `default`/`optional`.
+ */
+export function withMandatory(registry: Plugin[], ids: string[]): string[] {
+  const enabled = new Set(ids);
+  for (const plugin of registry) {
+    if (plugin.requirement === 'mandatory') enabled.add(plugin.id);
+  }
+  return [...enabled];
+}

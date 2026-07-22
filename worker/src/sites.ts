@@ -11,8 +11,12 @@ export interface SiteInfo {
   /** Self-asserted, spoofable label set once at creation. A footgun guard,
    *  never a permission — NULL (legacy/unowned) never blocks a deploy. */
   owner: string | null;
-  /** Enabled plugin ids, resolved against the registry at deploy time. */
-  plugins: string[];
+  /** Enabled plugin ids, resolved against the registry at deploy time — or
+   *  `null` for a legacy site deployed before the plugins column, which serving
+   *  treats as "registry defaults", not "nothing enabled". Distinct from `[]`
+   *  (an explicit opt-out), so the API doesn't report a widget-injecting legacy
+   *  site as having plugins off. */
+  plugins: string[] | null;
 }
 
 interface SiteRow {
@@ -56,7 +60,7 @@ function toInfo(row: SiteRow): SiteInfo {
     updatedAt: row.updated_at,
     updatedBy: row.updated_by,
     owner: row.owner,
-    plugins: parsePlugins(row.plugins),
+    plugins: row.plugins != null ? parsePlugins(row.plugins) : null,
   };
 }
 
