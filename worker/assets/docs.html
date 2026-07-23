@@ -151,7 +151,10 @@ const stop = posts.subscribe({
 });</code></pre>
       <p>
         Docs carry <code>id</code>, <code>createdAt</code>, <code>updatedAt</code>. Collections are
-        namespaced per site, so name things whatever you like.
+        namespaced per site, so name things whatever you like — except the reserved
+        <code>_plugin:*</code> namespace: plugin data reads (and subscribes) like any collection,
+        but writing it goes through the plugin's own <a href="#plugins">actions</a>, which stamp the
+        author and keep the audit trail honest.
       </p>
 
       <h2 id="identity"><a href="#identity">Identity</a></h2>
