@@ -25,6 +25,12 @@ releases are published to
   host page's own shortcuts. Minimize it to a corner bubble (click to reopen);
   `Shift+C` fully hides it.
 
+### Changed
+
+- The `/host` page now covers the self-hosted path (Docker Compose,
+  Kubernetes/Helm, `npm create brisk`, storage options) alongside Cloudflare,
+  instead of documenting the Worker deploy only.
+
 ## [0.3.0] - 2026-07-13
 
 ### Added
