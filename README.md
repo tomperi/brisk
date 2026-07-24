@@ -386,10 +386,12 @@ Sites opt in via `brisk.json`; each plugin is `mandatory`, on-by-`default`, or
 
 **The comments plugin** (on by default) is `html-grab` made native: click any
 element, leave a note. Comments start as **local drafts** (localStorage — copy
-them as markdown to hand an agent, zero server writes), and you **publish** when
-you want to share. Published comments are teammate-visible with realtime updates
-and an append-only audit trail, and they're reachable from the CLI so an agent
-can close the loop:
+them as markdown to hand an agent, zero server writes; note drafts are local to
+the browser, not private — on a path-mode instance every site shares one
+origin's storage), and you **publish** when you want to share. Published
+comments are teammate-visible with realtime updates and a best-effort,
+append-only audit trail, and they're reachable from the CLI so an agent can
+close the loop:
 
 ```sh
 brisk plugin comments list   my-site        # open feedback, as a table
