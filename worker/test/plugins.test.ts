@@ -173,6 +173,16 @@ describe('plugin API', () => {
     });
   });
 
+  it('400s a site argument that is not a valid site name', async () => {
+    const res = await call('/api/plugins/echo/actions/say', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ args: { message: 'hi', site: '../Evil Name' } }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json<{ error: string }>()).toMatchObject({ error: 'invalid site' });
+  });
+
   it('404s an unknown action and lists the real ones', async () => {
     const res = await call('/api/plugins/echo/actions/nope', {
       method: 'POST',
@@ -282,6 +292,28 @@ describe('widget injection', () => {
     await deployHtml('wtest2', '<!doctype html><html><body>x</body></html>');
     const css = await call('/s/wtest2/style.css');
     expect(await css.text()).toBe('body{}');
+  });
+
+  it('appends the widget when a page has no </body>', async () => {
+    await deployHtml('wnobody', '<!doctype html><h1>bare</h1>');
+    const html = await (await call('/s/wnobody/')).text();
+    expect(html).toContain('<h1>bare</h1>');
+    expect(html).toMatch(/<script src="\/_plugins\/echo\/widget\.js"[^>]*><\/script>$/);
+  });
+
+  it('matches </BODY> case-insensitively', async () => {
+    await deployHtml('wupper', '<!doctype html><html><BODY>x</BODY></html>');
+    const html = await (await call('/s/wupper/')).text();
+    expect(html.indexOf('<script src="/_plugins/echo/')).toBeLessThan(html.indexOf('</BODY>'));
+  });
+
+  it('splices at the right offset when case-folding changes string length', async () => {
+    // 'İ'.toLowerCase() is two code units — a lowercased-copy index search
+    // would land the tags one char late, splitting the closing tag.
+    await deployHtml('wturkish', '<!doctype html><html><body>İİİ</body></html>');
+    const html = await (await call('/s/wturkish/')).text();
+    expect(html).toContain('İİİ<script src="/_plugins/echo/widget.js"');
+    expect(html).toContain('</body></html>');
   });
 
   it('falls back to registry defaults on a legacy site (plugins column NULL)', async () => {
@@ -421,6 +453,31 @@ describe('comments write actions', () => {
     expect(forThis).toContain('resolve');
   });
 
+  it('rejects a reply to a reply (threads are one level deep)', async () => {
+    const { result: top } = await act('create', { site: 'nested', text: 'top' });
+    const { result: r1 } = await act('reply', { site: 'nested', id: String(top.id), text: 'a' });
+    const res = await cc('/api/plugins/comments/actions/reply', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ args: { site: 'nested', id: String(r1.id), text: 'b' } }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json<{ error: string }>()).toMatchObject({
+      error: expect.stringContaining('is itself a reply'),
+    });
+  });
+
+  it('refuses to resolve a deleted comment', async () => {
+    const { result: c } = await act('create', { site: 'frozen', text: 'x' });
+    await act('delete', { site: 'frozen', id: String(c.id) });
+    const res = await cc('/api/plugins/comments/actions/resolve', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ args: { site: 'frozen', id: String(c.id) } }),
+    });
+    expect(res.status).toBe(400);
+  });
+
   it('soft-deletes rather than destroying the record', async () => {
     const { result: c } = await act('create', { site: 'dsite', text: 'temp' });
     const { result: d } = await act('delete', { site: 'dsite', id: String(c.id) });
@@ -447,6 +504,18 @@ describe('comments read actions', () => {
     const all = (await act('list', { site: 'rsite', status: 'all' }))
       .result as unknown as unknown[];
     expect(all.length).toBe(2);
+  });
+
+  it('errors on an unknown status instead of filtering everything out', async () => {
+    const res = await cc('/api/plugins/comments/actions/list', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ args: { site: 'rsite', status: 'opne' } }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.json<{ error: string }>()).toMatchObject({
+      error: expect.stringContaining('unknown status'),
+    });
   });
 
   it('exports matching comments as markdown', async () => {

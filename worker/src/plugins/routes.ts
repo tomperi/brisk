@@ -1,6 +1,7 @@
 import type { Context, Hono } from 'hono';
 import type { AppEnv } from '../env';
 import type { DbEvent } from '../platform/types';
+import { isValidSiteName } from '../sites';
 import { toManifest, type Plugin } from './types';
 
 type Publish = (c: Context<AppEnv>, site: string, event: DbEvent) => void;
@@ -42,6 +43,13 @@ export function registerPluginRoutes(app: Hono<AppEnv>, plugins: Plugin[], publi
       if (spec.required && !(spec.name in args)) {
         return c.json({ error: `missing required argument: ${spec.name}` }, 400);
       }
+    }
+    // Handlers namespace their db/realtime writes by the caller-supplied `site`
+    // arg (the CLI targets the apex, so it can't ride on the request's own
+    // site). Hold it to the same rule the site middleware enforces, so plugin
+    // data can only ever live under a name a site could actually have.
+    if (args.site !== undefined && args.site !== 'home' && !isValidSiteName(args.site)) {
+      return c.json({ error: 'invalid site' }, 400);
     }
 
     try {

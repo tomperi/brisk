@@ -58,7 +58,12 @@ async function create(ctx: PluginActionCtx, args: Record<string, string>): Promi
 async function reply(ctx: PluginActionCtx, args: Record<string, string>): Promise<Doc> {
   const { site, id, text } = args;
   if (!site || !id || !text) throw new Error('site, id, and text are required');
-  await requireComment(new DocStore(ctx.platform.db), site, id);
+  const target = await requireComment(new DocStore(ctx.platform.db), site, id);
+  // Threads are one level deep — the widget and lists only show a comment's
+  // direct children, so a reply-to-a-reply would be invisible everywhere.
+  if (target.parentId) {
+    throw new Error(`${id} is itself a reply — reply to its thread ${String(target.parentId)}`);
+  }
   return create(ctx, { site, text, page: args.page ?? '', parentId: id });
 }
 
@@ -71,7 +76,10 @@ async function setResolved(
   if (!site || !id) throw new Error('site and id are required');
   const by = authorOf(ctx.user);
   const store = new DocStore(ctx.platform.db);
-  await requireComment(store, site, id);
+  const existing = await requireComment(store, site, id);
+  // Deleted comments are frozen — resolving one would also shrink the window
+  // for a racing resolve to write a pre-delete snapshot back over the delete.
+  if (existing.deleted) throw new Error(`comment ${id} is deleted`);
   const doc = (await store.update(site, COMMENTS, id, {
     resolved,
     resolvedBy: resolved ? by : '',
@@ -99,6 +107,15 @@ async function softDelete(ctx: PluginActionCtx, args: Record<string, string>): P
 }
 
 type Status = 'open' | 'resolved' | 'deleted' | 'all';
+const STATUSES = new Set<string>(['open', 'resolved', 'deleted', 'all']);
+
+/** A typo'd status must error, not silently filter every comment out. */
+function statusArg(raw: string | undefined): Status {
+  const status = raw ?? 'open';
+  if (!STATUSES.has(status))
+    throw new Error(`unknown status: ${status} (open|resolved|deleted|all)`);
+  return status as Status;
+}
 
 const statusOf = (c: Doc): Exclude<Status, 'all'> =>
   c.deleted ? 'deleted' : c.resolved ? 'resolved' : 'open';
@@ -113,7 +130,7 @@ async function topLevel(ctx: PluginActionCtx, site: string, status: Status): Pro
 
 async function list(ctx: PluginActionCtx, args: Record<string, string>): Promise<unknown> {
   if (!args.site) throw new Error('site is required');
-  const status = (args.status ?? 'open') as Status;
+  const status = statusArg(args.status);
   return (await topLevel(ctx, args.site, status)).map((c) => ({
     id: c.id,
     status: statusOf(c),
@@ -151,7 +168,7 @@ async function history(ctx: PluginActionCtx, args: Record<string, string>): Prom
 
 async function exportMd(ctx: PluginActionCtx, args: Record<string, string>): Promise<string> {
   if (!args.site) throw new Error('site is required');
-  const status = (args.status ?? 'open') as Status;
+  const status = statusArg(args.status);
   const rows = await topLevel(ctx, args.site, status);
   let out = `# comments on ${args.site}\n`;
   for (const c of rows) {

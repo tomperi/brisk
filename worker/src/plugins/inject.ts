@@ -27,10 +27,13 @@ export async function injectWidgets(
     .join('');
 
   const html = await res.text();
-  // Slot the scripts just before the closing </body>; fall back to appending if
-  // a page has no body tag (a bare fragment gets nothing to anchor to).
-  const idx = html.toLowerCase().lastIndexOf('</body>');
-  const out = idx >= 0 ? html.slice(0, idx) + tags + html.slice(idx) : html;
+  // Slot the scripts just before the last closing </body>, matched on the
+  // original string (lowercasing a copy shifts offsets when case-folding
+  // changes length, e.g. İ → i̇). A page with no body tag — a bare fragment
+  // browsers render anyway — gets them appended at the end instead.
+  let idx = -1;
+  for (const m of html.matchAll(/<\/body\s*>/gi)) idx = m.index ?? -1;
+  const out = idx >= 0 ? html.slice(0, idx) + tags + html.slice(idx) : html + tags;
 
   // The body changed, so length/etag no longer describe it — drop both and let
   // the runtime recompute the length from the string.
