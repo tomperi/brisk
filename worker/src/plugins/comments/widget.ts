@@ -1,8 +1,9 @@
 /* Brisk comments widget. Injected into pages that enable the comments plugin.
  * Drafts live in localStorage (local-first); publishing promotes them to
  * brisk.db via the plugin's server actions, which stamp the author and append
- * an audit event. Reads + realtime come from brisk.db directly — and degrade to
- * draft-only when the page doesn't load /brisk.js.
+ * an audit event. Reads use the SDK when the page loads /brisk.js and fall
+ * back to the same fetch the write path uses when it doesn't — only realtime
+ * needs the SDK (without it the list refreshes after each of our own actions).
  *
  * Look: "Notecard" — Brisk's warm paper + hyperlink blue + monospace, ink
  * borders and hard offset shadows (the deploy modal's family), light/dark aware. */
@@ -31,8 +32,8 @@ interface BdDoc {
   if (marker.__briskComments) return;
   marker.__briskComments = true;
 
-  // The SDK is optional: without /brisk.js the widget still does drafts +
-  // copy-as-markdown (local-first). Only published reads/realtime need it.
+  // The SDK is optional: without /brisk.js the widget reads over plain fetch
+  // and skips realtime — drafts, publishing, and published views all still work.
   const sdk = (window as { brisk?: Brisk }).brisk;
 
   const COLLECTION = '_plugin:comments';
@@ -83,8 +84,17 @@ interface BdDoc {
   // ---- published comments (brisk.db) ---------------------------------------
   let published: BdDoc[] = [];
   const refreshPublished = async () => {
-    if (!sdk) return;
-    published = await sdk.db.collection(COLLECTION).list({ limit: 500, sort: '-created' });
+    if (sdk) {
+      published = await sdk.db.collection(COLLECTION).list({ limit: 500, sort: '-created' });
+    } else {
+      // No /brisk.js on this page: read the collection through the same route
+      // the SDK wraps, so published comments still show up.
+      const res = await fetch(`/api/db/${COLLECTION}?limit=500&sort=-created`, {
+        headers: { 'x-brisk-site': SITE },
+      });
+      if (!res.ok) return;
+      published = ((await res.json()) as { docs: BdDoc[] }).docs;
+    }
     render();
   };
   if (sdk) {
@@ -111,6 +121,8 @@ interface BdDoc {
       body: JSON.stringify({ args: { site: SITE, ...args } }),
     });
     if (!res.ok) throw new Error(`${name} failed: ${res.status}`);
+    // With realtime unavailable, our own mutations won't push back — re-read.
+    if (!sdk) void refreshPublished();
     return ((await res.json()) as { result: BdDoc }).result;
   };
 
@@ -336,10 +348,14 @@ interface BdDoc {
     toastEl = $('toast');
   const layer = root.querySelector('.layer')!;
 
+  let toastTimer: ReturnType<typeof setTimeout> | undefined;
   const toast = (m: string) => {
     toastEl.textContent = m;
     toastEl.classList.add('show');
-    setTimeout(() => toastEl.classList.remove('show'), 1600);
+    // One timer, reset per toast — an earlier toast's timer must not cut a
+    // later message (e.g. the publish-all summary) short.
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1600);
   };
 
   const statusIcon = (s: Exclude<Status, 'all'>) => {
@@ -559,9 +575,9 @@ interface BdDoc {
     }
   }
 
-  async function publishDraft(id: string) {
+  async function publishDraft(id: string): Promise<boolean> {
     const d = drafts.find((x) => x.id === id);
-    if (!d) return;
+    if (!d) return true; // already gone — nothing left to publish
     try {
       await action('create', {
         text: d.text,
@@ -574,10 +590,12 @@ interface BdDoc {
       drafts = drafts.filter((x) => x.id !== id);
       saveDrafts();
       closePop();
-      toast(sdk ? 'published' : 'published (reload to see it)');
+      toast('published');
       render();
+      return true;
     } catch {
       toast('publish failed — draft kept');
+      return false;
     }
   }
 
@@ -592,30 +610,52 @@ interface BdDoc {
   }
 
   // ---- render ---------------------------------------------------------------
+  const findTarget = (selector: string): Element | null => {
+    try {
+      return selector ? document.querySelector(selector) : null;
+    } catch {
+      return null; // invalid selector
+    }
+  };
+  const placePin = (pin: HTMLElement, selector: string) => {
+    const r = findTarget(selector)?.getBoundingClientRect();
+    pin.style.left = `${(r?.left ?? 12) + 10}px`;
+    pin.style.top = `${(r?.top ?? 12) + 10}px`;
+  };
+
+  /** Full rebuild — call when the data changes, not on scroll (rebuilding per
+   *  scroll event restarts the pin-in animation and churns the DOM). */
+  const pinRefs: { el: HTMLElement; selector: string }[] = [];
   function render() {
     pins.innerHTML = '';
+    pinRefs.length = 0;
     for (const v of views().filter((v) => here(v) && !v.parentId && shown(v))) {
-      let target: Element | null = null;
-      try {
-        target = v.selector ? document.querySelector(v.selector) : null;
-      } catch {
-        /* invalid selector */
-      }
+      const target = findTarget(v.selector);
       const pin = document.createElement('div');
       pin.className = `pin ${v.kind === 'draft' ? 'draft' : v.status}${!target && v.selector ? ' detached' : ''}`;
       pin.textContent = v.kind === 'draft' ? '✎' : '●';
-      const r = target?.getBoundingClientRect();
-      pin.style.left = `${(r?.left ?? 12) + 10}px`;
-      pin.style.top = `${(r?.top ?? 12) + 10}px`;
+      placePin(pin, v.selector);
       pin.onclick = (e) => {
         e.stopPropagation();
         openThread(v, e.clientX, e.clientY);
       };
       pins.appendChild(pin);
+      pinRefs.push({ el: pin, selector: v.selector });
     }
     if (drawer.classList.contains('open')) renderPanel();
     updateNub();
   }
+
+  /** Scroll/resize path: move the existing pins, coalesced to one rAF. */
+  let repositionQueued = false;
+  const scheduleReposition = () => {
+    if (repositionQueued) return;
+    repositionQueued = true;
+    requestAnimationFrame(() => {
+      repositionQueued = false;
+      for (const { el, selector } of pinRefs) placePin(el, selector);
+    });
+  };
 
   const dotColor = (s: string) =>
     s === 'resolved' ? 'var(--ink-dim)' : s === 'deleted' ? 'var(--warn)' : 'var(--live)';
@@ -656,8 +696,14 @@ interface BdDoc {
     const puball = drawer.querySelector<HTMLElement>('[data-puball]');
     if (puball)
       puball.onclick = async () => {
-        for (const d of [...drafts]) await publishDraft(d.id);
-        toast('published all');
+        let ok = 0,
+          failed = 0;
+        for (const d of [...drafts]) (await publishDraft(d.id)) ? ok++ : failed++;
+        toast(
+          failed
+            ? `published ${ok}/${ok + failed} — failed drafts kept`
+            : `published ${ok} draft${ok === 1 ? '' : 's'}`,
+        );
       };
     drawer.querySelectorAll<HTMLElement>('.item').forEach((item) => {
       item.onclick = () => {
@@ -725,7 +771,10 @@ interface BdDoc {
       setPick(false);
       closePop();
     }
-    const t = e.target as HTMLElement | null;
+    // composedPath, not e.target: this listener sits outside our shadow root,
+    // so retargeting would report the host <div> for keys typed in the widget's
+    // own textareas — and Shift+C mid-comment would hide the widget.
+    const t = (e.composedPath()[0] ?? e.target) as HTMLElement | null;
     const typing =
       !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
     if (
@@ -747,8 +796,8 @@ interface BdDoc {
   document.addEventListener('keydown', onKey, true);
   // Reposition pins on scroll; the popover stays put (it's fixed) so a scrolling
   // textarea can't dismiss it.
-  addEventListener('scroll', () => render(), true);
-  addEventListener('resize', () => render(), true);
+  addEventListener('scroll', scheduleReposition, true);
+  addEventListener('resize', scheduleReposition, true);
 
   // ---- boot -----------------------------------------------------------------
   applyHidden();
