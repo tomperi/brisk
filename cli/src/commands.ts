@@ -482,8 +482,10 @@ interface PluginManifest {
 /**
  * The one CLI command that knows nothing about any specific plugin: it reads
  * each plugin's manifest from the server and dispatches actions generically, so
- * a fork can add plugins without touching the CLI. Args are scanned by hand (not
- * parseArgs) so free-text values that begin with '-' pass through as positionals.
+ * a fork can add plugins without touching the CLI. Argv is scanned by hand (not
+ * parseArgs): flags — bare or `--flag=value` — are only interpreted until the
+ * plugin id and action are known, so free-text action args that look like flags
+ * ("--help", "-v") pass through as positionals. `--` ends flag parsing early.
  */
 export async function plugin(argv: string[]): Promise<void> {
   const flags: { server?: string; profile?: string } = {};
@@ -491,15 +493,24 @@ export async function plugin(argv: string[]): Promise<void> {
   let help = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]!;
-    if (a === '--server') flags.server = argv[++i];
-    else if (a === '--profile') flags.profile = argv[++i];
-    else if (a === '--site' || a === '--username')
-      i++; // global flags irrelevant here
-    else if (a === '-h' || a === '--help') help = true;
-    else if (a === '--') {
+    if (a === '--') {
       positionals.push(...argv.slice(i + 1));
       break;
-    } else positionals.push(a);
+    }
+    // positionals[2] onward are the action's own args (site first — never
+    // flag-shaped), so past that point nothing is treated as a flag.
+    if (positionals.length > 2 || !a.startsWith('-')) {
+      positionals.push(a);
+      continue;
+    }
+    const eq = a.indexOf('=');
+    const [name, inline] = eq >= 0 ? [a.slice(0, eq), a.slice(eq + 1)] : [a, undefined];
+    if (name === '--server') flags.server = inline ?? argv[++i];
+    else if (name === '--profile') flags.profile = inline ?? argv[++i];
+    else if (name === '--site' || name === '--username') {
+      if (inline === undefined) i++; // global flags irrelevant here
+    } else if (name === '-h' || name === '--help') help = true;
+    else positionals.push(a);
   }
   const conn = resolveConnection(flags, process.cwd());
   const [id, action, ...rest] = positionals;

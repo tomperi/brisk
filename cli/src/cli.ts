@@ -25,6 +25,7 @@ ${bold('Plugins')}
   brisk plugin list                    installed plugins on the instance
   brisk plugin <id> --help             a plugin's actions (loaded from the server)
   brisk plugin <id> <action> [args…]   run an action, e.g. brisk plugin comments list <site>
+                                       args are free text; put -- first if one starts with a dash
 
 ${bold('Options')}
   --site <name>                override the site name (default: brisk.json or folder name)
