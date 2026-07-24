@@ -37,8 +37,10 @@ export interface Plugin {
   name: string;
   description: string;
   requirement: PluginRequirement;
-  /** Filename of the injected widget bundle, served at /_plugins/<id>/<widget>. */
-  widget?: string;
+  /** Whether the plugin ships an injected widget. The bundle name is fixed —
+   *  built from `<id>/widget.ts`, served at /_plugins/<id>/widget.js — so the
+   *  registry can't declare a filename the builder doesn't emit. */
+  widget?: boolean;
   actions?: Record<string, PluginAction>;
 }
 
@@ -55,7 +57,7 @@ export interface PluginManifest {
   name: string;
   description: string;
   requirement: PluginRequirement;
-  widget?: string;
+  widget?: boolean;
   actions: Record<string, ActionManifest>;
 }
 
@@ -75,7 +77,7 @@ export function toManifest(plugin: Plugin): PluginManifest {
     name: plugin.name,
     description: plugin.description,
     requirement: plugin.requirement,
-    ...(plugin.widget ? { widget: plugin.widget } : {}),
+    ...(plugin.widget ? { widget: true } : {}),
     actions,
   };
 }

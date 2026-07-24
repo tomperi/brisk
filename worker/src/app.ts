@@ -437,11 +437,12 @@ export function createApp(
     );
 
   // Plugin widget bundles: authed (see visitorAllowed), served from worker
-  // assets at /plugins/<id>/<file>. Registered before the catch-all.
-  app.get('/_plugins/:id/:file', async (c) => {
-    const { id, file } = c.req.param();
+  // assets at /plugins/<id>/widget.js — the one fixed name the widget builder
+  // emits. Registered before the catch-all.
+  app.get('/_plugins/:id/widget.js', async (c) => {
+    const id = c.req.param('id');
     if (!plugins.some((p) => p.id === id && p.widget)) return c.notFound();
-    const asset = await c.var.platform.assets.fetch(`/plugins/${id}/${encodeURIComponent(file)}`);
+    const asset = await c.var.platform.assets.fetch(`/plugins/${id}/widget.js`);
     if (!asset.ok) return c.notFound();
     return securedAsset(asset);
   });

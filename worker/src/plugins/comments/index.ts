@@ -189,7 +189,7 @@ export const comments: Plugin = {
   name: 'Comments',
   description: 'Leave feedback on any element; drafts stay local until you publish.',
   requirement: 'default',
-  widget: 'widget.js',
+  widget: true,
   actions: {
     create: {
       summary: 'create a comment',

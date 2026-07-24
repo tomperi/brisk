@@ -22,7 +22,7 @@ export async function injectWidgets(
   const tags = widgets
     .map(
       (p) =>
-        `<script src="/_plugins/${p.id}/${p.widget}" data-brisk-plugin="${p.id}" data-brisk-site="${escapeAttr(site)}" defer></script>`,
+        `<script src="/_plugins/${p.id}/widget.js" data-brisk-plugin="${p.id}" data-brisk-site="${escapeAttr(site)}" defer></script>`,
     )
     .join('');
 

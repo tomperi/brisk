@@ -54,7 +54,7 @@ describe('toManifest', () => {
       name: 'Echo',
       description: 'test',
       requirement: 'default',
-      widget: 'widget.js',
+      widget: true,
       actions: {
         say: {
           summary: 'echo it back',
@@ -71,7 +71,7 @@ describe('toManifest', () => {
       render: 'text',
     });
     expect('handler' in manifest.actions.say).toBe(false);
-    expect(manifest.widget).toBe('widget.js');
+    expect(manifest.widget).toBe(true);
   });
 });
 
@@ -108,7 +108,7 @@ const fixture: Plugin = {
   name: 'Echo',
   description: 'echoes arguments back',
   requirement: 'default',
-  widget: 'widget.js',
+  widget: true,
   actions: {
     say: {
       summary: 'echo a message',
@@ -227,7 +227,7 @@ describe('mandatory plugins reach already-deployed sites', () => {
     name: 'Wid',
     description: 'a widget plugin',
     requirement,
-    widget: 'widget.js',
+    widget: true,
   });
 
   const run = (app: ReturnType<typeof createApp>, req: Request) => {
