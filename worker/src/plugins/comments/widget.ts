@@ -280,6 +280,13 @@ interface BdDoc {
       .dhead .title { font-weight: 700; flex: 1; }
       .seg { display: inline-flex; flex-wrap: wrap; gap: 6px; flex-basis: 100%; margin-top: 4px; }
       .list { overflow: auto; padding: 8px 12px 16px; flex: 1; }
+      /* Sticky action bar: the list scrolls, actions stay reachable. Filters
+         (view state) live at the top; verbs live down here. */
+      .dfoot {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 14px;
+        border-top: 1.5px solid var(--line);
+      }
+      .dfoot .primary { margin-left: auto; }
       .item {
         border: 1.5px solid var(--ink); border-radius: 9px; margin: 8px 0; padding: 10px;
         background: var(--paper-raised); cursor: pointer;
@@ -846,9 +853,9 @@ interface BdDoc {
         <button class="btn" data-pins aria-label="toggle numbers" data-tip="${pinsHidden ? 'show numbers' : 'hide numbers'}">${pinsHidden ? EYE_OFF : EYE}</button>
         <button class="btn" data-close aria-label="close">✕</button>
         <div class="seg">${chips}</div>
-        <div class="seg"><button class="btn" data-copyall>copy log as md</button>${drafts0 ? `<button class="btn" data-copy>copy ${drafts0} draft(s) as md</button><button class="btn primary" data-puball>publish all</button>` : ''}</div>
       </div>
-      <div class="list">${rows || `<div class="empty">no ${filter} comments</div>`}</div>`;
+      <div class="list">${rows || `<div class="empty">no ${filter} comments</div>`}</div>
+      <div class="dfoot"><button class="btn" data-copyall>copy log as md</button>${drafts0 ? `<button class="btn" data-copy>copy ${drafts0} draft${drafts0 === 1 ? '' : 's'}</button><button class="btn primary" data-puball>publish all</button>` : ''}</div>`;
     drawer.querySelector<HTMLElement>('[data-close]')!.onclick = toggleDrawer;
     drawer.querySelectorAll<HTMLElement>('[data-f]').forEach((b) => {
       b.onclick = () => {
