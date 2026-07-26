@@ -285,9 +285,10 @@ interface BdDoc {
         background: var(--paper-raised); cursor: pointer;
       }
       .item .meta { color: var(--ink-dim); font-size: 0.72rem; margin-top: 4px; }
+      .item .txt { display: flex; align-items: center; gap: 6px; }
       .item .num {
-        display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 3px;
-        border-radius: 999px; margin-right: 6px; vertical-align: -2px; color: var(--paper);
+        flex: none; display: inline-grid; place-items: center; min-width: 17px; height: 17px;
+        padding: 0 3px; border-radius: 999px; color: var(--paper);
         font-size: 0.62rem; font-weight: 700;
         -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
       }
@@ -303,24 +304,37 @@ interface BdDoc {
       .btn.primary { background: var(--accent); color: var(--paper); }
       .seg .btn.on { background: var(--ink); color: var(--paper); }
 
-      /* fab — icon toolbar */
+      /* fab — icon toolbar. Collapse morphs it into the bubble: the pill and the
+         bubble share the bottom-right anchor and a 43px height, the pill scales
+         toward the bubble's center while the bubble scales up in its place —
+         transform/opacity only, one shared duration so they read as one shape. */
       .fab {
         position: fixed; right: 16px; bottom: 16px; pointer-events: auto; display: flex;
         align-items: center; gap: 8px; background: var(--paper); border: 1.5px solid var(--ink);
         border-radius: 999px; padding: 5px 13px; box-shadow: var(--shadow-hard);
+        transform-origin: calc(100% - 21.5px) center;
+        transition: transform 240ms var(--ease), opacity 160ms ease-out, visibility 0s;
+      }
+      .layer.collapsed .fab {
+        opacity: 0; transform: scale(0.45); visibility: hidden; pointer-events: none;
+        transition: transform 240ms var(--ease), opacity 160ms ease-out, visibility 0s 240ms;
       }
       .fab .btn { width: 30px; height: 30px; padding: 0; display: grid; place-items: center; font-size: 0.95rem; line-height: 1; }
       .fab [data-act='pick'] { font-size: 1.25rem; }
-      .drawer [data-close] { width: 28px; height: 28px; padding: 0; display: grid; place-items: center; font-size: 1rem; line-height: 1; }
+      .drawer [data-close],
+      .drawer [data-pins] { width: 28px; height: 28px; padding: 0; display: grid; place-items: center; font-size: 1rem; line-height: 1; }
+      .drawer [data-pins] svg { display: block; }
       .btn[data-tip] { position: relative; }
-      /* Centered by layout (auto margins), not translateX(-50%) — a transform
-         leaves odd-width tips on a half-pixel and the text rasterizes soft.
-         Whole-px font size + antialiased for the same reason: tiny light-on-dark
-         text fringes under subpixel AA. */
+      /* Positioned by layout, not translateX(-50%) — a transform leaves
+         odd-width tips on a half-pixel and the text rasterizes soft. Right-
+         aligned to the button: every tip-bearing control hugs the right edge of
+         the screen (toolbar, bubble, drawer head), so tips grow leftward and
+         never overflow the viewport. Whole-px font size + antialiased because
+         tiny light-on-dark text fringes under subpixel AA. */
       .btn[data-tip]::after,
       .nub[data-tip]::after {
         content: attr(data-tip); position: absolute; bottom: calc(100% + 8px);
-        left: 0; right: 0; margin: 0 auto; width: max-content;
+        right: 0; width: max-content;
         transform: translateY(4px); background: var(--ink); color: var(--paper);
         font-size: 11px; white-space: nowrap; padding: 3px 7px; border-radius: 6px; opacity: 0;
         -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
@@ -328,20 +342,26 @@ interface BdDoc {
       }
       .btn[data-tip]:hover::after,
       .nub[data-tip]:hover::after { opacity: 1; transform: translateY(0); }
+      /* The drawer head sits at the top of the screen — its tips open downward. */
+      .drawer .btn[data-tip]::after { bottom: auto; top: calc(100% + 8px); transform: translateY(-4px); }
+      .drawer .btn[data-tip]:hover::after { transform: translateY(0); }
 
-      /* minimized bubble — the always-visible way back */
+      /* minimized bubble — the always-visible way back; diameter == pill height */
       .nub {
-        position: fixed; right: 16px; bottom: 16px; pointer-events: auto; display: none;
-        width: 44px; height: 44px; border-radius: 50%; place-items: center; cursor: pointer;
+        position: fixed; right: 16px; bottom: 16px; pointer-events: none; display: grid;
+        width: 43px; height: 43px; border-radius: 50%; place-items: center; cursor: pointer;
         background: var(--accent); color: var(--paper); font: inherit; font-weight: 700;
         font-size: 0.95rem; border: 1.5px solid var(--ink); box-shadow: var(--shadow-hard);
         -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
-        transition: transform 110ms var(--ease);
+        opacity: 0; transform: scale(0.45); visibility: hidden;
+        transition: transform 240ms var(--ease), opacity 160ms ease-out, visibility 0s 240ms;
       }
-      .nub:active { transform: scale(0.96); }
-      .layer.collapsed .fab { display: none; }
+      .layer.collapsed .nub {
+        opacity: 1; transform: scale(1); visibility: visible; pointer-events: auto;
+        transition: transform 240ms var(--ease), opacity 160ms ease-out, visibility 0s;
+      }
+      .layer.collapsed .nub:active { transform: scale(0.96); }
       .layer.collapsed #pins { display: none; }
-      .layer.collapsed .nub { display: grid; }
 
       .toast {
         position: fixed; left: 0; right: 0; margin: 0 auto; width: max-content; bottom: 74px;
@@ -553,7 +573,9 @@ interface BdDoc {
       saveDrafts();
       closePop();
       render();
-      toast('draft saved');
+      toast('draft saved — pick the next element · Esc exits');
+      // Stay in comment mode: keep picking until Esc (or the ✎ toggle) ends it.
+      setPick(true);
     };
     ta.onkeydown = (ev) => {
       if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey))
@@ -793,8 +815,19 @@ interface BdDoc {
     });
   };
 
-  const dotColor = (s: string) =>
-    s === 'resolved' ? 'var(--ink-dim)' : s === 'deleted' ? 'var(--warn)' : 'var(--live)';
+  /* Number-badge color mirrors the pins: draft green vs published blue, so the
+     sidebar carries the same draft/published distinction as the page. */
+  const badgeColor = (v: View) =>
+    v.kind === 'draft'
+      ? 'var(--live)'
+      : v.status === 'resolved'
+        ? 'var(--ink-dim)'
+        : v.status === 'deleted'
+          ? 'var(--warn)'
+          : 'var(--accent)';
+
+  const EYE = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.6"/></svg>`;
+  const EYE_OFF = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.6"/><line x1="4" y1="20" x2="20" y2="4"/></svg>`;
 
   function renderPanel() {
     const chips = (['open', 'resolved', 'deleted', 'all'] as Status[])
@@ -804,14 +837,15 @@ interface BdDoc {
       .filter((v) => !v.parentId && shown(v))
       .map(
         (v) =>
-          `<div class="item" data-id="${escapeHtml(v.id)}" data-kind="${v.kind}"><div class="txt"><span class="num" style="background:${dotColor(v.status)}">${nums.get(v.id) ?? ''}</span>${escapeHtml(v.text.slice(0, 90))}</div><div class="meta">${whoTag(v.author, v.email)} · ${v.status} · ${escapeHtml(v.page)}</div></div>`,
+          `<div class="item" data-id="${escapeHtml(v.id)}" data-kind="${v.kind}"><div class="txt"><span class="num" style="background:${badgeColor(v)}">${nums.get(v.id) ?? ''}</span><span>${escapeHtml(v.text.slice(0, 90))}</span></div><div class="meta">${whoTag(v.author, v.email)} · ${v.kind === 'draft' ? 'draft' : v.status} · ${escapeHtml(v.page)}</div></div>`,
       )
       .join('');
     const drafts0 = drafts.length;
     drawer.innerHTML = `<div class="dhead">
         <span class="title">Comments</span>
+        <button class="btn" data-pins aria-label="toggle numbers" data-tip="${pinsHidden ? 'show numbers' : 'hide numbers'}">${pinsHidden ? EYE_OFF : EYE}</button>
         <button class="btn" data-close aria-label="close">✕</button>
-        <div class="seg">${chips}<button class="btn" data-pins>${pinsHidden ? 'show numbers' : 'hide numbers'}</button></div>
+        <div class="seg">${chips}</div>
         <div class="seg"><button class="btn" data-copyall>copy log as md</button>${drafts0 ? `<button class="btn" data-copy>copy ${drafts0} draft(s) as md</button><button class="btn primary" data-puball>publish all</button>` : ''}</div>
       </div>
       <div class="list">${rows || `<div class="empty">no ${filter} comments</div>`}</div>`;
