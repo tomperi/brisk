@@ -226,10 +226,13 @@ interface BdDoc {
       }
       @keyframes pin-in { from { opacity: 0; transform: scale(0.85); } }
       .pin:active { transform: scale(0.94); }
+      /* Status is fill + line style, not hue alone: solid accent = published
+         open, dashed outline = draft (penciled in, not yet real), faded = done,
+         red = deleted. Same language as the sidebar badges. */
       .pin.resolved { background: var(--paper-raised); color: var(--ink-dim); }
       .pin.deleted { background: var(--paper-raised); color: var(--warn); opacity: 0.6; }
       .pin.detached { background: var(--warn); }
-      .pin.draft { background: var(--live); }
+      .pin.draft { background: var(--paper); color: var(--ink); border-style: dashed; }
 
       /* popover (compose + thread) */
       .pop {
@@ -299,6 +302,8 @@ interface BdDoc {
         font-size: 0.62rem; font-weight: 700;
         -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
       }
+      /* Draft badge matches the draft pin: dashed outline, no fill. */
+      .item .num.draft { background: none; color: var(--ink); border: 1.5px dashed var(--ink); }
       .empty { color: var(--ink-dim); padding: 14px; font-size: 0.8rem; }
 
       /* buttons */
@@ -310,6 +315,8 @@ interface BdDoc {
       .btn:active { transform: scale(0.97); }
       .btn.primary { background: var(--accent); color: var(--paper); }
       .seg .btn.on { background: var(--ink); color: var(--paper); }
+      .btn.danger, .mi.danger { background: var(--warn); color: var(--paper); }
+      .mi.danger:hover { background: var(--warn); }
 
       /* fab — icon toolbar. Collapse morphs it into the bubble: the pill and the
          bubble share the bottom-right anchor and a 43px height, the pill scales
@@ -452,6 +459,26 @@ interface BdDoc {
     // later message (e.g. the publish-all summary) short.
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1600);
+  };
+
+  /** Two-click destructive confirm: first click arms the button ("confirm?"),
+   *  the second fires; hesitation disarms after 2s. Used where the data is
+   *  unrecoverable — draft deletion lives only in this browser. */
+  const armConfirm = (btn: HTMLElement, label: string, fire: () => void) => {
+    btn.onclick = () => {
+      if (btn.dataset.armed) {
+        fire();
+        return;
+      }
+      btn.dataset.armed = '1';
+      btn.textContent = 'confirm?';
+      btn.classList.add('danger');
+      setTimeout(() => {
+        delete btn.dataset.armed;
+        btn.textContent = label;
+        btn.classList.remove('danger');
+      }, 2000);
+    };
   };
 
   const statusIcon = (s: Exclude<Status, 'all'>) => {
@@ -660,12 +687,14 @@ interface BdDoc {
       };
     }
     if (v.kind === 'draft') {
-      pop.querySelector<HTMLElement>('[data-del]')!.onclick = () => {
+      // Unrecoverable (local-only), so deletion takes an armed second click.
+      armConfirm(pop.querySelector<HTMLElement>('[data-del]')!, 'delete draft', () => {
         drafts = drafts.filter((d) => d.id !== v.id);
         saveDrafts();
         closePop();
         render();
-      };
+        toast('draft deleted');
+      });
       pop.querySelector<HTMLElement>('[data-edit]')!.onclick = () => openDraftEdit(v.id, x, y);
       pop.querySelector<HTMLElement>('[data-publish]')!.onclick = () => void publishDraft(v.id);
     } else {
@@ -871,16 +900,14 @@ interface BdDoc {
     });
   };
 
-  /* Number-badge color mirrors the pins: draft green vs published blue, so the
-     sidebar carries the same draft/published distinction as the page. */
+  /* Badge fill mirrors the pins (drafts are the dashed-outline .draft class,
+     handled in markup): accent = open, dim = resolved, red = deleted. */
   const badgeColor = (v: View) =>
-    v.kind === 'draft'
-      ? 'var(--live)'
-      : v.status === 'resolved'
-        ? 'var(--ink-dim)'
-        : v.status === 'deleted'
-          ? 'var(--warn)'
-          : 'var(--accent)';
+    v.status === 'resolved'
+      ? 'var(--ink-dim)'
+      : v.status === 'deleted'
+        ? 'var(--warn)'
+        : 'var(--accent)';
 
   const EYE = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.6"/></svg>`;
   const EYE_OFF = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.6"/><line x1="4" y1="20" x2="20" y2="4"/></svg>`;
@@ -893,7 +920,7 @@ interface BdDoc {
       .filter((v) => !v.parentId && shown(v))
       .map(
         (v) =>
-          `<div class="item" data-id="${escapeHtml(v.id)}" data-kind="${v.kind}"><div class="txt"><span class="num" style="background:${badgeColor(v)}">${nums.get(v.id) ?? ''}</span><span>${escapeHtml(v.text.slice(0, 90))}</span></div><div class="meta">${whoTag(v.author, v.email)} · ${v.kind === 'draft' ? 'draft' : v.status} · ${escapeHtml(v.page)}</div></div>`,
+          `<div class="item" data-id="${escapeHtml(v.id)}" data-kind="${v.kind}"><div class="txt">${v.kind === 'draft' ? `<span class="num draft">${nums.get(v.id) ?? ''}</span>` : `<span class="num" style="background:${badgeColor(v)}">${nums.get(v.id) ?? ''}</span>`}<span>${escapeHtml(v.text.slice(0, 90))}</span></div><div class="meta">${whoTag(v.author, v.email)} · ${v.kind === 'draft' ? 'draft' : v.status} · ${escapeHtml(v.page)}</div></div>`,
       )
       .join('');
     const drafts0 = drafts.length;
@@ -1007,6 +1034,7 @@ interface BdDoc {
         ? [
             `<button class="mi" data-m="copydrafts">⧉ copy ${ds}</button>`,
             `<button class="mi" data-m="publish">↑ publish ${ds}</button>`,
+            `<button class="mi" data-m="delall">⌫ delete ${ds}</button>`,
           ]
         : []),
       `<button class="mi" data-m="pins">${pinsHidden ? `${EYE_OFF} show numbers` : `${EYE} hide numbers`}</button>`,
@@ -1017,6 +1045,18 @@ interface BdDoc {
     requestAnimationFrame(() => menu.classList.add('in'));
     menuOpen = true;
     menu.querySelectorAll<HTMLElement>('.mi').forEach((b) => {
+      if (b.dataset.m === 'delall') {
+        // Armed confirm: the first click flips the item to "confirm?" and keeps
+        // the menu open; only the second click deletes.
+        armConfirm(b, `⌫ delete ${ds}`, () => {
+          drafts = [];
+          saveDrafts();
+          closeMenu();
+          render();
+          toast('drafts deleted');
+        });
+        return;
+      }
       b.onclick = () => {
         closeMenu();
         const m = b.dataset.m;
