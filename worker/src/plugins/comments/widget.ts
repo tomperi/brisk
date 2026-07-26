@@ -320,11 +320,22 @@ interface BdDoc {
         align-items: center; gap: 8px; background: var(--paper); border: 1.5px solid var(--ink);
         border-radius: 999px; padding: 5px 13px; box-shadow: var(--shadow-hard);
         transform-origin: calc(100% - 21.5px) center;
-        transition: transform 240ms var(--ease), opacity 160ms ease-out, visibility 0s;
+        transition: transform 260ms var(--ease), opacity 160ms ease-out, visibility 0s;
       }
       .layer.collapsed .fab {
         opacity: 0; transform: scale(0.45); visibility: hidden; pointer-events: none;
-        transition: transform 240ms var(--ease), opacity 160ms ease-out, visibility 0s 240ms;
+        transition: transform 260ms var(--ease), opacity 160ms ease-out, visibility 0s 260ms;
+      }
+      /* The drawer owns the bottom-right corner while open (its action footer
+         lives there) — the toolbar slides out of its way, sharing the drawer's
+         duration and ease so the two read as one movement. */
+      .layer.drawer-open .fab { transform: translateX(calc(-1 * min(360px, 92vw))); }
+      @media (max-width: 560px) {
+        /* No room beside a 92vw drawer — fade the toolbar out instead. */
+        .layer.drawer-open .fab {
+          opacity: 0; transform: scale(0.45); visibility: hidden; pointer-events: none;
+          transition: transform 260ms var(--ease), opacity 160ms ease-out, visibility 0s 260ms;
+        }
       }
       .fab .btn { width: 30px; height: 30px; padding: 0; display: grid; place-items: center; font-size: 0.95rem; line-height: 1; }
       .fab [data-act='pick'] { font-size: 1.25rem; }
@@ -349,9 +360,12 @@ interface BdDoc {
       }
       .btn[data-tip]:hover::after,
       .nub[data-tip]:hover::after { opacity: 1; transform: translateY(0); }
-      /* The drawer head sits at the top of the screen — its tips open downward. */
-      .drawer .btn[data-tip]::after { bottom: auto; top: calc(100% + 8px); transform: translateY(-4px); }
-      .drawer .btn[data-tip]:hover::after { transform: translateY(0); }
+      /* The drawer head sits at the top of the screen — its tips open downward.
+         (Head only: the action footer's tips keep opening upward.) */
+      .dhead .btn[data-tip]::after { bottom: auto; top: calc(100% + 8px); transform: translateY(-4px); }
+      .dhead .btn[data-tip]:hover::after { transform: translateY(0); }
+      /* Footer buttons hug the drawer's left edge — their tips grow rightward. */
+      .dfoot .btn[data-tip]::after { right: auto; left: 0; }
 
       /* minimized bubble — the always-visible way back; diameter == pill height */
       .nub {
@@ -855,7 +869,7 @@ interface BdDoc {
         <div class="seg">${chips}</div>
       </div>
       <div class="list">${rows || `<div class="empty">no ${filter} comments</div>`}</div>
-      <div class="dfoot"><button class="btn" data-copyall>copy log as md</button>${drafts0 ? `<button class="btn" data-copy>copy ${drafts0} draft${drafts0 === 1 ? '' : 's'}</button><button class="btn primary" data-puball>publish all</button>` : ''}</div>`;
+      <div class="dfoot"><button class="btn" data-copyall data-tip="everything as markdown">copy all</button>${drafts0 ? `<button class="btn" data-copy data-tip="your unpublished drafts as markdown">copy ${drafts0} draft${drafts0 === 1 ? '' : 's'}</button><button class="btn primary" data-puball>publish all</button>` : ''}</div>`;
     drawer.querySelector<HTMLElement>('[data-close]')!.onclick = toggleDrawer;
     drawer.querySelectorAll<HTMLElement>('[data-f]').forEach((b) => {
       b.onclick = () => {
@@ -908,6 +922,8 @@ interface BdDoc {
     drawerOpen = !drawerOpen;
     renderPanel();
     drawer.classList.toggle('open', drawerOpen);
+    // The toolbar yields the bottom-right corner to the drawer's action footer.
+    layer.classList.toggle('drawer-open', drawerOpen);
   }
 
   // ---- minimize / hide / restore --------------------------------------------
