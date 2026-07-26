@@ -226,11 +226,12 @@ interface BdDoc {
       }
       @keyframes pin-in { from { opacity: 0; transform: scale(0.85); } }
       .pin:active { transform: scale(0.94); }
-      /* Status is fill + line style, not hue alone: solid accent = published
-         open, dashed outline = draft (penciled in, not yet real), faded = done,
-         red = deleted. Same language as the sidebar badges. */
-      .pin.resolved { background: var(--paper-raised); color: var(--ink-dim); }
-      .pin.deleted { background: var(--paper-raised); color: var(--warn); opacity: 0.6; }
+      /* Status is fill + line style, not hue alone: dashed outline = draft
+         (penciled in, not yet real), solid accent = published open, solid gray
+         = resolved, red + faded = deleted. Identical fills to the sidebar
+         badges, so a pale resolved pin can't be mistaken for a draft. */
+      .pin.resolved { background: var(--ink-dim); color: var(--paper); }
+      .pin.deleted { background: var(--warn); color: var(--paper); opacity: 0.65; }
       .pin.detached { background: var(--warn); }
       .pin.draft { background: var(--paper); color: var(--ink); border-style: dashed; }
 
