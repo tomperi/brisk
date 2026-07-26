@@ -570,6 +570,10 @@ function usageLine(id: string, action: string, act: ActionManifest): string {
 function printPluginHelp(manifest: PluginManifest): void {
   console.log(`${bold(manifest.id)} — ${manifest.description}\n`);
   const names = Object.keys(manifest.actions);
+  if (!names.length) {
+    console.log(dim('  No CLI actions — this plugin is widget-only.'));
+    return;
+  }
   const width = Math.max(...names.map((n) => n.length)) + 2;
   for (const [name, act] of Object.entries(manifest.actions)) {
     console.log(`  ${bold(name.padEnd(width))}${act.summary}`);
