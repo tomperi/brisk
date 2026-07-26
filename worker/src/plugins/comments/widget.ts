@@ -291,15 +291,21 @@ interface BdDoc {
       .fab [data-act='pick'] { font-size: 1.25rem; }
       .drawer [data-close] { width: 28px; height: 28px; padding: 0; display: grid; place-items: center; font-size: 1rem; line-height: 1; }
       .btn[data-tip] { position: relative; }
+      /* Centered by layout (auto margins), not translateX(-50%) — a transform
+         leaves odd-width tips on a half-pixel and the text rasterizes soft.
+         Whole-px font size + antialiased for the same reason: tiny light-on-dark
+         text fringes under subpixel AA. */
       .btn[data-tip]::after,
       .nub[data-tip]::after {
-        content: attr(data-tip); position: absolute; bottom: calc(100% + 8px); left: 50%;
-        transform: translateX(-50%) translateY(4px); background: var(--ink); color: var(--paper);
-        font-size: 0.66rem; white-space: nowrap; padding: 3px 7px; border-radius: 6px; opacity: 0;
+        content: attr(data-tip); position: absolute; bottom: calc(100% + 8px);
+        left: 0; right: 0; margin: 0 auto; width: max-content;
+        transform: translateY(4px); background: var(--ink); color: var(--paper);
+        font-size: 11px; white-space: nowrap; padding: 3px 7px; border-radius: 6px; opacity: 0;
+        -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
         pointer-events: none; transition: opacity 120ms ease, transform 120ms var(--ease); z-index: 5;
       }
       .btn[data-tip]:hover::after,
-      .nub[data-tip]:hover::after { opacity: 1; transform: translateX(-50%) translateY(0); }
+      .nub[data-tip]:hover::after { opacity: 1; transform: translateY(0); }
 
       /* minimized bubble — the always-visible way back */
       .nub {
@@ -307,6 +313,7 @@ interface BdDoc {
         width: 44px; height: 44px; border-radius: 50%; place-items: center; cursor: pointer;
         background: var(--accent); color: var(--paper); font: inherit; font-weight: 700;
         font-size: 0.95rem; border: 1.5px solid var(--ink); box-shadow: var(--shadow-hard);
+        -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
         transition: transform 110ms var(--ease);
       }
       .nub:active { transform: scale(0.96); }
@@ -315,12 +322,14 @@ interface BdDoc {
       .layer.collapsed .nub { display: grid; }
 
       .toast {
-        position: fixed; left: 50%; bottom: 74px; transform: translateX(-50%) translateY(6px);
+        position: fixed; left: 0; right: 0; margin: 0 auto; width: max-content; bottom: 74px;
+        transform: translateY(6px);
         background: var(--ink); color: var(--paper); font-size: 0.78rem; padding: 7px 13px;
         border-radius: 999px; pointer-events: none; opacity: 0;
+        -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
         transition: opacity 180ms ease-out, transform 180ms var(--ease);
       }
-      .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+      .toast.show { opacity: 1; transform: translateY(0); }
 
       @media (prefers-reduced-motion: reduce) {
         *, .drawer, .pop, .pin, .toast { transition: none !important; animation: none !important; }
