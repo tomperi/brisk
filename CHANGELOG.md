@@ -15,13 +15,15 @@ releases are published to
   from a generic `brisk plugin` CLI whose verbs load from the server. Adding a
   plugin in a fork is one directory under `worker/src/plugins/` plus a registry
   line — no worker-core or CLI changes.
-- **Comments plugin** (on by default) — leave feedback on any element. Drafts
-  are local-first (localStorage; editable, `copy as markdown` to hand an
-  agent), publish to share via `brisk.db` with realtime + an audit trail.
-  Resolve, reply, and soft-delete from the widget or the CLI
-  (`brisk plugin comments …`), or copy the whole log as markdown from the
-  drawer. Typing in the widget never triggers the host page's own shortcuts.
-  Minimize it to a corner bubble (click to reopen); `Shift+C` fully hides it.
+- **Comments plugin** (on by default) — leave feedback on any element, marked
+  by numbered pins (dashed = draft, blue = open, gray = resolved). Drafts are
+  local-first (localStorage; editable, copy as markdown to hand an agent),
+  publish to share via `brisk.db` with realtime + an audit trail. Resolve,
+  reply, and soft-delete from the widget or the CLI
+  (`brisk plugin comments …`), or copy the whole log as markdown. Right-click
+  the toolbar for the command menu. Typing in the widget never triggers the
+  host page's own shortcuts. Minimize it to a corner bubble (click to reopen);
+  `Shift+C` fully hides it.
 
 ## [0.3.0] - 2026-07-13
 
