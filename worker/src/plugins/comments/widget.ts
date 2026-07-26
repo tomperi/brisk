@@ -82,6 +82,8 @@ interface BdDoc {
   let hidden = localStorage.getItem(key('hidden')) === '1';
   let collapsed = localStorage.getItem(key('collapsed')) === '1';
   let filter = (localStorage.getItem(key('filter')) as Status) || 'open';
+  /** Hides the numbered pins only — independent of collapsing the toolbar. */
+  let pinsHidden = localStorage.getItem(key('pins')) === '1';
 
   // ---- published comments (brisk.db) ---------------------------------------
   let published: BdDoc[] = [];
@@ -283,7 +285,12 @@ interface BdDoc {
         background: var(--paper-raised); cursor: pointer;
       }
       .item .meta { color: var(--ink-dim); font-size: 0.72rem; margin-top: 4px; }
-      .item .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 6px; }
+      .item .num {
+        display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 3px;
+        border-radius: 999px; margin-right: 6px; vertical-align: -2px; color: var(--paper);
+        font-size: 0.62rem; font-weight: 700;
+        -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+      }
       .empty { color: var(--ink-dim); padding: 14px; font-size: 0.8rem; }
 
       /* buttons */
@@ -400,6 +407,8 @@ interface BdDoc {
     author: string;
     email: string;
     at: string;
+    /** Raw ISO timestamp — the number assignment sorts on it. */
+    created: string;
     parentId: string;
   }
   const statusOfDoc = (d: BdDoc): Exclude<Status, 'all'> =>
@@ -416,6 +425,7 @@ interface BdDoc {
       author: 'you',
       email: 'draft — not published',
       at: timeAgo(d.createdAt),
+      created: d.createdAt,
       parentId: '',
     })),
     ...published.map((d) => ({
@@ -429,6 +439,7 @@ interface BdDoc {
       author: String(d.createdBy ?? ''),
       email: String(d.createdByEmail ?? ''),
       at: timeAgo(d.createdAt),
+      created: d.createdAt,
       parentId: String(d.parentId ?? ''),
     })),
   ];
@@ -492,13 +503,17 @@ interface BdDoc {
     ta.style.height = 'auto';
     ta.style.height = `${Math.min(ta.scrollHeight, 180)}px`;
   }
+  let popCloseTimer: ReturnType<typeof setTimeout> | undefined;
   function openPop() {
+    // A pending close (click-away, then an immediate reopen — e.g. pick-click:
+    // mousedown closes, click opens) must not hide the popover it didn't own.
+    clearTimeout(popCloseTimer);
     pop.classList.add('show');
     requestAnimationFrame(() => pop.classList.add('in'));
   }
   const closePop = () => {
     pop.classList.remove('in');
-    setTimeout(() => pop.classList.remove('show'), 150);
+    popCloseTimer = setTimeout(() => pop.classList.remove('show'), 150);
   };
 
   // ---- new draft popover ----------------------------------------------------
@@ -736,14 +751,24 @@ interface BdDoc {
   /** Full rebuild — call when the data changes, not on scroll (rebuilding per
    *  scroll event restarts the pin-in animation and churns the DOM). */
   const pinRefs: { el: HTMLElement; selector: string }[] = [];
+  /** Comment number by id. Assigned chronologically over every top-level
+   *  comment (all pages, all statuses), so a comment keeps its number when the
+   *  filter changes or you navigate — the pin and the side panel always agree. */
+  let nums = new Map<string, number>();
   function render() {
+    nums = new Map(
+      views()
+        .filter((v) => !v.parentId)
+        .sort((a, b) => (a.created < b.created ? -1 : 1))
+        .map((v, i) => [v.id, i + 1]),
+    );
     pins.innerHTML = '';
     pinRefs.length = 0;
     for (const v of views().filter((v) => here(v) && !v.parentId && shown(v))) {
       const target = findTarget(v.selector);
       const pin = document.createElement('div');
       pin.className = `pin ${v.kind === 'draft' ? 'draft' : v.status}${!target && v.selector ? ' detached' : ''}`;
-      pin.textContent = v.kind === 'draft' ? '✎' : '●';
+      pin.textContent = String(nums.get(v.id) ?? '');
       placePin(pin, v.selector);
       pin.onclick = (e) => {
         e.stopPropagation();
@@ -752,6 +777,7 @@ interface BdDoc {
       pins.appendChild(pin);
       pinRefs.push({ el: pin, selector: v.selector });
     }
+    pins.style.display = pinsHidden ? 'none' : '';
     if (drawer.classList.contains('open')) renderPanel();
     updateNub();
   }
@@ -778,14 +804,14 @@ interface BdDoc {
       .filter((v) => !v.parentId && shown(v))
       .map(
         (v) =>
-          `<div class="item" data-id="${escapeHtml(v.id)}" data-kind="${v.kind}"><div class="txt"><span class="dot" style="background:${dotColor(v.status)}"></span>${escapeHtml(v.text.slice(0, 90))}</div><div class="meta">${whoTag(v.author, v.email)} · ${v.status} · ${escapeHtml(v.page)}</div></div>`,
+          `<div class="item" data-id="${escapeHtml(v.id)}" data-kind="${v.kind}"><div class="txt"><span class="num" style="background:${dotColor(v.status)}">${nums.get(v.id) ?? ''}</span>${escapeHtml(v.text.slice(0, 90))}</div><div class="meta">${whoTag(v.author, v.email)} · ${v.status} · ${escapeHtml(v.page)}</div></div>`,
       )
       .join('');
     const drafts0 = drafts.length;
     drawer.innerHTML = `<div class="dhead">
         <span class="title">Comments</span>
         <button class="btn" data-close aria-label="close">✕</button>
-        <div class="seg">${chips}</div>
+        <div class="seg">${chips}<button class="btn" data-pins>${pinsHidden ? 'show numbers' : 'hide numbers'}</button></div>
         <div class="seg"><button class="btn" data-copyall>copy log as md</button>${drafts0 ? `<button class="btn" data-copy>copy ${drafts0} draft(s) as md</button><button class="btn primary" data-puball>publish all</button>` : ''}</div>
       </div>
       <div class="list">${rows || `<div class="empty">no ${filter} comments</div>`}</div>`;
@@ -797,6 +823,12 @@ interface BdDoc {
         render();
       };
     });
+    // Pin visibility only — the toolbar keeps its own minimize/hide controls.
+    drawer.querySelector<HTMLElement>('[data-pins]')!.onclick = () => {
+      pinsHidden = !pinsHidden;
+      localStorage.setItem(key('pins'), pinsHidden ? '1' : '0');
+      render();
+    };
     drawer.querySelector<HTMLElement>('[data-copyall]')!.onclick = () =>
       void clip(`comments-${SITE}.md`, commentsMarkdown());
     const copy = drawer.querySelector<HTMLElement>('[data-copy]');
@@ -902,6 +934,13 @@ interface BdDoc {
   document.addEventListener('mousemove', onMove, true);
   document.addEventListener('click', onClick, true);
   document.addEventListener('keydown', onKey, true);
+  // Click-away closes the open popover, mirroring Esc. Bubble phase on purpose:
+  // interaction inside the widget stops at the shadow root (isolation guard
+  // above), so any mousedown that reaches here happened on the page itself.
+  // Pick-clicks are safe too — the popover only opens on the later click event.
+  document.addEventListener('mousedown', () => {
+    if (pop.classList.contains('show')) closePop();
+  });
   // Reposition pins on scroll; the popover stays put (it's fixed) so a scrolling
   // textarea can't dismiss it.
   addEventListener('scroll', scheduleReposition, true);
