@@ -384,6 +384,28 @@ interface BdDoc {
       .layer.collapsed .nub:active { transform: scale(0.96); }
       .layer.collapsed #pins { display: none; }
 
+      /* right-click command menu — anchored above the toolbar/bubble corner */
+      .menu {
+        position: fixed; right: 16px; bottom: 68px; min-width: 190px; pointer-events: auto;
+        background: var(--paper); border: 1.5px solid var(--ink); border-radius: 10px;
+        padding: 5px; box-shadow: var(--shadow-hard); display: none; opacity: 0;
+        transform: scale(0.96); transform-origin: bottom right;
+        transition: opacity 120ms ease-out, transform 140ms var(--ease); z-index: 6;
+      }
+      .menu.show { display: block; }
+      .menu.in { opacity: 1; transform: scale(1); }
+      .menu .mhead {
+        color: var(--ink-dim); font-size: 0.7rem; padding: 4px 9px 6px;
+        border-bottom: 1.5px solid var(--line); margin-bottom: 4px; white-space: nowrap;
+      }
+      .menu .mi {
+        display: flex; width: 100%; align-items: center; gap: 8px; padding: 6px 9px; border: 0;
+        background: none; color: var(--ink); font: inherit; font-size: 0.8rem; text-align: left;
+        border-radius: 6px; cursor: pointer;
+      }
+      .menu .mi:hover { background: var(--accent-soft); }
+      .menu .mi svg { flex: none; }
+
       .toast {
         position: fixed; left: 0; right: 0; margin: 0 auto; width: max-content; bottom: 74px;
         transform: translateY(6px);
@@ -409,6 +431,7 @@ interface BdDoc {
         <button class="btn" data-act="min" data-tip="Minimize">–</button>
       </div>
       <button class="nub" id="nub" data-tip="Comments">✎</button>
+      <div class="menu" id="menu"></div>
       <div class="toast" id="toast"></div>
     </div>`;
   const $ = (id: string) => root.getElementById(id)!;
@@ -417,6 +440,7 @@ interface BdDoc {
     pop = $('pop'),
     drawer = $('drawer'),
     nub = $('nub'),
+    menu = $('menu'),
     toastEl = $('toast');
   const layer = root.querySelector('.layer')!;
 
@@ -734,6 +758,17 @@ interface BdDoc {
     }
   }
 
+  async function publishAll(): Promise<void> {
+    let ok = 0,
+      failed = 0;
+    for (const d of [...drafts]) (await publishDraft(d.id)) ? ok++ : failed++;
+    toast(
+      failed
+        ? `published ${ok}/${ok + failed} — failed drafts kept`
+        : `published ${ok} draft${ok === 1 ? '' : 's'}`,
+    );
+  }
+
   // ---- markdown export ------------------------------------------------------
   function draftsMarkdown(): string {
     let out = `# comment drafts on ${SITE}\n`;
@@ -889,17 +924,7 @@ interface BdDoc {
     const copy = drawer.querySelector<HTMLElement>('[data-copy]');
     if (copy) copy.onclick = () => void clip(`comment-drafts-${SITE}.md`, draftsMarkdown());
     const puball = drawer.querySelector<HTMLElement>('[data-puball]');
-    if (puball)
-      puball.onclick = async () => {
-        let ok = 0,
-          failed = 0;
-        for (const d of [...drafts]) (await publishDraft(d.id)) ? ok++ : failed++;
-        toast(
-          failed
-            ? `published ${ok}/${ok + failed} — failed drafts kept`
-            : `published ${ok} draft${ok === 1 ? '' : 's'}`,
-        );
-      };
+    if (puball) puball.onclick = () => void publishAll();
     drawer.querySelectorAll<HTMLElement>('.item').forEach((item) => {
       item.onclick = () => {
         const v = views().find((x) => x.id === item.dataset.id && x.kind === item.dataset.kind);
@@ -962,11 +987,79 @@ interface BdDoc {
     applyCollapsed();
   };
 
+  // ---- right-click command menu ---------------------------------------------
+  let menuOpen = false;
+  function closeMenu() {
+    if (!menuOpen) return;
+    menuOpen = false;
+    menu.classList.remove('in');
+    setTimeout(() => menu.classList.remove('show'), 140);
+  }
+  function openMenu() {
+    const openN = views().filter((v) => !v.parentId && v.status === 'open').length;
+    const n = drafts.length;
+    const ds = `${n} draft${n === 1 ? '' : 's'}`;
+    menu.innerHTML = [
+      `<div class="mhead">${escapeHtml(SITE)} · ${openN} open · ${ds}</div>`,
+      `<button class="mi" data-m="pick">✎ new comment</button>`,
+      `<button class="mi" data-m="copyall">⧉ copy all</button>`,
+      ...(n
+        ? [
+            `<button class="mi" data-m="copydrafts">⧉ copy ${ds}</button>`,
+            `<button class="mi" data-m="publish">↑ publish ${ds}</button>`,
+          ]
+        : []),
+      `<button class="mi" data-m="pins">${pinsHidden ? `${EYE_OFF} show numbers` : `${EYE} hide numbers`}</button>`,
+      `<button class="mi" data-m="min">– minimize</button>`,
+      `<button class="mi" data-m="hide">✕ hide until Shift+C</button>`,
+    ].join('');
+    menu.classList.add('show');
+    requestAnimationFrame(() => menu.classList.add('in'));
+    menuOpen = true;
+    menu.querySelectorAll<HTMLElement>('.mi').forEach((b) => {
+      b.onclick = () => {
+        closeMenu();
+        const m = b.dataset.m;
+        if (m === 'pick') setPick(true);
+        else if (m === 'copyall') void clip(`comments-${SITE}.md`, commentsMarkdown());
+        else if (m === 'copydrafts') void clip(`comment-drafts-${SITE}.md`, draftsMarkdown());
+        else if (m === 'publish') void publishAll();
+        else if (m === 'pins') {
+          pinsHidden = !pinsHidden;
+          localStorage.setItem(key('pins'), pinsHidden ? '1' : '0');
+          render();
+        } else if (m === 'min') {
+          collapsed = true;
+          localStorage.setItem(key('collapsed'), '1');
+          applyCollapsed();
+        } else if (m === 'hide') {
+          hidden = true;
+          localStorage.setItem(key('hidden'), '1');
+          applyHidden();
+        }
+      };
+    });
+  }
+  for (const el of [fab, nub]) {
+    el.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (menuOpen) closeMenu();
+      else openMenu();
+    });
+  }
+  // Interactions elsewhere in the widget dismiss the menu (page-side clicks are
+  // handled by the document-level closer — they never cross the shadow root).
+  root.addEventListener('mousedown', (e) => {
+    if (menuOpen && !e.composedPath().includes(menu)) closeMenu();
+  });
+
   // The hotkey survives hiding: it toggles the whole host in and out.
   const onKey = (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
       setPick(false);
       closePop();
+      closeMenu();
     }
     // composedPath, not e.target: this listener sits outside our shadow root,
     // so retargeting would report the host <div> for keys typed in the widget's
@@ -997,6 +1090,7 @@ interface BdDoc {
   // Pick-clicks are safe too — the popover only opens on the later click event.
   document.addEventListener('mousedown', () => {
     if (pop.classList.contains('show')) closePop();
+    closeMenu();
   });
   // Reposition pins on scroll; the popover stays put (it's fixed) so a scrolling
   // textarea can't dismiss it.
