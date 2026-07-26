@@ -97,13 +97,19 @@ async function activeDeploy(platform: Platform, site: string): Promise<string | 
 }
 
 /**
- * The stored enabled plugin ids for a site, or `null` for a legacy site whose
+ * A site's stored plugin state: whether the site exists at all (has a live
+ * deploy pointer), and its enabled plugin ids — `null` for a legacy site whose
  * `plugins` column was never resolved (deployed before the feature). Callers
  * fall back to the registry defaults on `null` so a default-on plugin lights up
- * across an existing instance without re-deploying every site.
+ * across an existing instance without re-deploying every site. `exists` lets
+ * the plugin action routes tell "no such site" apart from "legacy row".
  */
-export async function enabledPlugins(platform: Platform, site: string): Promise<string[] | null> {
-  return (await pointer(platform, site)).plugins;
+export async function sitePlugins(
+  platform: Platform,
+  site: string,
+): Promise<{ exists: boolean; plugins: string[] | null }> {
+  const p = await pointer(platform, site);
+  return { exists: p.deploy != null, plugins: p.plugins };
 }
 
 export async function listSites(platform: Platform): Promise<SiteInfo[]> {

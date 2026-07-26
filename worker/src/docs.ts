@@ -87,24 +87,36 @@ export class DocStore {
     return { id, createdAt: now, updatedAt: now, ...data };
   }
 
-  /** Shallow-merges `fields` into the existing doc, Firebase-update style. */
+  /**
+   * Shallow-merges `fields` into the existing doc, Firebase-update style.
+   * With `ifUpdatedAt`, the write is a compare-and-swap: it only lands if the
+   * row still matches that snapshot, and returns `null` when a concurrent
+   * writer got there first — otherwise this read-merge-write would silently
+   * overwrite their change with our merged copy.
+   */
   async update(
     site: string,
     collection: string,
     id: string,
     fields: Record<string, unknown>,
+    opts: { ifUpdatedAt?: string } = {},
   ): Promise<Doc | null> {
     const existing = await this.get(site, collection, id);
     if (!existing) return null;
-    const { id: _id, createdAt, updatedAt: _updatedAt, ...current } = existing;
+    if (opts.ifUpdatedAt !== undefined && existing.updatedAt !== opts.ifUpdatedAt) return null;
+    const { id: _id, createdAt, updatedAt, ...current } = existing;
     const merged = { ...current, ...ownFields(fields) };
     const now = new Date().toISOString();
-    await this.db
-      .prepare(
-        'UPDATE docs SET data = ?, updated_at = ? WHERE site = ? AND collection = ? AND id = ?',
-      )
-      .bind(JSON.stringify(merged), now, site, collection, id)
-      .run();
+    const guarded = opts.ifUpdatedAt !== undefined;
+    const stmt = this.db.prepare(
+      `UPDATE docs SET data = ?, updated_at = ? WHERE site = ? AND collection = ? AND id = ?${guarded ? ' AND updated_at = ?' : ''}`,
+    );
+    const res = await (
+      guarded
+        ? stmt.bind(JSON.stringify(merged), now, site, collection, id, updatedAt)
+        : stmt.bind(JSON.stringify(merged), now, site, collection, id)
+    ).run();
+    if (res.meta.changes === 0) return null;
     return { id, createdAt, updatedAt: now, ...merged };
   }
 

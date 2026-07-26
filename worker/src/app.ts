@@ -12,7 +12,7 @@ import {
   listFiles,
   listSites,
   serveSite,
-  enabledPlugins,
+  sitePlugins,
   type DeployFile,
 } from './sites';
 import type { AppEnv, Env } from './env';
@@ -426,7 +426,8 @@ export function createApp(
         // A legacy site (plugins column NULL) never had a set resolved; fall back
         // to the registry defaults so default-on plugins appear without a
         // re-deploy. An explicit stored [] (opt-out) is respected as-is.
-        const stored = (await enabledPlugins(c.var.platform, site)) ?? resolveEnabled(plugins, {});
+        const stored =
+          (await sitePlugins(c.var.platform, site)).plugins ?? resolveEnabled(plugins, {});
         // Fold in any (now-)mandatory plugin the stored set predates, so
         // "mandatory is always on" holds without a redeploy.
         const enabled = withMandatory(plugins, stored);

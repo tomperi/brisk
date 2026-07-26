@@ -1,6 +1,7 @@
 import { SELF, createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/app';
+import { DocStore } from '../src/docs';
 import { buildCloudflarePlatform } from '../src/platform/cloudflare/platform';
 import type { AppEnv } from '../src/env';
 import type { Context } from 'hono';
@@ -307,6 +308,19 @@ describe('widget injection', () => {
     expect(html.indexOf('<script src="/_plugins/echo/')).toBeLessThan(html.indexOf('</BODY>'));
   });
 
+  it('ignores a literal </body> inside an inline script before the real close', async () => {
+    // Last-match semantics: the common hazard is a literal "</body>" in page
+    // JS ahead of the real closing tag. (The inverse — literal text after the
+    // real close — is a documented limit of string injection; see inject.ts.)
+    await deployHtml(
+      'wliteral',
+      '<!doctype html><html><body><script>var x = "</body>";</script>done</body></html>',
+    );
+    const html = await (await call('/s/wliteral/')).text();
+    expect(html).toContain('var x = "</body>";');
+    expect(html).toContain('done<script src="/_plugins/echo/widget.js"');
+  });
+
   it('splices at the right offset when case-folding changes string length', async () => {
     // 'İ'.toLowerCase() is two code units — a lowercased-copy index search
     // would land the tags one char late, splitting the closing tag.
@@ -423,6 +437,61 @@ const act = async (name: string, args: Record<string, string>) =>
       body: JSON.stringify({ args }),
     })
   ).json<{ result: Record<string, unknown> }>();
+
+// Actions only run against sites that exist with the plugin enabled, so every
+// site the comments tests touch is deployed up front (comments is default-on,
+// so a plain deploy enables it).
+beforeAll(async () => {
+  for (const site of ['csite', 'evsite', 'nested', 'frozen', 'dsite', 'rsite', 'xsite', 'hsite']) {
+    const form = new FormData();
+    form.append('files', new File(['<h1>x</h1>'], 'index.html', { type: 'text/html' }));
+    await cc(`/api/deploy/${site}`, { method: 'POST', body: form });
+  }
+});
+
+describe('action enablement', () => {
+  const create = (site: string) =>
+    cc('/api/plugins/comments/actions/create', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ args: { site, text: 'hi' } }),
+    });
+
+  it('404s an action against a site that was never deployed', async () => {
+    const res = await create('ghost-site');
+    expect(res.status).toBe(404);
+    expect(await res.json<{ error: string }>()).toMatchObject({
+      error: expect.stringContaining('no such site'),
+    });
+  });
+
+  it('403s an action against a site that opted out of the plugin', async () => {
+    const form = new FormData();
+    form.append('files', new File(['<h1>x</h1>'], 'index.html', { type: 'text/html' }));
+    await cc('/api/deploy/nocomm', {
+      method: 'POST',
+      headers: { 'x-brisk-plugins': JSON.stringify({ comments: false }) },
+      body: form,
+    });
+    const res = await create('nocomm');
+    expect(res.status).toBe(403);
+    expect(await res.json<{ error: string }>()).toMatchObject({
+      error: expect.stringContaining('not enabled'),
+    });
+  });
+
+  it('allows actions on a legacy site (plugins NULL resolves to registry defaults)', async () => {
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      `INSERT INTO sites (name, active_deploy, files, bytes, created_at, updated_at, updated_by, owner, plugins)
+       VALUES ('legacyact', 'seed', 1, 1, ?, ?, 'old', NULL, NULL)`,
+    )
+      .bind(now, now)
+      .run();
+    const { result } = await act('create', { site: 'legacyact', text: 'works' });
+    expect(result).toMatchObject({ text: 'works' });
+  });
+});
 
 describe('comments write actions', () => {
   it('creates a comment with a server-stamped author, ignoring a forged one', async () => {
@@ -547,5 +616,28 @@ describe('registry', () => {
     const res = await SELF.fetch('http://localhost/api/plugins');
     const { plugins } = await res.json<{ plugins: { id: string }[] }>();
     expect(plugins.map((p) => p.id)).toContain('comments');
+  });
+});
+
+describe('DocStore optimistic concurrency', () => {
+  const store = () => new DocStore(buildCloudflarePlatform(env, createExecutionContext()).db);
+
+  it('refuses an update whose snapshot went stale (ifUpdatedAt)', async () => {
+    const s = store();
+    const doc = await s.create('cas', 'c', { v: 1 });
+    // Move past the snapshot's millisecond so the winner's timestamp differs.
+    await new Promise((r) => setTimeout(r, 2));
+    expect(await s.update('cas', 'c', doc.id, { v: 2 })).not.toBeNull();
+
+    const stale = await s.update('cas', 'c', doc.id, { v: 3 }, { ifUpdatedAt: doc.updatedAt });
+    expect(stale).toBeNull();
+    expect(await s.get('cas', 'c', doc.id)).toMatchObject({ v: 2 });
+  });
+
+  it('applies an update whose snapshot is current', async () => {
+    const s = store();
+    const doc = await s.create('cas', 'c2', { v: 1 });
+    const updated = await s.update('cas', 'c2', doc.id, { v: 2 }, { ifUpdatedAt: doc.updatedAt });
+    expect(updated).toMatchObject({ v: 2 });
   });
 });

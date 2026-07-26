@@ -76,15 +76,27 @@ async function setResolved(
   if (!site || !id) throw new Error('site and id are required');
   const by = authorOf(ctx.user);
   const store = new DocStore(ctx.platform.db);
-  const existing = await requireComment(store, site, id);
-  // Deleted comments are frozen — resolving one would also shrink the window
-  // for a racing resolve to write a pre-delete snapshot back over the delete.
-  if (existing.deleted) throw new Error(`comment ${id} is deleted`);
-  const doc = (await store.update(site, COMMENTS, id, {
-    resolved,
-    resolvedBy: resolved ? by : '',
-    resolvedAt: resolved ? new Date().toISOString() : '',
-  }))!;
+  // Deleted comments are frozen. The check alone leaves a window where a
+  // racing delete lands between our read and write and gets overwritten by
+  // this merge (resurrecting the comment) — the CAS on the read snapshot
+  // closes it: a concurrent write voids our attempt and we re-read.
+  let doc: Doc | null = null;
+  for (let attempt = 0; attempt < 2 && !doc; attempt++) {
+    const existing = await requireComment(store, site, id);
+    if (existing.deleted) throw new Error(`comment ${id} is deleted`);
+    doc = await store.update(
+      site,
+      COMMENTS,
+      id,
+      {
+        resolved,
+        resolvedBy: resolved ? by : '',
+        resolvedAt: resolved ? new Date().toISOString() : '',
+      },
+      { ifUpdatedAt: String(existing.updatedAt) },
+    );
+  }
+  if (!doc) throw new Error(`comment ${id} is changing concurrently — retry`);
   await record(ctx, site, id, resolved ? 'resolve' : 'reopen', by);
   ctx.publish(site, { collection: COMMENTS, event: 'update', doc });
   return doc;
@@ -95,12 +107,25 @@ async function softDelete(ctx: PluginActionCtx, args: Record<string, string>): P
   if (!site || !id) throw new Error('site and id are required');
   const by = authorOf(ctx.user);
   const store = new DocStore(ctx.platform.db);
-  await requireComment(store, site, id);
-  const doc = (await store.update(site, COMMENTS, id, {
-    deleted: true,
-    deletedBy: by,
-    deletedAt: new Date().toISOString(),
-  }))!;
+  // Same CAS discipline as setResolved; deleting an already-deleted comment is
+  // an idempotent no-op (no re-stamp, no duplicate audit event).
+  let doc: Doc | null = null;
+  for (let attempt = 0; attempt < 2 && !doc; attempt++) {
+    const existing = await requireComment(store, site, id);
+    if (existing.deleted) return existing;
+    doc = await store.update(
+      site,
+      COMMENTS,
+      id,
+      {
+        deleted: true,
+        deletedBy: by,
+        deletedAt: new Date().toISOString(),
+      },
+      { ifUpdatedAt: String(existing.updatedAt) },
+    );
+  }
+  if (!doc) throw new Error(`comment ${id} is changing concurrently — retry`);
   await record(ctx, site, id, 'delete', by);
   ctx.publish(site, { collection: COMMENTS, event: 'update', doc });
   return doc;

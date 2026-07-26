@@ -31,6 +31,12 @@ export async function injectWidgets(
   // original string (lowercasing a copy shifts offsets when case-folding
   // changes length, e.g. İ → i̇). A page with no body tag — a bare fragment
   // browsers render anyway — gets them appended at the end instead.
+  //
+  // Last match, not first: a literal "</body>" inside an inline script or
+  // comment *before* the real close is the common hazard, and the last match
+  // skips past it. The inverse — literal "</body>" text trailing the real
+  // close — misplaces the tags; a known, accepted limit of string injection
+  // (anything stricter needs an HTML tokenizer).
   let idx = -1;
   for (const m of html.matchAll(/<\/body\s*>/gi)) idx = m.index ?? -1;
   const out = idx >= 0 ? html.slice(0, idx) + tags + html.slice(idx) : html + tags;

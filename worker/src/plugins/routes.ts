@@ -1,7 +1,8 @@
 import type { Context, Hono } from 'hono';
 import type { AppEnv } from '../env';
 import type { DbEvent } from '../platform/types';
-import { isValidSiteName } from '../sites';
+import { isValidSiteName, sitePlugins } from '../sites';
+import { resolveEnabled, withMandatory } from './resolve';
 import { toManifest, type Plugin } from './types';
 
 type Publish = (c: Context<AppEnv>, site: string, event: DbEvent) => void;
@@ -50,6 +51,18 @@ export function registerPluginRoutes(app: Hono<AppEnv>, plugins: Plugin[], publi
     // data can only ever live under a name a site could actually have.
     if (args.site !== undefined && args.site !== 'home' && !isValidSiteName(args.site)) {
       return c.json({ error: 'invalid site' }, 400);
+    }
+    // Enablement gates actions, not just injection: a site that opted out of a
+    // plugin must not accept its writes through the API/CLI either, and actions
+    // can't seed data under names that were never deployed. Resolution mirrors
+    // serving exactly — legacy NULL → registry defaults, mandatory folded in.
+    if (args.site !== undefined) {
+      const state = await sitePlugins(c.var.platform, args.site);
+      if (!state.exists) return c.json({ error: `no such site: ${args.site}` }, 404);
+      const enabled = withMandatory(plugins, state.plugins ?? resolveEnabled(plugins, {}));
+      if (!enabled.includes(plugin.id)) {
+        return c.json({ error: `plugin ${plugin.id} is not enabled on ${args.site}` }, 403);
+      }
     }
 
     try {
