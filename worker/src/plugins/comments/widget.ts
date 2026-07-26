@@ -65,6 +65,8 @@ interface BdDoc {
     label: string;
     textSnippet: string;
     html: string;
+    /** The element's data-* attributes — often the fastest grep for an agent. */
+    dataAttrs?: string;
     createdAt: string;
   }
   const loadDrafts = (): Draft[] => {
@@ -158,6 +160,16 @@ interface BdDoc {
   host.style.cssText = 'all:initial;position:fixed;inset:0;z-index:2147483646;pointer-events:none;';
   (document.body || document.documentElement).appendChild(host);
   const root = host.attachShadow({ mode: 'open' });
+  // Keep widget interaction off the host page's own handlers — typing 'w' in a
+  // comment must not scroll a game, arrows must not move tiles, wheel over the
+  // drawer must not feed a scroll-jack library (html-grab lesson). Bubble-phase
+  // on the shadow root: every widget handler runs earlier (document-capture
+  // onKey on the way down, per-element listeners at target), so only the leak
+  // out to the page is cut. Capture-phase page listeners on document still see
+  // the event first — that's not stoppable from in here.
+  for (const type of ['keydown', 'keypress', 'keyup', 'wheel', 'mousedown'] as const) {
+    root.addEventListener(type, (e) => e.stopPropagation());
+  }
   root.innerHTML = `
     <style>
       :host {
@@ -197,6 +209,9 @@ interface BdDoc {
       .hi {
         position: fixed; pointer-events: none; border: 1.5px solid var(--accent);
         background: var(--accent-soft); border-radius: 5px; display: none;
+        /* glide between elements instead of snapping; linear because it tracks
+           the cursor, and short enough to feel attached to it */
+        transition: all 50ms linear;
       }
 
       /* pins — bold ink-bordered circles with a hard offset shadow */
@@ -417,7 +432,11 @@ interface BdDoc {
       parentId: String(d.parentId ?? ''),
     })),
   ];
-  const here = (v: View) => v.page === location.pathname;
+  // Page identity includes the query string — ?tab=billing is a different page
+  // to comment on. Comments saved before this (or via the CLI) may carry a bare
+  // pathname, so those still match anywhere on the path.
+  const pageId = () => location.pathname + location.search;
+  const here = (v: View) => v.page === pageId() || v.page === location.pathname;
   const shown = (v: View) => (filter === 'all' ? true : v.status === filter);
   const whoTag = (author: string, email: string) =>
     `<strong class="who" title="${escapeHtml(email || author)}">${escapeHtml(author)}</strong>`;
@@ -502,11 +521,18 @@ interface BdDoc {
       drafts.push({
         id: `d-${Date.now().toString(36)}-${Math.floor(performance.now())}`,
         text,
-        page: location.pathname,
+        page: pageId(),
         selector: cssPath(el),
         label: labelOf(el),
         textSnippet: clean(el.textContent ?? '', 140),
         html: clean(el.outerHTML, 300),
+        dataAttrs: clean(
+          [...el.attributes]
+            .filter((a) => a.name.startsWith('data-'))
+            .map((a) => `${a.name}="${a.value}"`)
+            .join(' '),
+          200,
+        ),
         createdAt: new Date().toISOString(),
       });
       saveDrafts();
@@ -535,7 +561,7 @@ interface BdDoc {
     const threadHtml = replies ? `<div class="thread">${replies}</div>` : '';
     const actions =
       v.kind === 'draft'
-        ? `<div class="composebar"><div class="row"><button class="btn" data-del>delete draft</button><button class="btn primary" data-publish>publish</button></div></div>`
+        ? `<div class="composebar"><div class="row"><button class="btn" data-del>delete draft</button><button class="btn" data-edit>edit</button><button class="btn primary" data-publish>publish</button></div></div>`
         : `<div class="composebar"><textarea placeholder="reply…"></textarea><div class="row"><button class="btn" data-del>delete</button><button class="btn" data-res>${v.status === 'resolved' ? 'reopen' : 'resolve'}</button><button class="btn primary" data-reply>reply</button></div></div>`;
     pop.innerHTML = `${head}${body}${threadHtml}${actions}`;
     placePop(x, y);
@@ -544,6 +570,12 @@ interface BdDoc {
     if (ta) {
       ta.addEventListener('input', () => autogrow(ta));
       autogrow(ta);
+      // Same keyboard affordances as compose: Cmd/Ctrl+Enter sends, Esc closes.
+      ta.onkeydown = (ev) => {
+        if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey))
+          pop.querySelector<HTMLElement>('[data-reply]')!.click();
+        if (ev.key === 'Escape') closePop();
+      };
     }
     if (v.kind === 'draft') {
       pop.querySelector<HTMLElement>('[data-del]')!.onclick = () => {
@@ -552,6 +584,7 @@ interface BdDoc {
         closePop();
         render();
       };
+      pop.querySelector<HTMLElement>('[data-edit]')!.onclick = () => openDraftEdit(v.id, x, y);
       pop.querySelector<HTMLElement>('[data-publish]')!.onclick = () => void publishDraft(v.id);
     } else {
       pop.querySelector<HTMLElement>('[data-reply]')!.onclick = async () => {
@@ -584,6 +617,41 @@ interface BdDoc {
     }
   }
 
+  // Editing gets its own clean compose-shaped view, never an input spliced
+  // into the thread bubble — that's the state tangle html-grab hit and undid.
+  function openDraftEdit(id: string, x: number, y: number) {
+    const d = drafts.find((it) => it.id === id);
+    if (!d) return;
+    pop.innerHTML = `<div class="ctx">editing draft · ${escapeHtml(d.label)}</div>
+      <textarea></textarea>
+      <div class="row"><button class="btn" data-cancel>cancel</button><button class="btn primary" data-save>save</button></div>`;
+    placePop(x, y);
+    openPop();
+    const ta = pop.querySelector('textarea')!;
+    ta.value = d.text;
+    ta.focus();
+    autogrow(ta);
+    ta.addEventListener('input', () => autogrow(ta));
+    pop.querySelector<HTMLElement>('[data-cancel]')!.onclick = closePop;
+    pop.querySelector<HTMLElement>('[data-save]')!.onclick = () => {
+      const text = ta.value.trim();
+      if (!text) {
+        ta.focus();
+        return;
+      }
+      d.text = text;
+      saveDrafts();
+      closePop();
+      render();
+      toast('draft updated');
+    };
+    ta.onkeydown = (ev) => {
+      if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey))
+        pop.querySelector<HTMLElement>('[data-save]')!.click();
+      if (ev.key === 'Escape') closePop();
+    };
+  }
+
   async function publishDraft(id: string): Promise<boolean> {
     const d = drafts.find((x) => x.id === id);
     if (!d) return true; // already gone — nothing left to publish
@@ -614,9 +682,42 @@ interface BdDoc {
     for (const d of drafts) {
       out += `\n## ${d.text}\n- page: \`${d.page}\`\n- selector: \`${d.selector}\`\n`;
       if (d.textSnippet) out += `- text: "${d.textSnippet}"\n`;
+      if (d.dataAttrs) out += `- data: \`${d.dataAttrs}\`\n`;
     }
     return out;
   }
+
+  /** The whole log — drafts and published, with status and replies. The widget
+   *  twin of `brisk plugin comments export`. */
+  function commentsMarkdown(): string {
+    let out = `# comments on ${SITE}\n`;
+    for (const v of views().filter((x) => !x.parentId)) {
+      out += `\n## [${v.kind === 'draft' ? 'draft' : v.status}] ${v.text}\n`;
+      out += `- by: ${v.author}\n- page: \`${v.page}\`\n`;
+      if (v.selector) out += `- selector: \`${v.selector}\`\n`;
+      for (const r of published.filter((p) => String(p.parentId ?? '') === v.id && !p.deleted))
+        out += `- reply (${String(r.createdBy ?? '')}): ${String(r.text ?? '')}\n`;
+    }
+    return out;
+  }
+
+  // Clipboard writes reject on denied permission or an insecure context — fall
+  // back to downloading the file so the export is never silently lost.
+  function download(name: string, text: string) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: 'text/markdown' }));
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+  const clip = (name: string, text: string) =>
+    navigator.clipboard.writeText(text).then(
+      () => toast('copied — paste to your agent'),
+      () => {
+        download(name, text);
+        toast('clipboard blocked — downloaded instead');
+      },
+    );
 
   // ---- render ---------------------------------------------------------------
   const findTarget = (selector: string): Element | null => {
@@ -685,7 +786,7 @@ interface BdDoc {
         <span class="title">Comments</span>
         <button class="btn" data-close aria-label="close">✕</button>
         <div class="seg">${chips}</div>
-        ${drafts0 ? `<div class="seg"><button class="btn" data-copy>copy ${drafts0} draft(s) as md</button><button class="btn primary" data-puball>publish all</button></div>` : ''}
+        <div class="seg"><button class="btn" data-copyall>copy log as md</button>${drafts0 ? `<button class="btn" data-copy>copy ${drafts0} draft(s) as md</button><button class="btn primary" data-puball>publish all</button>` : ''}</div>
       </div>
       <div class="list">${rows || `<div class="empty">no ${filter} comments</div>`}</div>`;
     drawer.querySelector<HTMLElement>('[data-close]')!.onclick = toggleDrawer;
@@ -696,12 +797,10 @@ interface BdDoc {
         render();
       };
     });
+    drawer.querySelector<HTMLElement>('[data-copyall]')!.onclick = () =>
+      void clip(`comments-${SITE}.md`, commentsMarkdown());
     const copy = drawer.querySelector<HTMLElement>('[data-copy]');
-    if (copy)
-      copy.onclick = () =>
-        navigator.clipboard
-          .writeText(draftsMarkdown())
-          .then(() => toast('copied — paste to your agent'));
+    if (copy) copy.onclick = () => void clip(`comment-drafts-${SITE}.md`, draftsMarkdown());
     const puball = drawer.querySelector<HTMLElement>('[data-puball]');
     if (puball)
       puball.onclick = async () => {
@@ -807,6 +906,8 @@ interface BdDoc {
   // textarea can't dismiss it.
   addEventListener('scroll', scheduleReposition, true);
   addEventListener('resize', scheduleReposition, true);
+  // History-routed navigation changes the page identity — re-filter the pins.
+  addEventListener('popstate', () => render());
 
   // ---- boot -----------------------------------------------------------------
   applyHidden();
