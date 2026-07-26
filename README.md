@@ -95,8 +95,8 @@ npx wrangler r2 bucket create brisk
 # 2. Apply the schema
 npx wrangler d1 migrations apply brisk --remote
 
-# 3. Ship it
-pnpm --filter @usebrisk/sdk build        # bundles the SDK into worker assets
+# 3. Ship it — wrangler's configured build runs the whole workspace first
+# (SDK → /brisk.js, plugin widgets, /changelog), so this is the only command:
 npx wrangler deploy
 ```
 
