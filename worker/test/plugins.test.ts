@@ -1,5 +1,5 @@
 import { SELF, createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:test';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../src/app';
 import { DocStore } from '../src/docs';
 import { buildCloudflarePlatform } from '../src/platform/cloudflare/platform';
@@ -625,8 +625,6 @@ describe('DocStore optimistic concurrency', () => {
   it('refuses an update whose snapshot went stale (ifUpdatedAt)', async () => {
     const s = store();
     const doc = await s.create('cas', 'c', { v: 1 });
-    // Move past the snapshot's millisecond so the winner's timestamp differs.
-    await new Promise((r) => setTimeout(r, 2));
     expect(await s.update('cas', 'c', doc.id, { v: 2 })).not.toBeNull();
 
     const stale = await s.update('cas', 'c', doc.id, { v: 3 }, { ifUpdatedAt: doc.updatedAt });
@@ -639,5 +637,25 @@ describe('DocStore optimistic concurrency', () => {
     const doc = await s.create('cas', 'c2', { v: 1 });
     const updated = await s.update('cas', 'c2', doc.id, { v: 2 }, { ifUpdatedAt: doc.updatedAt });
     expect(updated).toMatchObject({ v: 2 });
+  });
+
+  it('moves the CAS token even when a write lands in the same millisecond', async () => {
+    // Frozen clock: create and update share one wall-clock millisecond, the
+    // exact case where a timestamp token would stand still and let a stale
+    // snapshot's guard pass (resurrecting a raced soft-delete).
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+      const s = store();
+      const doc = await s.create('cas', 'c3', { v: 1 });
+      const winner = await s.update('cas', 'c3', doc.id, { v: 2 });
+      expect(winner!.updatedAt).not.toBe(doc.updatedAt);
+
+      const stale = await s.update('cas', 'c3', doc.id, { v: 3 }, { ifUpdatedAt: doc.updatedAt });
+      expect(stale).toBeNull();
+      expect(await s.get('cas', 'c3', doc.id)).toMatchObject({ v: 2 });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

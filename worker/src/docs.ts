@@ -106,7 +106,11 @@ export class DocStore {
     if (opts.ifUpdatedAt !== undefined && existing.updatedAt !== opts.ifUpdatedAt) return null;
     const { id: _id, createdAt, updatedAt, ...current } = existing;
     const merged = { ...current, ...ownFields(fields) };
-    const now = new Date().toISOString();
+    // updated_at doubles as the CAS token, so a successful write must always
+    // move it: same-millisecond writes (create-then-update on sub-ms SQLite)
+    // would otherwise leave a stale snapshot's guard passing. The bump is also
+    // monotonic per doc under clock skew.
+    const now = new Date(Math.max(Date.now(), Date.parse(existing.updatedAt) + 1)).toISOString();
     const guarded = opts.ifUpdatedAt !== undefined;
     const stmt = this.db.prepare(
       `UPDATE docs SET data = ?, updated_at = ? WHERE site = ? AND collection = ? AND id = ?${guarded ? ' AND updated_at = ?' : ''}`,
