@@ -70,14 +70,16 @@
 
       <h1>Hosting Brisk</h1>
       <p class="lede">
-        Brisk is one Cloudflare Worker plus R2, D1, and Durable Objects. Stand up your own instance,
-        point it at a domain, and decide who gets in. This is the operator's page — building sites
-        on an instance is in the <a href="/docs">docs</a>.
+        Brisk is one Cloudflare Worker plus R2, D1, and Durable Objects — or the same app
+        self-hosted on any Node box with SQLite and a disk. Stand up your own instance, point it at
+        a domain, and decide who gets in. This is the operator's page — building sites on an
+        instance is in the <a href="/docs">docs</a>.
       </p>
 
       <ul class="toc">
         <li><a href="#how">how it works</a></li>
         <li><a href="#setup">stand it up</a></li>
+        <li><a href="#selfhost">self-hosting</a></li>
         <li><a href="#subdomains">wildcard subdomains</a></li>
         <li><a href="#login">google login</a></li>
         <li><a href="#visibility">public demo mode</a></li>
@@ -124,6 +126,50 @@ npx wrangler deploy</code></pre>
         (Workers&nbsp;&amp;&nbsp;Pages → your worker → Settings → Variables and Secrets); every var
         is optional and defaults to a path-only, no-auth, private instance. Locally,
         <code>wrangler dev</code> reads them from <code>.dev.vars</code>.
+      </p>
+
+      <h2 id="selfhost"><a href="#selfhost">Self-hosting (Docker, Compose, Kubernetes)</a></h2>
+      <p>
+        Cloudflare is the reference target, not a requirement. The same core runs as a plain Node
+        server with the platform's seams bound to SQLite, the filesystem or any S3-compatible
+        bucket, and in-process websockets — the SDK, the dashboard, and every deployed site behave
+        identically. The fastest way in is the wizard, which asks a few questions and writes the
+        config for whichever target you pick. It lives in this repo, so run it from a checkout:
+      </p>
+      <pre><code>pnpm install &amp;&amp; pnpm build
+node create-brisk/dist/index.js</code></pre>
+      <p>
+        Or go straight to the artifacts in
+        <a href="https://github.com/tomperi/brisk/tree/main/deploy">deploy/</a>:
+      </p>
+      <pre><code># a single VM
+cp deploy/.env.example deploy/.env      # set AUTH, BASE_HOST, secrets…
+docker compose -f deploy/docker-compose.yml up -d
+
+# Kubernetes
+helm install brisk deploy/helm/brisk \
+  --set config.baseHost=brisk.example.com \
+  --set config.auth=google \
+  --set secrets.googleClientId=… \
+  --set secrets.googleClientSecret=… \
+  --set secrets.sessionSecret=$(openssl rand -hex 32) \
+  --set ingress.enabled=true</code></pre>
+      <p>
+        Storage defaults to filesystem-plus-SQLite on one volume — no external services; set
+        <code>config.storage=s3</code> — plus the <code>s3.*</code> endpoint and bucket values and
+        the S3 credentials under <code>secrets</code> — to put objects in any S3-compatible bucket
+        instead. Realtime lives in-process, so run exactly one replica (the Helm chart refuses to
+        render more). The
+        <a href="https://github.com/tomperi/brisk/blob/main/deploy/README.md">deploy/README</a>
+        holds the full environment-variable reference and the backup story:
+        <strong>the volume is the database</strong> — nothing replicates it for you.
+      </p>
+      <p>
+        The login, demo-mode, and AI sections below apply to a self-hosted instance too — every
+        <code>wrangler secret put</code> becomes the same variable in <code>.env</code> or the Helm
+        values. Subdomains need a wildcard DNS record and TLS pointed at your box instead of
+        Cloudflare's; demo mode's rate-limiting advice is Cloudflare's, so bring your own (usually
+        at the reverse proxy); the cost section stops applying entirely (the cost is the box).
       </p>
 
       <h2 id="subdomains"><a href="#subdomains">Wildcard subdomains</a></h2>

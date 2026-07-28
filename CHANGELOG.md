@@ -29,6 +29,11 @@ releases are published to
 
 - The `/changelog` page renders `**bold**` in entries instead of showing the
   literal asterisks.
+### Changed
+
+- The `/host` page now covers the self-hosted path (Docker Compose,
+  Kubernetes/Helm, `npm create brisk`, storage options) alongside Cloudflare,
+  instead of documenting the Worker deploy only.
 
 ## [0.3.0] - 2026-07-13
 
