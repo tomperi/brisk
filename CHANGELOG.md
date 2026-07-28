@@ -31,6 +31,11 @@ releases are published to
   Kubernetes/Helm, `npm create brisk`, storage options) alongside Cloudflare,
   instead of documenting the Worker deploy only.
 
+### Fixed
+
+- The `/changelog` page renders `**bold**` in entries instead of showing the
+  literal asterisks.
+
 ## [0.3.0] - 2026-07-13
 
 ### Added
