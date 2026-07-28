@@ -16,10 +16,12 @@
   },
 
   // Cloudflare Workers Builds installs deps but never runs our build, so the
-  // generated assets — the SDK at /brisk.js and the /changelog page — would be
-  // absent from the deploy. Build the whole workspace (cwd = repo root) before
-  // every `wrangler deploy`. It also runs ahead of `wrangler dev`, so local runs
-  // no longer need a manual `pnpm build` first.
+  // generated assets — the SDK at /brisk.js, the /changelog page, and the
+  // plugin widget bundles under assets/plugins/ — would be absent from the
+  // deploy. Build the whole workspace (cwd = repo root) before every
+  // `wrangler deploy`. It also runs ahead of `wrangler dev`, so local runs
+  // no longer need a manual `pnpm build` first. (Reviewers: this is why a bare
+  // `wrangler deploy` from a clean checkout still ships every generated asset.)
   "build": {
     "command": "pnpm -r build",
     "cwd": ".."

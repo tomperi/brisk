@@ -6,6 +6,12 @@ import { buildCloudflarePlatform } from '../src/platform/cloudflare/platform';
 
 const HOST = 'http://localhost';
 
+/** Members get plugin widget tags injected into every served HTML page (even
+ *  body-less fragments, where they're appended). Strip them so the serving
+ *  assertions here stay about the deployed content itself. */
+const stripWidgets = (html: string) =>
+  html.replace(/<script src="\/_plugins\/[^"]*"[^>]*><\/script>/g, '');
+
 function deployForm(files: Record<string, string>): FormData {
   const form = new FormData();
   for (const [path, content] of Object.entries(files)) {
@@ -106,14 +112,14 @@ describe('deploy and serve', () => {
     expect(info).toMatchObject({ name: 'greet', files: 2 });
 
     const path = await SELF.fetch(`${HOST}/s/greet/`);
-    expect(await path.text()).toBe('<h1>hi</h1>');
+    expect(stripWidgets(await path.text())).toBe('<h1>hi</h1>');
 
     const subdomain = await SELF.fetch('http://greet.localhost/');
-    expect(await subdomain.text()).toBe('<h1>hi</h1>');
+    expect(stripWidgets(await subdomain.text())).toBe('<h1>hi</h1>');
 
     // extensionless resolution
     const about = await SELF.fetch(`${HOST}/s/greet/about`);
-    expect(await about.text()).toBe('<h1>about</h1>');
+    expect(stripWidgets(await about.text())).toBe('<h1>about</h1>');
   });
 
   it('atomically replaces the previous deploy', async () => {
@@ -125,7 +131,7 @@ describe('deploy and serve', () => {
       method: 'POST',
       body: deployForm({ 'index.html': 'v2' }),
     });
-    expect(await (await SELF.fetch(`${HOST}/s/swap/`)).text()).toBe('v2');
+    expect(stripWidgets(await (await SELF.fetch(`${HOST}/s/swap/`)).text())).toBe('v2');
     expect((await SELF.fetch(`${HOST}/s/swap/old.txt`)).status).toBe(404);
   });
 
@@ -164,7 +170,7 @@ describe('deploy and serve', () => {
     expect(deploys.map((d) => d.version)).toEqual([2, 1]);
 
     // Serving still follows the live pointer, which names the latest publish.
-    expect(await (await SELF.fetch(`${HOST}/s/ver/`)).text()).toBe('second');
+    expect(stripWidgets(await (await SELF.fetch(`${HOST}/s/ver/`)).text())).toBe('second');
   });
 
   it('keeps versions sequential and distinct under concurrent deploys', async () => {

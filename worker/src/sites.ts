@@ -11,6 +11,12 @@ export interface SiteInfo {
   /** Self-asserted, spoofable label set once at creation. A footgun guard,
    *  never a permission — NULL (legacy/unowned) never blocks a deploy. */
   owner: string | null;
+  /** Enabled plugin ids, resolved against the registry at deploy time — or
+   *  `null` for a legacy site deployed before the plugins column, which serving
+   *  treats as "registry defaults", not "nothing enabled". Distinct from `[]`
+   *  (an explicit opt-out), so the API doesn't report a widget-injecting legacy
+   *  site as having plugins off. */
+  plugins: string[] | null;
 }
 
 interface SiteRow {
@@ -22,6 +28,7 @@ interface SiteRow {
   updated_at: string;
   updated_by: string | null;
   owner: string | null;
+  plugins: string | null;
 }
 
 /** Subdomain-safe: a site name has to be a valid DNS label. */
@@ -34,6 +41,16 @@ export function isValidSiteName(name: string): boolean {
   return SITE_NAME.test(name) && !RESERVED.has(name);
 }
 
+function parsePlugins(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const value = JSON.parse(raw);
+    return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 function toInfo(row: SiteRow): SiteInfo {
   return {
     name: row.name,
@@ -43,25 +60,56 @@ function toInfo(row: SiteRow): SiteInfo {
     updatedAt: row.updated_at,
     updatedBy: row.updated_by,
     owner: row.owner,
+    plugins: row.plugins != null ? parsePlugins(row.plugins) : null,
   };
 }
 
 const deployPrefix = (site: string, deploy: string) => `deploys/${site}/${deploy}/`;
 
-/** The live-deploy pointer barely changes; cache it per isolate for a beat. */
-const pointerCache = new Map<string, { deploy: string | null; expires: number }>();
+/** The live-deploy pointer and enabled plugins barely change; cache per isolate. */
+interface Pointer {
+  deploy: string | null;
+  /** The stored enabled-set, or `null` when the column is NULL — i.e. the site
+   *  predates the plugins feature (or its deploy). `null` means "never resolved,
+   *  fall back to the registry defaults"; `[]` means "explicitly nothing". */
+  plugins: string[] | null;
+}
+const pointerCache = new Map<string, { value: Pointer; expires: number }>();
 const POINTER_TTL_MS = 5_000;
 
-async function activeDeploy(platform: Platform, site: string): Promise<string | null> {
+async function pointer(platform: Platform, site: string): Promise<Pointer> {
   const cached = pointerCache.get(site);
-  if (cached && cached.expires > Date.now()) return cached.deploy;
+  if (cached && cached.expires > Date.now()) return cached.value;
   const row = await platform.db
-    .prepare('SELECT active_deploy FROM sites WHERE name = ?')
+    .prepare('SELECT active_deploy, plugins FROM sites WHERE name = ?')
     .bind(site)
-    .first<{ active_deploy: string }>();
-  const deploy = row?.active_deploy ?? null;
-  pointerCache.set(site, { deploy, expires: Date.now() + POINTER_TTL_MS });
-  return deploy;
+    .first<{ active_deploy: string; plugins: string | null }>();
+  const value: Pointer = {
+    deploy: row?.active_deploy ?? null,
+    plugins: row && row.plugins != null ? parsePlugins(row.plugins) : null,
+  };
+  pointerCache.set(site, { value, expires: Date.now() + POINTER_TTL_MS });
+  return value;
+}
+
+async function activeDeploy(platform: Platform, site: string): Promise<string | null> {
+  return (await pointer(platform, site)).deploy;
+}
+
+/**
+ * A site's stored plugin state: whether the site exists at all (has a live
+ * deploy pointer), and its enabled plugin ids — `null` for a legacy site whose
+ * `plugins` column was never resolved (deployed before the feature). Callers
+ * fall back to the registry defaults on `null` so a default-on plugin lights up
+ * across an existing instance without re-deploying every site. `exists` lets
+ * the plugin action routes tell "no such site" apart from "legacy row".
+ */
+export async function sitePlugins(
+  platform: Platform,
+  site: string,
+): Promise<{ exists: boolean; plugins: string[] | null }> {
+  const p = await pointer(platform, site);
+  return { exists: p.deploy != null, plugins: p.plugins };
 }
 
 export async function listSites(platform: Platform): Promise<SiteInfo[]> {
@@ -137,6 +185,7 @@ export async function deploySite(
   files: DeployFile[],
   who: string,
   keepHistory: boolean,
+  plugins: string[],
 ): Promise<SiteInfo> {
   const previous = await activeDeploy(platform, site);
   const deploy = crypto.randomUUID().slice(0, 8);
@@ -157,21 +206,23 @@ export async function deploySite(
   const now = new Date().toISOString();
   const row = await platform.db
     .prepare(
-      `INSERT INTO sites (name, active_deploy, files, bytes, created_at, updated_at, updated_by, owner)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO sites (name, active_deploy, files, bytes, created_at, updated_at, updated_by, owner, plugins)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (name) DO UPDATE SET
        active_deploy = excluded.active_deploy,
        files = excluded.files,
        bytes = excluded.bytes,
        updated_at = excluded.updated_at,
-       updated_by = excluded.updated_by
+       updated_by = excluded.updated_by,
+       plugins = excluded.plugins
      RETURNING *`,
     )
     // Attribute to `who` — the asserted deployer, which auth already falls back
     // to the user's name then email. updated_by is the latest deployer; owner is
     // the same identity but set once at creation: it's absent from the ON CONFLICT
-    // UPDATE, so a later deploy (even a forced overwrite) preserves it.
-    .bind(site, deploy, files.length, bytes, now, now, who, who)
+    // UPDATE, so a later deploy (even a forced overwrite) preserves it. plugins
+    // reflects the current deploy, so it IS updated every publish.
+    .bind(site, deploy, files.length, bytes, now, now, who, who, JSON.stringify(plugins))
     .first<SiteRow>();
   pointerCache.delete(site);
 

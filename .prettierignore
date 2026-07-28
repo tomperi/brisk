@@ -3,6 +3,7 @@ dist/
 .wrangler/
 worker/assets/brisk.js
 worker/assets/changelog.html
+worker/assets/plugins/
 examples/*/vendor/
 pnpm-lock.yaml
 docs/superpowers/

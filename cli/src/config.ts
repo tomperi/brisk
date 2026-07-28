@@ -8,6 +8,8 @@ import path from 'node:path';
 export interface SiteConfig {
   site?: string;
   server?: string;
+  /** Per-plugin on/off; resolved against the instance's registry at deploy. */
+  plugins?: Record<string, boolean>;
 }
 
 export function loadConfig(dir: string): SiteConfig {

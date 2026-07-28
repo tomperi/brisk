@@ -82,6 +82,7 @@
         <li><a href="#ai">ai</a></li>
         <li><a href="#files">files</a></li>
         <li><a href="#channels">channels</a></li>
+        <li><a href="#plugins">plugins</a></li>
         <li><a href="#philosophy">philosophy</a></li>
       </ul>
 
@@ -150,7 +151,10 @@ const stop = posts.subscribe({
 });</code></pre>
       <p>
         Docs carry <code>id</code>, <code>createdAt</code>, <code>updatedAt</code>. Collections are
-        namespaced per site, so name things whatever you like.
+        namespaced per site, so name things whatever you like — except the reserved
+        <code>_plugin:*</code> namespace: plugin data reads (and subscribes) like any collection,
+        but writing it goes through the plugin's own <a href="#plugins">actions</a>, which stamp the
+        author and keep the audit trail honest.
       </p>
 
       <h2 id="identity"><a href="#identity">Identity</a></h2>
@@ -192,6 +196,32 @@ room.on('message', (data, from) => { … });       // from = { email, name }
 room.on('presence', (members) => { … });         // join/leave
 room.members;                                    // current list
 room.leave();</code></pre>
+
+      <h2 id="plugins"><a href="#plugins">Plugins</a></h2>
+      <p>
+        Curated, first-party features a site switches on in <code>brisk.json</code>, injected into
+        its pages automatically. A platform layer, not a seventh primitive — sites consume plugins;
+        extending the set is a fork concern. Each is <code>mandatory</code>, on by
+        <code>default</code>, or <code>optional</code>:
+      </p>
+      <pre><code>{ "name": "my-site", "plugins": { "comments": false } }</code></pre>
+      <p>
+        <strong>Comments</strong> (on by default) lets teammates leave feedback on any element.
+        Notes start as local drafts (copy them as markdown for an agent — drafts sit in the
+        browser's localStorage, which path-mode sites share, so local ≠ private); publish to share
+        with realtime + a best-effort audit trail. Drive it from the terminal — the same verbs an
+        agent uses:
+      </p>
+      <pre><code>brisk plugin comments list   my-site        # open feedback, as a table
+brisk plugin comments export my-site        # markdown an agent can act on
+brisk plugin comments reply  my-site &lt;id&gt; "fixed it"
+brisk plugin comments resolve my-site &lt;id&gt;</code></pre>
+      <p>
+        The widget minimizes to a corner bubble you click to reopen; <code>Shift+C</code> fully
+        hides it. <code>brisk plugin list</code> shows what's installed;
+        <code>brisk plugin &lt;id&gt; --help</code>
+        lists a plugin's verbs, loaded live from the server.
+      </p>
 
       <h2 id="philosophy"><a href="#philosophy">Philosophy</a></h2>
       <p>

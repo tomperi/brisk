@@ -12,10 +12,16 @@ import {
   listFiles,
   listSites,
   serveSite,
+  sitePlugins,
   type DeployFile,
 } from './sites';
 import type { AppEnv, Env } from './env';
 import type { DbEvent, Platform } from './platform/types';
+import { PLUGINS } from './plugins';
+import { resolveEnabled, withMandatory } from './plugins/resolve';
+import { registerPluginRoutes } from './plugins/routes';
+import { injectWidgets } from './plugins/inject';
+import { PLUGIN_COLLECTION_PREFIX, type Plugin } from './plugins/types';
 
 const MAX_DEPLOY_FILES = 2000;
 
@@ -28,6 +34,21 @@ const tooLarge = (bytes: number): boolean => bytes > MAX_SITE_BYTES;
 function formFiles(body: Record<string, unknown>): File[] {
   const raw = body['files'];
   return (Array.isArray(raw) ? raw : [raw]).filter((f): f is File => f instanceof File);
+}
+
+/** The site's brisk.json `plugins` map, sent by the CLI as an x-brisk-plugins
+ *  header. Malformed input is ignored (deploys never fail over a bad map). */
+function parseRequestedPlugins(header: string | undefined): Record<string, boolean> {
+  if (!header) return {};
+  try {
+    const value = JSON.parse(header);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    const out: Record<string, boolean> = {};
+    for (const [id, on] of Object.entries(value)) if (typeof on === 'boolean') out[id] = on;
+    return out;
+  } catch {
+    return {};
+  }
 }
 
 /**
@@ -96,6 +117,7 @@ async function visitorCached(
 export function createApp(
   makePlatform: (c: Context<AppEnv>) => Platform,
   wsRoute?: MiddlewareHandler<AppEnv>,
+  plugins: Plugin[] = PLUGINS,
 ): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
@@ -148,6 +170,8 @@ export function createApp(
     c.var.platform.waitUntil(c.var.platform.rooms.publish(site, event));
   };
 
+  registerPluginRoutes(app, plugins, publish);
+
   app.get('/api/db', async (c) => {
     const store = new DocStore(c.var.platform.db);
     return c.json({ collections: await store.collections(c.var.site) });
@@ -162,8 +186,19 @@ export function createApp(
     return c.json({ docs });
   });
 
+  // Plugin-owned collections (`_plugin:*`) are writable only through their
+  // plugin's action handlers, which server-stamp the author and keep the audit
+  // trail append-only. The generic db routes may read them — the widget
+  // subscribes that way — but refuse direct writes, or any teammate could forge
+  // an author, hard-delete past the soft-delete, or fabricate audit events. A
+  // namespace reservation, not a permission: everyone uses the plugin equally
+  // through its actions.
+  const isPluginCollection = (name: string) => name.startsWith(PLUGIN_COLLECTION_PREFIX);
+  const reservedCollection = (c: Context<AppEnv>) => c.json({ error: 'reserved collection' }, 403);
+
   app.post('/api/db/:collection', async (c) => {
     const collection = c.req.param('collection');
+    if (isPluginCollection(collection)) return reservedCollection(c);
     const fields = await c.req.json<Record<string, unknown>>();
     const doc = await new DocStore(c.var.platform.db).create(c.var.site, collection, fields);
     publish(c, c.var.site, { collection, event: 'create', doc });
@@ -181,6 +216,7 @@ export function createApp(
 
   app.patch('/api/db/:collection/:id', async (c) => {
     const collection = c.req.param('collection');
+    if (isPluginCollection(collection)) return reservedCollection(c);
     const fields = await c.req.json<Record<string, unknown>>();
     const doc = await new DocStore(c.var.platform.db).update(
       c.var.site,
@@ -195,6 +231,7 @@ export function createApp(
 
   app.delete('/api/db/:collection/:id', async (c) => {
     const collection = c.req.param('collection');
+    if (isPluginCollection(collection)) return reservedCollection(c);
     const id = c.req.param('id');
     const deleted = await new DocStore(c.var.platform.db).delete(c.var.site, collection, id);
     if (!deleted) return c.json({ error: 'not found' }, 404);
@@ -342,7 +379,16 @@ export function createApp(
 
     // Resolve the retention flag here (the route has c.env); deploySite itself
     // is platform-only and takes the decision as a boolean.
-    const info = await deploySite(c.var.platform, site, files, who, c.env.DEPLOY_HISTORY === 'on');
+    const requested = parseRequestedPlugins(c.req.header('x-brisk-plugins'));
+    const enabled = resolveEnabled(plugins, requested);
+    const info = await deploySite(
+      c.var.platform,
+      site,
+      files,
+      who,
+      c.env.DEPLOY_HISTORY === 'on',
+      enabled,
+    );
     return c.json({ ...info, url: siteUrl(c, site) });
   });
 
@@ -370,7 +416,37 @@ export function createApp(
   // ---- static serving ----------------------------------------------------
 
   const serveSiteFor = (c: Context<AppEnv>, site: string, path: string): Promise<Response | null> =>
-    visitorCached(c, () => serveSite(c.var.platform, site, path), 300, site);
+    visitorCached(
+      c,
+      async () => {
+        const res = await serveSite(c.var.platform, site, path);
+        // Members get widgets; visitors (edge-cached, signed-out) never do — the
+        // widget is behind auth, and comments are internal review tooling.
+        if (!res || isVisitor(c.var.user)) return res;
+        // A legacy site (plugins column NULL) never had a set resolved; fall back
+        // to the registry defaults so default-on plugins appear without a
+        // re-deploy. An explicit stored [] (opt-out) is respected as-is.
+        const stored =
+          (await sitePlugins(c.var.platform, site)).plugins ?? resolveEnabled(plugins, {});
+        // Fold in any (now-)mandatory plugin the stored set predates, so
+        // "mandatory is always on" holds without a redeploy.
+        const enabled = withMandatory(plugins, stored);
+        return injectWidgets(res, plugins, enabled, site);
+      },
+      300,
+      site,
+    );
+
+  // Plugin widget bundles: authed (see visitorAllowed), served from worker
+  // assets at /plugins/<id>/widget.js — the one fixed name the widget builder
+  // emits. Registered before the catch-all.
+  app.get('/_plugins/:id/widget.js', async (c) => {
+    const id = c.req.param('id');
+    if (!plugins.some((p) => p.id === id && p.widget)) return c.notFound();
+    const asset = await c.var.platform.assets.fetch(`/plugins/${id}/widget.js`);
+    if (!asset.ok) return c.notFound();
+    return securedAsset(asset);
+  });
 
   // Path mode: /s/<site>/... works on any host (workers.dev, local dev).
   app.get('/s/:site/*', async (c) => {
