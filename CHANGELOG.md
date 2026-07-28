@@ -25,6 +25,11 @@ releases are published to
   host page's own shortcuts. Minimize it to a corner bubble (click to reopen);
   `Shift+C` fully hides it.
 
+### Fixed
+
+- The `/changelog` page renders `**bold**` in entries instead of showing the
+  literal asterisks.
+
 ## [0.3.0] - 2026-07-13
 
 ### Added

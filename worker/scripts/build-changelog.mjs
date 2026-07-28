@@ -5,7 +5,8 @@
 //
 // This is a deliberately tiny Keep a Changelog -> HTML renderer for exactly the
 // subset the file uses: `## [version] - date` sections, `### Group` subheadings,
-// `- item` bullets with inline `code` and [text](url). No markdown dependency.
+// `- item` bullets with inline `code`, **bold**, and [text](url). No markdown
+// dependency.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,14 +29,16 @@ const safeUrl = (url) => {
 };
 
 // Inline markdown -> HTML. Runs on already-escaped text, so brackets, parens,
-// and backticks survive to be matched here; links first, then code spans.
+// backticks, and asterisks survive to be matched here; links first, then code
+// spans, then bold (so a `**bold**` link label still renders).
 const inline = (text) =>
   escapeHtml(text)
     .replace(
       /\[([^\]]+)\]\(([^)]+)\)/g,
       (_, label, url) => `<a href="${safeUrl(url).replace(/"/g, '&quot;')}">${label}</a>`,
     )
-    .replace(/`([^`]+)`/g, (_, code) => `<code>${code}</code>`);
+    .replace(/`([^`]+)`/g, (_, code) => `<code>${code}</code>`)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
 
 // CHANGELOG.md -> [{ version, date, groups: [{ name, items }] }]. Everything
 // else (the H1, intro prose, blank lines, link-reference definitions) is
