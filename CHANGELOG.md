@@ -8,6 +8,8 @@ releases are published to
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-11
+
 ### Added
 
 - **Deploy a single HTML file.** `brisk deploy report.html` (and `brisk dev`)
@@ -185,7 +187,8 @@ releases are published to
 - `@usebrisk/cli` and `@usebrisk/sdk` published to npm, cut in lockstep by a
   tag-driven release workflow.
 
-[unreleased]: https://github.com/tomperi/brisk/compare/v0.4.0...HEAD
+[unreleased]: https://github.com/tomperi/brisk/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/tomperi/brisk/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/tomperi/brisk/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/tomperi/brisk/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/tomperi/brisk/compare/v0.1.0...v0.2.0
