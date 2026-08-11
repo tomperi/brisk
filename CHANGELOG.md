@@ -27,6 +27,18 @@ releases are published to
 - Dismissing the dashboard's deploy overlay clears the pending overwrite, so a
   later drop can no longer replace a site someone else owns without the
   "belongs to …" confirmation.
+- Site URLs (the link the CLI prints after a deploy, the dashboard's live link,
+  and `/api/sites`) are `https://` on an instance behind a TLS-terminating
+  proxy, instead of the plain-http scheme the request reached the server with.
+  `X-Forwarded-Proto` decides it when a proxy sends one, but only when it
+  carries `http` or `https`, and the visitor cache varies by the result — so no
+  single visitor's header can rewrite the links everyone else is handed.
+  The guess is made against the host each URL actually names, so a proxy that
+  rewrites `Host` to a backend address no longer produces an `http://` OAuth
+  `redirect_uri` for an https instance. Where a public certificate can't reach —
+  loopback, bare IPs, and the private-use TLDs `.internal`, `.local`,
+  `.home.arpa` — links stay on http. `deploy/README.md` documents the order and
+  the one case that still needs `X-Forwarded-Proto`.
 
 ## [0.4.0] - 2026-07-29
 

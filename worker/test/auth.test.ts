@@ -51,6 +51,25 @@ describe('auth=google', () => {
     expect(google.searchParams.get('redirect_uri')).toBe('https://brisk.example.com/auth/callback');
   });
 
+  it('builds the redirect_uri from the host it names, not the one it arrived on', async () => {
+    // A bare `proxy_pass http://10.0.0.5:8788;` rewrites Host to the backend
+    // address and sends no X-Forwarded-Proto. The origin still names BASE_HOST,
+    // so judging the IP would emit http:// for an https instance and Google
+    // would answer redirect_uri_mismatch — login impossible.
+    const behindRewritingProxy = { ...googleEnv, BASE_HOST: 'brisk.example.com' };
+    const res = await fetchUrl(behindRewritingProxy, 'http://10.0.0.5:8788/auth/login');
+    expect(res.status).toBe(302);
+    expect(new URL(res.headers.get('location')!).searchParams.get('redirect_uri')).toBe(
+      'https://brisk.example.com/auth/callback',
+    );
+
+    // The same request with no BASE_HOST names the IP itself, where http is right.
+    const bare = await fetchUrl(googleEnv, 'http://10.0.0.5:8788/auth/login');
+    expect(new URL(bare.headers.get('location')!).searchParams.get('redirect_uri')).toBe(
+      'http://10.0.0.5:8788/auth/callback',
+    );
+  });
+
   it('honors X-Forwarded-Proto and keeps localhost on http for dev', async () => {
     const forwarded = await fetchUrl(googleEnv, 'http://brisk.example.com/auth/login', {
       headers: { 'x-forwarded-proto': 'https' },
@@ -191,6 +210,60 @@ describe('visibility=public (demo mode)', () => {
     // The next, header-less visitor must not get the poisoned copy from cache.
     const innocent = await fetchUrl(publicEnv, 'http://victimsite.localhost/');
     expect(await innocent.text()).toBe('VICTIM-CONTENT');
+  });
+
+  it("keeps one visitor's X-Forwarded-Proto out of the next visitor's links", async () => {
+    const form = new FormData();
+    form.append('files', new File(['<h1>ok</h1>'], 'index.html'));
+    await fetchAs(publicEnv, '/api/deploy/listed', {
+      method: 'POST',
+      headers: { authorization: 'Bearer ci-token' },
+      body: form,
+    });
+    const urlsOf = async (res: Response) =>
+      (await res.json<{ sites: { url: string }[] }>()).sites.map((s) => s.url);
+
+    // The site list is cached for visitors, and every url in it carries the
+    // scheme derived from *that* request's headers. A visitor asking for http
+    // gets http — and must not leave it behind for everyone else.
+    const asked = await fetchUrl(publicEnv, 'http://brisk.example.com/api/sites', {
+      headers: { 'x-forwarded-proto': 'http' },
+    });
+    expect((await urlsOf(asked)).every((url) => url.startsWith('http://'))).toBe(true);
+
+    const innocent = await fetchUrl(publicEnv, 'http://brisk.example.com/api/sites');
+    expect((await urlsOf(innocent)).every((url) => url.startsWith('https://'))).toBe(true);
+
+    // A scheme the header may not carry never reaches the body at all —
+    // app.js assigns site.url straight to an anchor's href. Sent to a host
+    // nothing has cached yet, so the body is genuinely rebuilt with the forged
+    // header present: keyed against a warm cache this assertion would be
+    // answered by the innocent request's stored copy and pin nothing.
+    const forged = await fetchUrl(publicEnv, 'http://cold.brisk.example.com/api/sites', {
+      headers: { 'x-forwarded-proto': 'javascript:alert(document.domain);//' },
+    });
+    expect((await urlsOf(forged)).every((url) => url.startsWith('https://'))).toBe(true);
+  });
+
+  it('keys the cached list by port, so :443 cannot collapse onto the clean host', async () => {
+    const form = new FormData();
+    form.append('files', new File(['<h1>ok</h1>'], 'index.html'));
+    await fetchAs(publicEnv, '/api/deploy/ported', {
+      method: 'POST',
+      headers: { authorization: 'Bearer ci-token' },
+      body: form,
+    });
+    const urlsOf = async (res: Response) =>
+      (await res.json<{ sites: { url: string }[] }>()).sites.map((s) => s.url);
+
+    // The Node assembly builds the request URL straight from Host, so a visitor
+    // can arrive as `host:443`. Keying the scheme by mutating url.protocol drops
+    // that port — https's default — filing this body under the clean host's key.
+    const ported = await fetchUrl(publicEnv, 'http://brisk.example.com:443/api/sites');
+    expect((await urlsOf(ported)).every((url) => url.includes(':443/s/'))).toBe(true);
+
+    const clean = await fetchUrl(publicEnv, 'http://brisk.example.com/api/sites');
+    expect((await urlsOf(clean)).some((url) => url.includes(':443'))).toBe(false);
   });
 
   it('401s every dynamic surface for visitors', async () => {

@@ -70,8 +70,11 @@ describe('host routing', () => {
 });
 
 describe('site urls', () => {
-  const conn = (reqUrl: string, BASE_HOST: string) =>
-    siteUrl({ env: { BASE_HOST } as never, req: { url: reqUrl } }, 'foo');
+  const conn = (reqUrl: string, BASE_HOST: string, headers: Record<string, string> = {}) =>
+    siteUrl(
+      { env: { BASE_HOST } as never, req: { url: reqUrl, header: (n: string) => headers[n] } },
+      'foo',
+    );
 
   it('uses subdomain form only when reached via BASE_HOST', () => {
     expect(conn('https://brisk.example.com/api/sites', 'brisk.example.com')).toBe(
@@ -90,6 +93,60 @@ describe('site urls', () => {
       'https://brisk.acme.workers.dev/s/foo/',
     );
     expect(conn('http://localhost:8787/api/sites', '')).toBe('http://localhost:8787/s/foo/');
+  });
+
+  it('links https when TLS is terminated upstream', () => {
+    // The proxy reaches the worker over plain http, so the request's own scheme
+    // would hand out an http:// link to an https-only site — the URL the CLI
+    // prints and the dashboard links to right after a deploy.
+    expect(conn('http://brisk.example.com/api/deploy/foo', 'brisk.example.com')).toBe(
+      'https://foo.brisk.example.com/',
+    );
+    expect(conn('http://brisk.acme.dev/api/deploy/foo', '')).toBe('https://brisk.acme.dev/s/foo/');
+  });
+
+  it('honors X-Forwarded-Proto over the guess, but only http and https', () => {
+    const forwarded = (proto: string) =>
+      conn('http://brisk.example.com/api/sites', 'brisk.example.com', {
+        'x-forwarded-proto': proto,
+      });
+    expect(forwarded('https')).toBe('https://foo.brisk.example.com/');
+    expect(forwarded('http')).toBe('http://foo.brisk.example.com/');
+    expect(forwarded('HTTPS, http')).toBe('https://foo.brisk.example.com/');
+
+    // Nothing strips this header on an instance no proxy fronts, and the url
+    // lands in an <a href> on the dashboard: a client-chosen scheme must not.
+    expect(forwarded('javascript:alert(document.domain);//')).toBe(
+      'https://foo.brisk.example.com/',
+    );
+    expect(forwarded('')).toBe('https://foo.brisk.example.com/');
+  });
+
+  it('keeps a plain-http instance on http when TLS is implausible', () => {
+    // A self-hosted box reached over http with no proxy in front: guessing https
+    // hands out links that don't resolve. No public certificate can name a bare
+    // IP or a private-use TLD, so neither is a hidden-TLS candidate.
+    expect(conn('http://10.0.0.5:8787/api/sites', '')).toBe('http://10.0.0.5:8787/s/foo/');
+    expect(conn('http://[fd00::1]:8787/api/sites', '')).toBe('http://[fd00::1]:8787/s/foo/');
+    expect(conn('http://site.localhost:8787/api/sites', '')).toBe(
+      'http://site.localhost:8787/s/foo/',
+    );
+    expect(conn('http://brisk.acme.internal:8788/api/sites', '')).toBe(
+      'http://brisk.acme.internal:8788/s/foo/',
+    );
+    expect(conn('http://brisk.acme.internal/api/sites', 'brisk.acme.internal')).toBe(
+      'http://foo.brisk.acme.internal/',
+    );
+    expect(conn('http://brisk.home.arpa/api/sites', '')).toBe('http://brisk.home.arpa/s/foo/');
+  });
+
+  it('judges the host the link names, not the one the request arrived on', () => {
+    // A bare `proxy_pass` rewrites Host to the backend address. The path-form
+    // link names that IP, so it stays http — while the OAuth origin, which
+    // names BASE_HOST, does not (see auth.test.ts).
+    expect(conn('http://10.0.0.5:8788/api/sites', 'brisk.example.com')).toBe(
+      'http://10.0.0.5:8788/s/foo/',
+    );
   });
 });
 
@@ -172,6 +229,22 @@ describe('deploy and serve', () => {
       body: deployForm({ 'docs/page.html': 'buried' }),
     });
     expect((await SELF.fetch(`${HOST}/s/nested/`)).status).toBe(404);
+  });
+
+  it('returns an https url from a deploy behind a TLS-terminating proxy', async () => {
+    const ctx = createExecutionContext();
+    const res = await app.fetch(
+      new Request('http://brisk.example.com/api/deploy/proxied', {
+        method: 'POST',
+        body: deployForm({ 'index.html': '<h1>hi</h1>' }),
+      }),
+      { ...env, BASE_HOST: 'brisk.example.com' },
+      ctx,
+    );
+    await waitOnExecutionContext(ctx);
+    expect(await res.json<{ url: string }>()).toMatchObject({
+      url: 'https://proxied.brisk.example.com/',
+    });
   });
 
   it('atomically replaces the previous deploy', async () => {
