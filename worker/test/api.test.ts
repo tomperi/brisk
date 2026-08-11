@@ -122,6 +122,58 @@ describe('deploy and serve', () => {
     expect(stripWidgets(await about.text())).toBe('<h1>about</h1>');
   });
 
+  it('serves a lone html page at the root and under its own name', async () => {
+    await SELF.fetch(`${HOST}/api/deploy/findings`, {
+      method: 'POST',
+      body: deployForm({ 'db-contention-findings.html': '<h1>findings</h1>' }),
+    });
+
+    const root = await SELF.fetch(`${HOST}/s/findings/`);
+    expect(root.status).toBe(200);
+    expect(stripWidgets(await root.text())).toBe('<h1>findings</h1>');
+
+    const subdomain = await SELF.fetch('http://findings.localhost/');
+    expect(stripWidgets(await subdomain.text())).toBe('<h1>findings</h1>');
+
+    const own = await SELF.fetch(`${HOST}/s/findings/db-contention-findings.html`);
+    expect(stripWidgets(await own.text())).toBe('<h1>findings</h1>');
+  });
+
+  it('serves a lone .htm page as html, widgets and all', async () => {
+    // The fallback matches .htm, so the mime table has to as well: stored as
+    // application/octet-stream the browser downloads the page instead of
+    // rendering it, and widget injection skips anything that isn't text/html.
+    await SELF.fetch(`${HOST}/api/deploy/oldschool`, {
+      method: 'POST',
+      body: deployForm({ 'report.HTM': '<h1>legacy</h1>' }),
+    });
+
+    const root = await SELF.fetch(`${HOST}/s/oldschool/`);
+    expect(root.status).toBe(200);
+    expect(root.headers.get('content-type')).toBe('text/html; charset=utf-8');
+    const html = await root.text();
+    expect(html).toContain('/_plugins/');
+    expect(stripWidgets(html)).toBe('<h1>legacy</h1>');
+  });
+
+  it('leaves the root a 404 when which page is home is a guess', async () => {
+    // Two top-level pages, or one buried in a folder: no obvious front door, so
+    // the site keeps saying so instead of picking for you.
+    await SELF.fetch(`${HOST}/api/deploy/pair`, {
+      method: 'POST',
+      body: deployForm({ 'a.html': 'a', 'b.html': 'b' }),
+    });
+    const pair = await SELF.fetch(`${HOST}/s/pair/`);
+    expect(pair.status).toBe(404);
+    expect(await pair.text()).toContain('is live');
+
+    await SELF.fetch(`${HOST}/api/deploy/nested`, {
+      method: 'POST',
+      body: deployForm({ 'docs/page.html': 'buried' }),
+    });
+    expect((await SELF.fetch(`${HOST}/s/nested/`)).status).toBe(404);
+  });
+
   it('atomically replaces the previous deploy', async () => {
     await SELF.fetch(`${HOST}/api/deploy/swap`, {
       method: 'POST',

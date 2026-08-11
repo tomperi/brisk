@@ -127,6 +127,44 @@ export async function getSite(platform: Platform, name: string): Promise<SiteInf
   return row ? toInfo(row) : null;
 }
 
+/** A deploy prefix is immutable — files all land before the pointer swaps — so
+ *  its lone page is resolved once per deploy, not once per request. Keyed by
+ *  site (bounded like pointerCache) and validated against the deploy id, which
+ *  is what makes a stale answer impossible rather than merely short-lived. */
+const lonePageCache = new Map<string, { deploy: string; page: string | null }>();
+
+/**
+ * The deploy's only top-level HTML file, or null when it has none or several.
+ * Reached only by a root request that already missed `index.html` — a 404
+ * without it — and then only once per deploy: a site with no top-level page has
+ * to page through the whole prefix to learn that, which is not a per-request
+ * price worth paying.
+ */
+async function lonePage(platform: Platform, site: string, deploy: string): Promise<string | null> {
+  const cached = lonePageCache.get(site);
+  if (cached && cached.deploy === deploy) return cached.page;
+
+  const prefix = deployPrefix(site, deploy);
+  let only: string | null = null;
+  let cursor: string | undefined;
+  scan: do {
+    const listed = await platform.storage.list({ prefix, cursor });
+    for (const object of listed.objects) {
+      const rel = object.key.slice(prefix.length);
+      if (rel.includes('/') || !/\.html?$/i.test(rel)) continue;
+      if (only) {
+        only = null; // two candidates: which one is home is a guess
+        break scan;
+      }
+      only = rel;
+    }
+    cursor = listed.cursor;
+  } while (cursor);
+
+  lonePageCache.set(site, { deploy, page: only });
+  return only;
+}
+
 /**
  * Serve `path` from a site's live deploy in R2, resolving directory indexes
  * and extensionless paths (`/about` → `/about.html`).
@@ -141,16 +179,31 @@ export async function serveSite(
 
   const clean = path.replace(/^\/+/, '');
   if (clean.split('/').includes('..')) return null;
+  const prefix = deployPrefix(site, deploy);
   const candidates = clean ? [clean, `${clean}/index.html`, `${clean}.html`] : ['index.html'];
 
-  for (const candidate of candidates) {
-    const object = await platform.storage.get(deployPrefix(site, deploy) + candidate);
-    if (!object) continue;
+  const serve = async (candidate: string): Promise<Response | null> => {
+    const object = await platform.storage.get(prefix + candidate);
+    if (!object) return null;
     const headers = new Headers();
     headers.set('content-type', object.contentType ?? contentType(candidate));
     headers.set('etag', object.etag);
     headers.set('cache-control', 'no-cache');
     return new Response(object.body, { headers });
+  };
+
+  for (const candidate of candidates) {
+    const hit = await serve(candidate);
+    if (hit) return hit;
+  }
+
+  // Deploying one HTML file — a report, a mockup — publishes it under its own
+  // name, so the site's front door would 404. With a single page there's nothing
+  // to disambiguate: it *is* the home page, and it stays reachable under its own
+  // name too. Only reached once index.html has already missed.
+  if (!clean) {
+    const page = await lonePage(platform, site, deploy);
+    if (page) return serve(page);
   }
   return null;
 }
@@ -225,6 +278,7 @@ export async function deploySite(
     .bind(site, deploy, files.length, bytes, now, now, who, who, JSON.stringify(plugins))
     .first<SiteRow>();
   pointerCache.delete(site);
+  lonePageCache.delete(site);
 
   // Record this publish as an immutable version. The number is computed inline
   // so concurrent deploys can't read the same MAX and collide; if two still
@@ -347,6 +401,7 @@ export async function deleteSite(platform: Platform, site: string): Promise<bool
     platform.db.prepare('DELETE FROM deploys WHERE site = ?').bind(site),
   ]);
   pointerCache.delete(site);
+  lonePageCache.delete(site);
   await Promise.all([
     deletePrefix(platform, `deploys/${site}/`),
     deletePrefix(platform, `uploads/${site}/`),

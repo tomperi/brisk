@@ -52,6 +52,43 @@ function resolveSite(dir: string, flags: Flags): string {
 /** Folder names become site names: lowercase dns labels, nothing fancier. */
 const slugify = (name: string): string => name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
 
+interface Target {
+  /** The folder a deploy's paths are relative to, and whose brisk.json pins the
+   *  instance — for a single file, the folder it sits in. */
+  dir: string;
+  /** The one file being deployed, or null for a whole folder. */
+  file: string | null;
+  site: string;
+}
+
+/**
+ * A deploy target is a folder or a single file — `brisk deploy report.html`
+ * publishes a one-page site. A file takes its site name from the file, never
+ * from a neighboring brisk.json: that config belongs to the folder's own site,
+ * and reusing it would silently overwrite it.
+ */
+async function resolveTarget(targetArg: string | undefined, flags: Flags): Promise<Target> {
+  const target = path.resolve(targetArg ?? '.');
+  const stat = await fsp.stat(target).catch((err: NodeJS.ErrnoException) => {
+    // Only a genuinely missing path gets the friendly message. A permission
+    // error or a symlink loop on a path that DOES exist has to surface as
+    // itself, or the fix looks like "check the spelling".
+    if (err.code !== 'ENOENT') throw err;
+    return null;
+  });
+  if (!stat) throw new Error(`no such file or directory: ${target}`);
+  if (!stat.isFile()) return { dir: target, file: null, site: resolveSite(target, flags) };
+  // Canonical case, from the filesystem rather than from what was typed: on a
+  // case-insensitive volume `brisk dev Report.HTML` opens `report.html`, and
+  // watch events name the file the way the disk spells it.
+  const file = await fsp.realpath(target);
+  return {
+    dir: path.dirname(file),
+    file,
+    site: slugify(flags.site ?? path.basename(file, path.extname(file))),
+  };
+}
+
 async function collectFiles(dir: string): Promise<{ rel: string; abs: string }[]> {
   const out: { rel: string; abs: string }[] = [];
   for (const entry of await fsp.readdir(dir, { recursive: true, withFileTypes: true })) {
@@ -147,15 +184,14 @@ export async function deploy(
   // confirm — lets `dev` make the rest of the watch session force silently.
   onOverwrite?: () => void,
 ): Promise<SiteInfo | undefined> {
-  const dir = path.resolve(dirArg ?? '.');
-  const site = resolveSite(dir, flags);
+  const { dir, file, site } = await resolveTarget(dirArg, flags);
   const conn = resolveConnection(flags, dir);
   // Open-instance gate first (are we shipping to a public AUTH=none host?),
   // independent of the ownership overwrite gate below.
   await confirmOpenTarget(conn, flags);
   const username = resolveUsername(flags, conn);
 
-  const files = await collectFiles(dir);
+  const files = file ? [{ rel: path.basename(file), abs: file }] : await collectFiles(dir);
   if (!files.length) throw new Error(`nothing to deploy in ${dir}`);
 
   const form = new FormData();
@@ -163,7 +199,9 @@ export async function deploy(
     form.append('files', new File([await fsp.readFile(abs)], rel));
   }
 
-  const requested = loadConfig(dir).plugins;
+  // A single file is its own site with no brisk.json: take the instance's
+  // plugin defaults rather than the surrounding project's preferences.
+  const requested = file ? undefined : loadConfig(dir).plugins;
   const headers: Record<string, string> = {
     ...(username ? { 'x-brisk-username': username } : {}),
     ...(requested ? { 'x-brisk-plugins': JSON.stringify(requested) } : {}),
@@ -185,7 +223,16 @@ export async function deploy(
     console.log(
       `${green('✓')} ${bold(site)} ${dim(`· ${info.files} ${info.files === 1 ? 'file' : 'files'} · ${humanBytes(info.bytes)} · ${Date.now() - started}ms`)}`,
     );
-    console.log(`  ${cyan(info.url)}`);
+    // A lone page is served at the site root; a lone anything-else is not, so
+    // point at the file itself rather than a root that answers 404.
+    const name = file ? path.basename(file) : '';
+    const rootless = Boolean(file) && !/\.html?$/i.test(name);
+    console.log(`  ${cyan(rootless ? `${info.url}${encodeURIComponent(name)}` : info.url)}`);
+    if (rootless) {
+      console.log(
+        `  ${yellow('note:')} ${dim(`${name} isn't an html page — the site root has nothing to serve`)}`,
+      );
+    }
     if (info.plugins?.length) {
       console.log(`  ${dim(`plugins: ${info.plugins.map((p) => `${p} ✓`).join('  ')}`)}`);
     }
@@ -237,7 +284,7 @@ function confirm(question: string): Promise<boolean> {
 
 /** Deploy on every save — the whole "dev server" Brisk needs. */
 export async function dev(dirArg: string | undefined, flags: Flags): Promise<void> {
-  const dir = path.resolve(dirArg ?? '.');
+  const { dir, file } = await resolveTarget(dirArg, flags);
   // Owner is set-once, so overwriting another owner's site would re-prompt on
   // every save. Confirm (or --force) once, then force the rest of the session.
   let force = Boolean(flags.force) || ['1', 'true'].includes(process.env.BRISK_FORCE ?? '');
@@ -272,8 +319,13 @@ export async function dev(dirArg: string | undefined, flags: Flags): Promise<voi
     }
   };
 
-  fs.watch(dir, { recursive: true }, (_event, file) => {
-    if (!file || file.split(path.sep).some((part) => SKIP.has(part))) return;
+  // A single-file target still watches its folder, filtered to that one name:
+  // editors that save by rename-and-replace swap the inode, and a watch on the
+  // file itself goes deaf after the first save.
+  const only = file ? path.basename(file) : null;
+  fs.watch(dir, { recursive: !only }, (_event, changed) => {
+    if (!changed) return;
+    if (only ? changed !== only : changed.split(path.sep).some((part) => SKIP.has(part))) return;
     if (timer) clearTimeout(timer);
     timer = setTimeout(redeploy, 300);
   });

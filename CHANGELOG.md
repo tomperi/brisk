@@ -8,6 +8,26 @@ releases are published to
 
 ## [Unreleased]
 
+### Added
+
+- **Deploy a single HTML file.** `brisk deploy report.html` (and `brisk dev`)
+  publishes a one-page site named after the file, and dropping one file on the
+  dashboard names the site the same way. A deploy whose only top-level page is
+  one HTML file serves it at `/` as well as under its own name, instead of
+  landing on "there's no page at /". Two or more top-level pages stay a 404 —
+  which one is home would be a guess. Deploying a single file that isn't a page
+  links to the file itself and says so, rather than pointing at a root that has
+  nothing to serve.
+
+### Fixed
+
+- `.htm` pages are served as `text/html` instead of `application/octet-stream`,
+  so browsers render them (and plugin widgets load on them) rather than
+  downloading the file.
+- Dismissing the dashboard's deploy overlay clears the pending overwrite, so a
+  later drop can no longer replace a site someone else owns without the
+  "belongs to …" confirmation.
+
 ## [0.4.0] - 2026-07-29
 
 ### Added

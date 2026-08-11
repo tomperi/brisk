@@ -7,8 +7,8 @@ const HELP = `${bold('brisk')} — drop a folder, get a site
 
 ${bold('Usage')}
   brisk init [name]            scaffold a new site folder
-  brisk deploy [dir]           upload a folder, get a URL
-  brisk dev [dir]              deploy on every file change
+  brisk deploy [dir|file]      upload a folder (or one html file), get a URL
+  brisk dev [dir|file]         deploy on every file change
   brisk list                   all sites on the instance
   brisk open [site]            open a site in the browser
   brisk pull <site> [dir]      download a site's source to remix it
@@ -28,7 +28,7 @@ ${bold('Plugins')}
                                        args are free text; put -- first if one starts with a dash
 
 ${bold('Options')}
-  --site <name>                override the site name (default: brisk.json or folder name)
+  --site <name>                override the site name (default: brisk.json, folder, or file name)
   --server <url>               target instance directly, e.g. brisk.example.com
   --profile <name>             use a specific profile for this command
   --username <name>            deploy identity / owner label (default: profile username)
