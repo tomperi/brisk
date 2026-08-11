@@ -1,6 +1,14 @@
 import { Hono, type Context, type Handler, type MiddlewareHandler } from 'hono';
 import { AiNotConfiguredError, chat } from './ai';
-import { auth, authRoutes, cliConsent, cliMint, isVisitor } from './auth';
+import {
+  auth,
+  authRoutes,
+  cliConsent,
+  cliMint,
+  isVisitor,
+  publicScheme,
+  type SchemeSource,
+} from './auth';
 import { DocStore } from './docs';
 import { contentType } from './mime';
 import {
@@ -72,13 +80,21 @@ export function siteFromHost(host: string, baseHost = ''): string | null {
  * Site URLs adapt to however the requester reached the instance: subdomain
  * form only when the request actually came through BASE_HOST, path form on
  * any other host (localhost, workers.dev, a self-hoster's alternate domain).
- * Otherwise local dev would hand out production links.
+ * Otherwise local dev would hand out production links. The scheme comes from
+ * publicScheme, not the request — behind a TLS-terminating proxy the request
+ * arrives over http, and these URLs are what the CLI prints and the dashboard
+ * links to after a deploy.
  */
-export function siteUrl(c: { env: Env; req: { url: string } }, site: string): string {
+export function siteUrl(c: { env: Env } & SchemeSource, site: string): string {
   const url = new URL(c.req.url);
   const base = c.env.BASE_HOST;
   const viaBase = base && (url.host === base || url.host.endsWith(`.${base}`));
-  return viaBase ? `${url.protocol}//${site}.${base}/` : `${url.protocol}//${url.host}/s/${site}/`;
+  // Judge the host this link will name, not the one the request arrived on:
+  // reached at a bare IP while BASE_HOST is set, the path-form link names the
+  // IP — so it is the IP's scheme that decides, not BASE_HOST's.
+  const named = viaBase ? `${site}.${base}` : url.host;
+  const scheme = publicScheme(c, named);
+  return viaBase ? `${scheme}://${named}/` : `${scheme}://${named}/s/${site}/`;
 }
 
 /**
@@ -100,6 +116,13 @@ async function visitorCached(
   // picks a site via x-brisk-site could cache its content under another site's
   // URL, and the next header-less visitor would be served the poisoned copy.
   if (cacheSite) url.searchParams.set('__site', cacheSite);
+  // Site urls in the body carry the derived scheme, which comes from a request
+  // header — so it varies the response and has to vary the key, or one visitor's
+  // X-Forwarded-Proto rewrites the links every other visitor is handed. It goes
+  // in a search param rather than url.protocol: the protocol setter drops a port
+  // that is the new scheme's default, so `host:443` would collapse onto the
+  // clean host's key and serve it that visitor's body.
+  url.searchParams.set('__proto', publicScheme(c, url.host));
   const key = url.toString();
   const cache = c.var.platform.cache;
   const hit = await cache.match(key);

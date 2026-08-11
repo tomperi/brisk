@@ -65,28 +65,62 @@ function visitorAllowed(method: string, pathname: string): boolean {
 
 const apexHost = (c: Context<AppEnv>): string => c.env.BASE_HOST || new URL(c.req.url).host;
 
-/**
- * The public scheme, for OAuth `redirect_uri`, login URLs, and the cookie
- * `Secure` flag. Behind a TLS-terminating reverse proxy the app is reached over
- * plain http, and not every proxy forwards the original scheme (e.g. a Tailscale
- * ingress — tailscale/tailscale#7061), so the request's own scheme is unreliable.
- * Trust `X-Forwarded-Proto` when a proxy does send it; otherwise assume https for
- * any real host and keep localhost on http for local dev. Getting this wrong
- * means `redirect_uri_mismatch` at Google.
- */
-function apexScheme(c: Context<AppEnv>): string {
-  const forwarded = c.req.header('x-forwarded-proto')?.split(',')[0]?.trim();
-  if (forwarded) return forwarded;
-  const url = new URL(c.req.url);
-  if (url.protocol === 'https:') return 'https';
-  const host = url.hostname;
-  const local = host === 'localhost' || host === '127.0.0.1' || host === '::1';
-  return local ? 'http' : 'https';
+/** The scheme derivation needs a URL and one header — nothing else, so callers
+ *  outside a request handler (and tests) can pass a stand-in. */
+export interface SchemeSource {
+  req: { url: string; header: (name: string) => string | undefined };
 }
 
-const apexOrigin = (c: Context<AppEnv>): string => `${apexScheme(c)}://${apexHost(c)}`;
+/** The hostname within a `host` value: port dropped, IPv6 brackets kept. Parsed
+ *  rather than split, so `[fd00::1]:8787` doesn't lose its address. */
+const hostnameOf = (host: string): string => {
+  try {
+    return new URL(`http://${host}`).hostname;
+  } catch {
+    return host.toLowerCase();
+  }
+};
 
-const isSecure = (c: Context<AppEnv>): boolean => apexScheme(c) === 'https';
+/**
+ * Hosts no publicly trusted certificate can name, so a plain-http request to one
+ * really is http rather than a proxy hiding TLS: loopback and `*.localhost`,
+ * bare IPs (`10.0.0.5`, `[fd00::1]`), and the TLDs reserved for private networks
+ * (`.internal`, `.local`, `.home.arpa`) — which is the LAN self-host the compose
+ * deployment documents.
+ */
+function tlsImplausible(host: string): boolean {
+  const h = hostnameOf(host);
+  if (isLocalHost(h)) return true;
+  if (h.startsWith('[') || /^\d{1,3}(\.\d{1,3}){3}$/.test(h)) return true;
+  return /\.(internal|local|home\.arpa)$/.test(h);
+}
+
+/**
+ * The public scheme for a URL this server is about to hand out. Behind a
+ * TLS-terminating reverse proxy the app is reached over plain http, and not
+ * every proxy forwards the original scheme (e.g. a Tailscale ingress —
+ * tailscale/tailscale#7061), so the request's own scheme is unreliable. So:
+ * trust `X-Forwarded-Proto`, but only the two values it may legally carry —
+ * nothing sits in front of a bare instance to strip that header, and the result
+ * reaches `href`s the dashboard renders. Failing that, guess from the host.
+ *
+ * `host` is the host the resulting URL will actually name, which is not always
+ * the one the request arrived on: a proxy doing a bare `proxy_pass` rewrites
+ * Host to the backend address, and judging that IP while naming `BASE_HOST`
+ * yields an `http://` OAuth redirect_uri for an https instance — Google answers
+ * `redirect_uri_mismatch` and login becomes impossible.
+ */
+export function publicScheme(c: SchemeSource, host: string): string {
+  const forwarded = c.req.header('x-forwarded-proto')?.split(',')[0]?.trim().toLowerCase();
+  if (forwarded === 'http' || forwarded === 'https') return forwarded;
+  if (new URL(c.req.url).protocol === 'https:') return 'https';
+  return tlsImplausible(host) ? 'http' : 'https';
+}
+
+const apexOrigin = (c: Context<AppEnv>): string =>
+  `${publicScheme(c, apexHost(c))}://${apexHost(c)}`;
+
+const isSecure = (c: Context<AppEnv>): boolean => publicScheme(c, apexHost(c)) === 'https';
 
 /**
  * The session cookie is scoped to `.BASE_HOST`, so one login on the apex

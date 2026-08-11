@@ -164,6 +164,27 @@ Point a DNS A/CNAME record for both the apex and the wildcard
   ingress controller's annotations (`ingress.annotations`); leave
   `ingress.tls.enabled=false` since the LB terminates TLS.
 
+### How Brisk decides http vs https
+
+Brisk is reached over plain http whenever something in front of it terminates
+TLS, so the scheme it prints in links, OAuth `redirect_uri`s, and the cookie
+`Secure` flag can't come from the request. It resolves in this order:
+
+1. **`X-Forwarded-Proto`**, when the proxy sends one — the reliable answer, and
+   the one to configure if anything below guesses wrong. Only `http` and `https`
+   are honored.
+2. The request's own scheme, when it really is https end to end.
+3. Otherwise a guess from the host the URL will name: `http` for loopback,
+   `*.localhost`, bare IPs, and the private-use TLDs `.internal`, `.local` and
+   `.home.arpa` — none of which a public certificate can cover — and `https` for
+   any other name, since a plain-http request to a real domain almost always
+   means TLS ended upstream.
+
+The one case that guesses wrong is a **public domain name served over plain
+http with no proxy at all** (`http://brisk.example.com:8787` direct to the
+container): links come out `https://` and won't connect. Terminate TLS, use a
+private-use hostname, or put anything in front that sets `X-Forwarded-Proto`.
+
 ### Health probes
 
 The readiness/liveness probes hit `healthcheck.path`, which defaults to
