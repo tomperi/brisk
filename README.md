@@ -33,7 +33,7 @@ folder, same six APIs, no code changes.
 
 **What you get:**
 
-- **Instant hosting** — `brisk deploy` any folder; it's live at
+- **Instant hosting** — `brisk deploy` any folder (or one HTML file); it's live at
   `https://<name>.<your-host>/` in about a second. Deploys are atomic, names
   are first come, and anyone can overwrite anything.
 - **Six backend primitives**, callable from any page with zero setup:
@@ -330,8 +330,8 @@ on the provider side if your sites lean on it.
 npm install -g @usebrisk/cli       # or run from this repo: node cli/dist/cli.js
 
 brisk init [name]               # scaffold a folder (brisk.json, index.html, AGENTS.md)
-brisk deploy [dir]              # upload, get a URL
-brisk dev [dir]                 # redeploy on every save
+brisk deploy [dir|file]         # upload a folder — or one html file — and get a URL
+brisk dev [dir|file]            # redeploy on every save
 brisk list                      # everything on the instance
 brisk open [site]               # open in the browser
 brisk pull <site> [dir]         # download any site's source to remix it
@@ -451,8 +451,10 @@ brisk.example.com ─────┘    │
    Google; APIs get a 401.
 3. Static requests look up the site's live deploy pointer (cached ~5s per
    isolate) and stream the file from R2, resolving `/about` → `about.html`
-   and directory indexes. API requests hit D1/R2 directly; `/api/ws` upgrades
-   are handed to the site's Durable Object with the user attached.
+   and directory indexes. A site whose deploy is a single HTML page — one
+   dropped file — serves that page at `/` too, since there's nothing else it
+   could be. API requests hit D1/R2 directly; `/api/ws` upgrades are handed to
+   the site's Durable Object with the user attached.
 
 ### Storage layout
 

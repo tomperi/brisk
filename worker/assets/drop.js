@@ -37,6 +37,10 @@
     stage = null;
     dropped = [];
     shipping = false;
+    // Dismissing ends the flow the 409 armed this for. Leaving it set would let
+    // the next drop overwrite a site someone else owns with no confirmation —
+    // a prefilled name box can go straight to launch without an input event.
+    armedForce = false;
     $('drop-error').hidden = true;
     $('drop-note').hidden = true;
     launch.disabled = false;
@@ -86,7 +90,11 @@
       // No filesystem entries (synthetic drops, odd browsers): take flat files.
       for (const file of dataTransfer.files) out.push({ path: file.name, file });
     }
-    return { files: out, defaultName: '' };
+    // One file is a one-page site — name it after the file, extension dropped,
+    // the way a folder drop is named after the folder. The server serves a lone
+    // page at the root, so it lands live at `/`.
+    const single = out.length === 1 ? out[0].path.replace(/\.[^./]+$/, '') : '';
+    return { files: out, defaultName: single };
   }
 
   // ---- the name stage ----------------------------------------------------------
@@ -179,9 +187,14 @@
       if (!res.ok) throw new Error(info.error ?? `deploy failed (${res.status})`);
       armedForce = false;
 
+      // A lone page is served at the site root; a lone anything-else is not, so
+      // point at the file rather than a root that answers 404 — same call the
+      // CLI makes. The site keeps the name either way.
+      const only = dropped.length === 1 ? dropped[0].path : '';
+      const live = only && !/\.html?$/i.test(only) ? info.url + encodeURIComponent(only) : info.url;
       const link = $('live-link');
-      link.textContent = info.url.replace(/^https?:\/\//, '').replace(/\/$/, '');
-      link.href = info.url;
+      link.textContent = live.replace(/^https?:\/\//, '').replace(/\/$/, '');
+      link.href = live;
       show('live');
       confetti();
       load(); // refresh the dashboard's site list behind the overlay
