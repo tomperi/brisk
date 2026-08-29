@@ -15,6 +15,12 @@ releases are published to
   every comment on the page used to pin itself over whatever you were actually
   looking at. Pins follow the page as it swaps panels, with no reload.
 
+### Changed
+
+- **Comments** — pins number per author: yours count 1, 2, 3 whatever anyone
+  else leaves alongside them, and a draft keeps its number when you publish it.
+  The pin's tooltip and the panel row name whose a comment is.
+
 ## [0.4.1] - 2026-08-11
 
 ### Added
