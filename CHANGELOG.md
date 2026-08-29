@@ -8,6 +8,13 @@ releases are published to
 
 ## [Unreleased]
 
+### Fixed
+
+- **Comments** — a pin now hides while the element it marks is hidden. Stacked
+  slides, tabs and accordions keep laying their hidden panels out on screen, so
+  every comment on the page used to pin itself over whatever you were actually
+  looking at. Pins follow the page as it swaps panels, with no reload.
+
 ## [0.4.1] - 2026-08-11
 
 ### Added

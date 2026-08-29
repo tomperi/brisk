@@ -850,8 +850,35 @@ interface BdDoc {
       return null; // invalid selector
     }
   };
+  /** A hidden element keeps its box: a deck stacks every slide at inset:0 and
+   *  hides all but one with visibility/opacity, so its comments would otherwise
+   *  pin themselves over whatever slide you are reading. */
+  const onScreen = (el: Element): boolean => {
+    if (
+      typeof el.checkVisibility === 'function' &&
+      !el.checkVisibility({
+        contentVisibilityAuto: true,
+        opacityProperty: true,
+        visibilityProperty: true,
+        checkOpacity: true,
+        checkVisibilityCSS: true,
+      })
+    )
+      return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 || r.height > 0;
+  };
+
   const placePin = (pin: HTMLElement, selector: string) => {
-    const r = findTarget(selector)?.getBoundingClientRect();
+    const target = findTarget(selector);
+    // Gone and hidden are different: a comment whose element no longer exists
+    // still shows (detached, parked in the corner), one whose element is merely
+    // hidden waits for it to come back.
+    pin.classList.toggle('detached', !target && !!selector);
+    const visible = !target || onScreen(target);
+    pin.style.display = visible ? '' : 'none';
+    if (!visible) return;
+    const r = target?.getBoundingClientRect();
     pin.style.left = `${(r?.left ?? 12) + 10}px`;
     pin.style.top = `${(r?.top ?? 12) + 10}px`;
   };
@@ -873,9 +900,8 @@ interface BdDoc {
     pins.innerHTML = '';
     pinRefs.length = 0;
     for (const v of views().filter((v) => here(v) && !v.parentId && shown(v))) {
-      const target = findTarget(v.selector);
       const pin = document.createElement('div');
-      pin.className = `pin ${v.kind === 'draft' ? 'draft' : v.status}${!target && v.selector ? ' detached' : ''}`;
+      pin.className = `pin ${v.kind === 'draft' ? 'draft' : v.status}`;
       pin.textContent = String(nums.get(v.id) ?? '');
       placePin(pin, v.selector);
       pin.onclick = (e) => {
@@ -1137,6 +1163,18 @@ interface BdDoc {
   // textarea can't dismiss it.
   addEventListener('scroll', scheduleReposition, true);
   addEventListener('resize', scheduleReposition, true);
+  // A cross-fade leaves the incoming element at opacity 0 for the length of its
+  // transition, long after the class flip — re-place when the motion lands too.
+  addEventListener('transitionend', scheduleReposition, true);
+  addEventListener('animationend', scheduleReposition, true);
+  // Slides, tabs and accordions swap what's on screen with a class or style
+  // flip and fire no event of their own — watch the markup so pins follow.
+  new MutationObserver(scheduleReposition).observe(document.documentElement, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ['class', 'style', 'hidden', 'aria-hidden', 'open'],
+  });
   // History-routed navigation changes the page identity — re-filter the pins.
   addEventListener('popstate', () => render());
 
