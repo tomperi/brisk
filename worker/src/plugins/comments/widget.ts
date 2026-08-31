@@ -130,6 +130,22 @@ interface BdDoc {
     return ((await res.json()) as { result: BdDoc }).result;
   };
 
+  /** What the numbering groups on: the stamped email, else the display name. */
+  const identityOf = (email: string, name: string) => (email || name).trim().toLowerCase();
+
+  // A draft has to count in the same sequence as the comments this account has
+  // already published, or publishing one renumbers it. Async — until it lands,
+  // drafts number as their own author.
+  let meKey = '';
+  void fetch('/api/me')
+    .then((r) => (r.ok ? (r.json() as Promise<{ email?: string; name?: string }>) : null))
+    .then((me) => {
+      if (!me) throw new Error('/api/me refused');
+      meKey = identityOf(me.email ?? '', me.name ?? '');
+      render();
+    })
+    .catch((err: unknown) => console.warn('[comments] identity unavailable:', err));
+
   // ---- element anchoring (ported from html-grab) ---------------------------
   function cssPath(el: Element): string {
     if (el.id) return `#${CSS.escape(el.id)}`;
@@ -499,6 +515,8 @@ interface BdDoc {
     status: Exclude<Status, 'all'>;
     author: string;
     email: string;
+    /** Identity the numbering counts under — see identityOf. */
+    authorKey: string;
     at: string;
     /** Raw ISO timestamp — the number assignment sorts on it. */
     created: string;
@@ -517,6 +535,7 @@ interface BdDoc {
       status: 'open' as const,
       author: 'you',
       email: 'draft — not published',
+      authorKey: meKey,
       at: timeAgo(d.createdAt),
       created: d.createdAt,
       parentId: '',
@@ -531,6 +550,7 @@ interface BdDoc {
       status: statusOfDoc(d),
       author: String(d.createdBy ?? ''),
       email: String(d.createdByEmail ?? ''),
+      authorKey: identityOf(String(d.createdByEmail ?? ''), String(d.createdBy ?? '')),
       at: timeAgo(d.createdAt),
       created: d.createdAt,
       parentId: String(d.parentId ?? ''),
@@ -850,8 +870,35 @@ interface BdDoc {
       return null; // invalid selector
     }
   };
+  /** A hidden element keeps its box: a deck stacks every slide at inset:0 and
+   *  hides all but one with visibility/opacity, so its comments would otherwise
+   *  pin themselves over whatever slide you are reading. */
+  const onScreen = (el: Element): boolean => {
+    if (
+      typeof el.checkVisibility === 'function' &&
+      !el.checkVisibility({
+        contentVisibilityAuto: true,
+        opacityProperty: true,
+        visibilityProperty: true,
+        checkOpacity: true,
+        checkVisibilityCSS: true,
+      })
+    )
+      return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 || r.height > 0;
+  };
+
   const placePin = (pin: HTMLElement, selector: string) => {
-    const r = findTarget(selector)?.getBoundingClientRect();
+    const target = findTarget(selector);
+    // Gone and hidden are different: a comment whose element no longer exists
+    // still shows (detached, parked in the corner), one whose element is merely
+    // hidden waits for it to come back.
+    pin.classList.toggle('detached', !target && !!selector);
+    const visible = !target || onScreen(target);
+    pin.style.display = visible ? '' : 'none';
+    if (!visible) return;
+    const r = target?.getBoundingClientRect();
     pin.style.left = `${(r?.left ?? 12) + 10}px`;
     pin.style.top = `${(r?.top ?? 12) + 10}px`;
   };
@@ -859,23 +906,30 @@ interface BdDoc {
   /** Full rebuild — call when the data changes, not on scroll (rebuilding per
    *  scroll event restarts the pin-in animation and churns the DOM). */
   const pinRefs: { el: HTMLElement; selector: string }[] = [];
-  /** Comment number by id. Assigned chronologically over every top-level
-   *  comment (all pages, all statuses), so a comment keeps its number when the
-   *  filter changes or you navigate — the pin and the side panel always agree. */
+  /** Comment number by id: chronological within each author, so yours count 1,
+   *  2, 3 whatever anyone else leaves alongside them. Numbers repeat across
+   *  authors — the pin's tooltip and the panel row say whose a comment is. */
   let nums = new Map<string, number>();
+  const numberPerAuthor = (all: View[]): Map<string, number> => {
+    const next = new Map<string, number>();
+    const out = new Map<string, number>();
+    for (const v of all
+      .filter((v) => !v.parentId)
+      .sort((a, b) => (a.created < b.created ? -1 : 1))) {
+      const n = (next.get(v.authorKey) ?? 0) + 1;
+      next.set(v.authorKey, n);
+      out.set(v.id, n);
+    }
+    return out;
+  };
   function render() {
-    nums = new Map(
-      views()
-        .filter((v) => !v.parentId)
-        .sort((a, b) => (a.created < b.created ? -1 : 1))
-        .map((v, i) => [v.id, i + 1]),
-    );
+    nums = numberPerAuthor(views());
     pins.innerHTML = '';
     pinRefs.length = 0;
     for (const v of views().filter((v) => here(v) && !v.parentId && shown(v))) {
-      const target = findTarget(v.selector);
       const pin = document.createElement('div');
-      pin.className = `pin ${v.kind === 'draft' ? 'draft' : v.status}${!target && v.selector ? ' detached' : ''}`;
+      pin.className = `pin ${v.kind === 'draft' ? 'draft' : v.status}`;
+      pin.title = `${v.author} · ${clean(v.text, 60)}`;
       pin.textContent = String(nums.get(v.id) ?? '');
       placePin(pin, v.selector);
       pin.onclick = (e) => {
@@ -1137,6 +1191,18 @@ interface BdDoc {
   // textarea can't dismiss it.
   addEventListener('scroll', scheduleReposition, true);
   addEventListener('resize', scheduleReposition, true);
+  // A cross-fade leaves the incoming element at opacity 0 for the length of its
+  // transition, long after the class flip — re-place when the motion lands too.
+  addEventListener('transitionend', scheduleReposition, true);
+  addEventListener('animationend', scheduleReposition, true);
+  // Slides, tabs and accordions swap what's on screen with a class or style
+  // flip and fire no event of their own — watch the markup so pins follow.
+  new MutationObserver(scheduleReposition).observe(document.documentElement, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ['class', 'style', 'hidden', 'aria-hidden', 'open'],
+  });
   // History-routed navigation changes the page identity — re-filter the pins.
   addEventListener('popstate', () => render());
 
