@@ -8,6 +8,8 @@ releases are published to
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-08-30
+
 ### Fixed
 
 - **Comments** — a pin now hides while the element it marks is hidden. Stacked
@@ -200,7 +202,8 @@ releases are published to
 - `@usebrisk/cli` and `@usebrisk/sdk` published to npm, cut in lockstep by a
   tag-driven release workflow.
 
-[unreleased]: https://github.com/tomperi/brisk/compare/v0.4.1...HEAD
+[unreleased]: https://github.com/tomperi/brisk/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/tomperi/brisk/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/tomperi/brisk/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/tomperi/brisk/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/tomperi/brisk/compare/v0.2.0...v0.3.0
