@@ -15,6 +15,9 @@ releases are published to
   architecture, and the changelog, generated from the repo at build time so it
   always matches the running version. Served like `/docs`: open on `AUTH=none`
   instances, viewable by signed-out visitors in public demo mode.
+- **Skill** — the Brisk skill explains plugins and how an agent discovers the
+  ones an instance has (`brisk plugin list`, `/api/plugins`) instead of
+  assuming a registry, and how to act on teammates' comments.
 
 ## [0.4.2] - 2026-08-30
 

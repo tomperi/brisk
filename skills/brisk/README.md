@@ -13,8 +13,17 @@ the public repo and `brisk --help`, never to sibling files.
 cp -r brisk ~/.claude/skills/brisk
 ```
 
+Or, without a checkout, fetch the two files straight from GitHub:
+
+```sh
+mkdir -p ~/.claude/skills/brisk/references
+curl -fsSL https://raw.githubusercontent.com/tomperi/brisk/main/skills/brisk/SKILL.md -o ~/.claude/skills/brisk/SKILL.md
+curl -fsSL https://raw.githubusercontent.com/tomperi/brisk/main/skills/brisk/references/sdk.md -o ~/.claude/skills/brisk/references/sdk.md
+```
+
 It's auto-discovered via the frontmatter in `SKILL.md`; it fires when you ask to
-build or deploy a Brisk site.
+build or deploy a Brisk site. Any Brisk instance also serves these instructions,
+with the skill itself and the rest of the docs, at `/llms.txt`.
 
 **Codex** — Codex doesn't read the Claude `SKILL.md` frontmatter, so point your
 agent at the file directly: reference `SKILL.md` from your project's `AGENTS.md`
