@@ -8,6 +8,14 @@ releases are published to
 
 ## [Unreleased]
 
+### Added
+
+- **`/llms.txt`** — everything about Brisk as one text file for coding agents:
+  the companion skill and how to install it, the `/docs` and `/host` pages, the
+  architecture, and the changelog, generated from the repo at build time so it
+  always matches the running version. Served like `/docs`: open on `AUTH=none`
+  instances, viewable by signed-out visitors in public demo mode.
+
 ## [0.4.2] - 2026-08-30
 
 ### Fixed

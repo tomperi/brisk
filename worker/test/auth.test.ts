@@ -35,6 +35,10 @@ describe('auth=google', () => {
     const api = await fetchAs(googleEnv, '/api/me');
     expect(api.status).toBe(401);
 
+    // A private instance keeps every page behind login, /llms.txt included.
+    const llms = await fetchAs(googleEnv, '/llms.txt');
+    expect(llms.status).toBe(401);
+
     const browser = await fetchAs(googleEnv, '/', { headers: { accept: 'text/html' } });
     expect(browser.status).toBe(302);
     expect(browser.headers.get('location')).toContain('/auth/login');
@@ -185,6 +189,13 @@ describe('visibility=public (demo mode)', () => {
   it('lets visitors list sites for the dashboard', async () => {
     const res = await fetchAs(publicEnv, '/api/sites');
     expect(res.status).toBe(200);
+  });
+
+  it('lets visitors read /llms.txt, like /docs', async () => {
+    const res = await fetchAs(publicEnv, '/llms.txt');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/plain');
+    expect((await res.text()).startsWith('# Brisk\n')).toBe(true);
   });
 
   it('ignores x-brisk-site for static serving — no cache poisoning', async () => {

@@ -350,7 +350,11 @@ deploys are then attributed to _you_. Every command takes `--profile <name>`
 skip profiles entirely: `BRISK_SERVER` + `BRISK_TOKEN`.
 
 `brisk init` also drops an `AGENTS.md` so coding agents immediately know the
-SDK — "make me a lunch-voting site" works out of the box.
+SDK — "make me a lunch-voting site" works out of the box. For an agent to know
+Brisk _before_ a folder exists, install the [companion skill](skills/brisk)
+(Claude Code and Codex instructions in its README), and point it at `/llms.txt`
+on any instance: the whole product — docs, hosting, changelog, the skill and how
+to install it — as one text file, generated from this repo at build time.
 
 ## The SDK
 

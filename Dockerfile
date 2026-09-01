@@ -8,13 +8,15 @@ RUN corepack enable
 # the sdk to generate worker/assets/brisk.js and the worker to bundle.
 COPY . .
 # Generate the built assets (brisk.js via the sdk, changelog.html from
-# CHANGELOG.md, plugin widget bundles — all gitignored, so absent unless
-# produced here; without build:widgets the injected /_plugins/<id>/widget.js
-# 404s and the plugin is silently dead), bundle the Node entry, then materialize
-# a self-contained, lockfile-pinned production node_modules under /prod.
+# CHANGELOG.md, llms.txt from the skill + docs pages + README + CHANGELOG,
+# plugin widget bundles — all gitignored, so absent unless produced here;
+# without build:widgets the injected /_plugins/<id>/widget.js 404s and the
+# plugin is silently dead), bundle the Node entry, then materialize a
+# self-contained, lockfile-pinned production node_modules under /prod.
 RUN pnpm install --frozen-lockfile \
  && pnpm --filter @usebrisk/sdk build \
  && node worker/scripts/build-changelog.mjs \
+ && node worker/scripts/build-llms.mjs \
  && pnpm --filter @usebrisk/worker build:widgets \
  && pnpm --filter @usebrisk/worker build:node \
  && pnpm --filter @usebrisk/worker --legacy deploy --prod --frozen-lockfile /prod
