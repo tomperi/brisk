@@ -101,7 +101,9 @@ is a later opt-in.
   `/files/`, or `/auth/` are visitor-blocked by default — any other GET
   becomes publicly viewable, so check that function when adding routes.
   Visitor static responses are edge-cached (`serveSiteFor` in `app.ts`);
-  members always bypass the cache.
+  members always bypass the cache. `OPEN_PAGES` (just `/llms.txt`) is the one
+  exception that applies on private instances too — it holds only the repo's
+  docs, and agents can't log in to read it.
 
 ## Working on it
 

@@ -35,9 +35,13 @@ describe('auth=google', () => {
     const api = await fetchAs(googleEnv, '/api/me');
     expect(api.status).toBe(401);
 
-    // A private instance keeps every page behind login, /llms.txt included.
+    // /llms.txt is the one page a private instance still serves — apex only.
     const llms = await fetchAs(googleEnv, '/llms.txt');
-    expect(llms.status).toBe(401);
+    expect(llms.status).toBe(200);
+    expect(llms.headers.get('content-type')).toContain('text/plain');
+    expect((await fetchUrl(googleEnv, 'http://somesite.localhost/llms.txt')).status).toBe(401);
+    const steered = await fetchAs(googleEnv, '/llms.txt', { headers: { 'x-brisk-site': 'home' } });
+    expect(steered.status).toBe(401);
 
     const browser = await fetchAs(googleEnv, '/', { headers: { accept: 'text/html' } });
     expect(browser.status).toBe(302);
@@ -191,7 +195,7 @@ describe('visibility=public (demo mode)', () => {
     expect(res.status).toBe(200);
   });
 
-  it('lets visitors read /llms.txt, like /docs', async () => {
+  it('lets visitors read /llms.txt', async () => {
     const res = await fetchAs(publicEnv, '/llms.txt');
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/plain');

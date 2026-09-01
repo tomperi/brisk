@@ -63,6 +63,19 @@ function visitorAllowed(method: string, pathname: string): boolean {
   return true; // static site files, dashboard assets, /brisk.js, /docs
 }
 
+/** Pages every instance serves with no login, private ones included: they hold
+ *  only this repo's docs, and exist to be fetched by agents and crawlers that
+ *  can't complete OAuth. */
+const OPEN_PAGES = new Set(['/llms.txt']);
+
+/** Apex only — a site's own file of the same name stays a member's. With no
+ *  x-brisk-site header steering the site, a resolved `home` is the bare host. */
+function openPage(c: Context<AppEnv>): boolean {
+  if (c.req.method !== 'GET' && c.req.method !== 'HEAD') return false;
+  if (!OPEN_PAGES.has(new URL(c.req.url).pathname)) return false;
+  return c.var.site === 'home' && !c.req.header('x-brisk-site');
+}
+
 const apexHost = (c: Context<AppEnv>): string => c.env.BASE_HOST || new URL(c.req.url).host;
 
 /** The scheme derivation needs a URL and one header — nothing else, so callers
@@ -390,8 +403,8 @@ export function auth(): MiddlewareHandler<AppEnv> {
     }
 
     if (
-      c.env.VISIBILITY === 'public' &&
-      visitorAllowed(c.req.method, new URL(c.req.url).pathname)
+      openPage(c) ||
+      (c.env.VISIBILITY === 'public' && visitorAllowed(c.req.method, new URL(c.req.url).pathname))
     ) {
       c.set('user', VISITOR);
       return next();

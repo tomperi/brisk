@@ -203,6 +203,9 @@ instance — so you can't expose one silently.
 | `google`         | `private` (default) | members only                       | members + CI token                          |
 | `google`         | `public`            | **anyone**, read-only, edge-cached | members + CI token                          |
 
+`/llms.txt` is the one page every instance serves without a login — it holds
+only this repo's docs, and the agents it is for can't complete OAuth.
+
 Members are whoever passes `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS`. Three
 credentials exist: the browser session cookie (7 days, covers every site
 subdomain), the personal CLI token from `brisk login` (90 days, attributed to

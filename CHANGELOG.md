@@ -13,8 +13,9 @@ releases are published to
 - **`/llms.txt`** — everything about Brisk as one text file for coding agents:
   the companion skill and how to install it, the `/docs` and `/host` pages, the
   architecture, and the changelog, generated from the repo at build time so it
-  always matches the running version. Served like `/docs`: open on `AUTH=none`
-  instances, viewable by signed-out visitors in public demo mode.
+  always matches the running version. It is the one page every instance serves
+  without a login, private ones included, since the agents it is for can't
+  complete OAuth — apex only, and it holds nothing but the repo's docs.
 - **Skill** — the Brisk skill explains plugins and how an agent discovers the
   ones an instance has (`brisk plugin list`, `/api/plugins`) instead of
   assuming a registry, and how to act on teammates' comments.
