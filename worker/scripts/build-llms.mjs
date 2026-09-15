@@ -79,18 +79,25 @@ function inline(html) {
 const heading = (level, html) =>
   `${'#'.repeat(level)} ${inline(html.replace(/<\/?a\b[^>]*>/g, ''))}`;
 
-const fence = (html) => '```\n' + decode(html.replace(/<\/?code>/g, '')) + '\n```';
+/** A fenced block. Only the `<code>` wrapper belongs inside a `<pre>`; any
+ *  other tag would ship verbatim into a block an agent copies, so it throws. */
+function fence(html) {
+  const code = html.replace(/<\/?code>/g, '');
+  if (/<[a-z]/i.test(code)) {
+    throw new Error(`build-llms: unhandled markup in <pre>: ${code.slice(0, 80)}`);
+  }
+  return '```\n' + decode(code) + '\n```';
+}
 
-/** A list item: inline text, plus any `<pre>` it embeds as a fenced block
- *  indented under the marker so the list survives it. */
+/** A list item: inline text plus any `<pre>` it embeds, every line after the
+ *  first indented under the marker so the whole thing stays one item. */
 function item(html, marker) {
   const indent = ' '.repeat(marker.length + 1);
-  return html
+  const parts = html
     .split(/<pre\b[^>]*>([\s\S]*?)<\/pre>/)
-    .map((part, i) => (i % 2 ? fence(part).replace(/^/gm, indent) : inline(part)))
-    .filter(Boolean)
-    .map((part, i) => (i ? `\n\n${part}` : `${marker} ${part}`))
-    .join('');
+    .map((part, i) => (i % 2 ? fence(part) : inline(part)))
+    .filter(Boolean);
+  return `${marker} ${parts.join('\n\n')}`.replace(/\n(?=.)/g, `\n${indent}`);
 }
 
 const items = (html, marker) =>
