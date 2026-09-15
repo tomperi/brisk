@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { sign, verify } from 'hono/jwt';
 import type { AppEnv, Env, User } from './env';
+import { siteFromHost } from './sites';
 
 const SESSION_COOKIE = 'brisk_session';
 const STATE_COOKIE = 'brisk_oauth_state';
@@ -65,15 +66,17 @@ function visitorAllowed(method: string, pathname: string): boolean {
 
 /** Pages every instance serves with no login, private ones included: they hold
  *  only this repo's docs, and exist to be fetched by agents and crawlers that
- *  can't complete OAuth. */
-const OPEN_PAGES = new Set(['/llms.txt']);
+ *  can't complete OAuth. app.ts serves them from the worker's own assets by
+ *  explicit route, so no deployed site can publish a file under one of these
+ *  names to the world. */
+export const OPEN_PAGES: ReadonlySet<string> = new Set(['/llms.txt']);
 
-/** Apex only — a site's own file of the same name stays a member's. With no
- *  x-brisk-site header steering the site, a resolved `home` is the bare host. */
+/** The bare host only, judged from the Host and never from x-brisk-site:
+ *  `foo.<BASE_HOST>/llms.txt` is that site's own file and stays a member's. */
 function openPage(c: Context<AppEnv>): boolean {
   if (c.req.method !== 'GET' && c.req.method !== 'HEAD') return false;
-  if (!OPEN_PAGES.has(new URL(c.req.url).pathname)) return false;
-  return c.var.site === 'home' && !c.req.header('x-brisk-site');
+  const url = new URL(c.req.url);
+  return OPEN_PAGES.has(url.pathname) && siteFromHost(url.host, c.env.BASE_HOST) === null;
 }
 
 const apexHost = (c: Context<AppEnv>): string => c.env.BASE_HOST || new URL(c.req.url).host;

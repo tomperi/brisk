@@ -2,8 +2,9 @@ import { SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 /** /llms.txt is a generated asset (worker/scripts/build-llms.mjs, run by `pnpm
- *  build`), served by the `home` catch-all like /docs. These pin that the build
- *  output is wired through and carries each source it is assembled from. */
+ *  build`) with its own route. These pin that the build output is wired
+ *  through and carries each source it is assembled from; who may read it is
+ *  auth.test.ts's business. */
 describe('/llms.txt', () => {
   it('serves the generated file as plain text', async () => {
     const res = await SELF.fetch('http://localhost/llms.txt');
@@ -22,8 +23,12 @@ describe('/llms.txt', () => {
     expect(body).toContain('## Changelog');
   });
 
-  it('is the apex page only — a site subdomain does not serve it', async () => {
-    const res = await SELF.fetch('http://nosuchsite.localhost/llms.txt');
-    expect(res.status).toBe(404);
+  it("is the apex's file — on a site's host the path is that site's own", async () => {
+    const form = new FormData();
+    form.append('files', new File(["the site's own llms.txt"], 'llms.txt'));
+    await SELF.fetch('http://localhost/api/deploy/ownfile', { method: 'POST', body: form });
+    const own = await SELF.fetch('http://ownfile.localhost/llms.txt');
+    expect(await own.text()).toBe("the site's own llms.txt");
+    expect((await SELF.fetch('http://nosuchsite.localhost/llms.txt')).status).toBe(404);
   });
 });

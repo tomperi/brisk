@@ -1,7 +1,7 @@
 import { SELF, createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
-import { createApp, siteFromHost, siteUrl } from '../src/app';
-import { isValidSiteName, listDeploys } from '../src/sites';
+import { createApp, siteUrl } from '../src/app';
+import { isValidSiteName, listDeploys, siteFromHost } from '../src/sites';
 import { buildCloudflarePlatform } from '../src/platform/cloudflare/platform';
 
 const HOST = 'http://localhost';

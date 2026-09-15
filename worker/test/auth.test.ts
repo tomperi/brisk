@@ -35,17 +35,47 @@ describe('auth=google', () => {
     const api = await fetchAs(googleEnv, '/api/me');
     expect(api.status).toBe(401);
 
-    // /llms.txt is the one page a private instance still serves — apex only.
-    const llms = await fetchAs(googleEnv, '/llms.txt');
-    expect(llms.status).toBe(200);
-    expect(llms.headers.get('content-type')).toContain('text/plain');
-    expect((await fetchUrl(googleEnv, 'http://somesite.localhost/llms.txt')).status).toBe(401);
-    const steered = await fetchAs(googleEnv, '/llms.txt', { headers: { 'x-brisk-site': 'home' } });
-    expect(steered.status).toBe(401);
-
     const browser = await fetchAs(googleEnv, '/', { headers: { accept: 'text/html' } });
     expect(browser.status).toBe(302);
     expect(browser.headers.get('location')).toContain('/auth/login');
+  });
+
+  it('serves /llms.txt with no session, and only ever the platform file', async () => {
+    // The page exists for agents that can't log in, so a private instance
+    // answers it — but a deployed site named `home` shadows the dashboard, and
+    // must not get to publish a file under that name (or its `.html` twin) to
+    // the world through the same door.
+    const form = new FormData();
+    form.append('files', new File(['NOT-THE-PLATFORM-FILE'], 'llms.txt'));
+    form.append('files', new File(['NOT-THE-PLATFORM-FILE'], 'llms.txt.html'));
+    form.append('files', new File(['<h1>home</h1>'], 'index.html'));
+    const ci = { authorization: 'Bearer ci-token' };
+    const deployed = await fetchAs(googleEnv, '/api/deploy/home', {
+      method: 'POST',
+      headers: ci,
+      body: form,
+    });
+    expect(deployed.status).toBe(200);
+    try {
+      const platform = async (res: Response) => {
+        expect(res.status).toBe(200);
+        expect(res.headers.get('content-type')).toContain('text/plain');
+        expect((await res.text()).startsWith('# Brisk\n')).toBe(true);
+      };
+      await platform(await fetchAs(googleEnv, '/llms.txt'));
+      // The SDK header can't steer it onto a site, and a member sees the same.
+      await platform(
+        await fetchAs(googleEnv, '/llms.txt', { headers: { 'x-brisk-site': 'home' } }),
+      );
+      await platform(await fetchAs(googleEnv, '/llms.txt', { headers: ci }));
+      // On a site's own host the path is that site's file: members only.
+      expect((await fetchUrl(googleEnv, 'http://home.localhost/llms.txt')).status).toBe(401);
+      expect((await fetchUrl(googleEnv, 'http://somesite.localhost/llms.txt')).status).toBe(401);
+      // The rest of the deployed home site stays behind login.
+      expect((await fetchAs(googleEnv, '/index.html')).status).toBe(401);
+    } finally {
+      await fetchAs(googleEnv, '/api/sites/home', { method: 'DELETE', headers: ci });
+    }
   });
 
   it('builds an https OAuth redirect_uri when TLS is terminated upstream', async () => {
@@ -195,7 +225,7 @@ describe('visibility=public (demo mode)', () => {
     expect(res.status).toBe(200);
   });
 
-  it('lets visitors read /llms.txt', async () => {
+  it('lets visitors read /llms.txt (as any GET outside the API would be)', async () => {
     const res = await fetchAs(publicEnv, '/llms.txt');
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/plain');

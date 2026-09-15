@@ -103,7 +103,9 @@ is a later opt-in.
   Visitor static responses are edge-cached (`serveSiteFor` in `app.ts`);
   members always bypass the cache. `OPEN_PAGES` (just `/llms.txt`) is the one
   exception that applies on private instances too — it holds only the repo's
-  docs, and agents can't log in to read it.
+  docs, and agents can't log in to read it. Those pages have their own routes
+  in `app.ts` that read the worker asset directly, so a deployed `home` site
+  can't shadow them the way it shadows `/docs`; keep it that way.
 
 ## Working on it
 
