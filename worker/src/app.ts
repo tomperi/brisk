@@ -6,6 +6,7 @@ import {
   cliConsent,
   cliMint,
   isVisitor,
+  OPEN_PAGES,
   publicScheme,
   type SchemeSource,
 } from './auth';
@@ -20,6 +21,7 @@ import {
   listFiles,
   listSites,
   serveSite,
+  siteFromHost,
   sitePlugins,
   type DeployFile,
 } from './sites';
@@ -57,23 +59,6 @@ function parseRequestedPlugins(header: string | undefined): Record<string, boole
   } catch {
     return {};
   }
-}
-
-/**
- * `foo.brisk.example.com` → `foo`. `foo.localhost` always works too, whatever
- * BASE_HOST says — local dev shouldn't depend on production config.
- */
-export function siteFromHost(host: string, baseHost = ''): string | null {
-  const bare = host.split(':')[0]!.toLowerCase();
-  const bases = [...new Set([baseHost.split(':')[0]!.toLowerCase(), 'localhost'])].filter(Boolean);
-  for (const base of bases) {
-    if (bare === base) return null;
-    if (bare.endsWith(`.${base}`)) {
-      const label = bare.slice(0, -(base.length + 1));
-      return label.includes('.') ? null : label;
-    }
-  }
-  return null;
 }
 
 /**
@@ -481,6 +466,20 @@ export function createApp(
     return notFoundPage(site, path, exists, `/s/${site}/`);
   });
   app.get('/s/:site', (c) => c.redirect(`/s/${c.req.param('site')}/`));
+
+  // The open pages (OPEN_PAGES in auth.ts) are readable with no login, so they
+  // come from the worker's own assets and never from a deployed site: through
+  // the catch-all, a site named `home` could publish a file under one of these
+  // names — or its `.html` twin — to the whole internet, and the visitor cache
+  // would keep serving it after the site was deleted. Apex only; on a site's
+  // own host the path falls through to that site's file, for members.
+  for (const path of OPEN_PAGES) {
+    app.get(path, async (c, next) => {
+      if (siteFromHost(new URL(c.req.url).host, c.env.BASE_HOST) !== null) return next();
+      const asset = await c.var.platform.assets.fetch(path);
+      return asset.ok ? securedAsset(asset) : c.notFound();
+    });
+  }
 
   // Everything else: serve the request's site. The dashboard ships as worker
   // assets and acts as the default `home` site until someone deploys over it.

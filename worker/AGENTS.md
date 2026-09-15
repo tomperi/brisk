@@ -5,17 +5,17 @@ router, dashboard. Request flow and storage layout: README → Architecture.
 
 ## Map
 
-| File           | Owns                                                                                                |
-| -------------- | --------------------------------------------------------------------------------------------------- |
-| `src/app.ts`   | All HTTP routes, site resolution, the static-serving fallback                                       |
-| `src/sites.ts` | Deploys (atomic pointer swap), serving from R2, site CRUD, name rules                               |
-| `src/docs.ts`  | The document store on D1 (`docs` table)                                                             |
-| `src/room.ts`  | `SiteRoom` Durable Object: db events, channels, presence ([protocol](../docs/realtime-protocol.md)) |
-| `src/auth.ts`  | Google OAuth, session cookies, dev identity, personal CLI tokens (`/auth/cli`) + CI deploy token    |
-| `src/ai.ts`    | Anthropic/OpenAI proxy; provider picked by configured key                                           |
-| `src/plugins/` | Curated, forkable plugin layer (registry, `/api/plugins`, HTML injection) + the `comments` plugin   |
-| `assets/`      | The dashboard (the built-in `home` site) + generated `brisk.js` + built plugin widgets (`plugins/`) |
-| `migrations/`  | D1 schema; add new numbered files, never edit applied ones                                          |
+| File           | Owns                                                                                                                                           |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/app.ts`   | All HTTP routes, site resolution, the static-serving fallback                                                                                  |
+| `src/sites.ts` | Deploys (atomic pointer swap), serving from R2, site CRUD, name rules                                                                          |
+| `src/docs.ts`  | The document store on D1 (`docs` table)                                                                                                        |
+| `src/room.ts`  | `SiteRoom` Durable Object: db events, channels, presence ([protocol](../docs/realtime-protocol.md))                                            |
+| `src/auth.ts`  | Google OAuth, session cookies, dev identity, personal CLI tokens (`/auth/cli`) + CI deploy token                                               |
+| `src/ai.ts`    | Anthropic/OpenAI proxy; provider picked by configured key                                                                                      |
+| `src/plugins/` | Curated, forkable plugin layer (registry, `/api/plugins`, HTML injection) + the `comments` plugin                                              |
+| `assets/`      | The dashboard (the built-in `home` site) + generated `brisk.js`, `changelog.html`, `llms.txt` (`scripts/`) + built plugin widgets (`plugins/`) |
+| `migrations/`  | D1 schema; add new numbered files, never edit applied ones                                                                                     |
 
 ## Two assemblies, one core
 
@@ -101,7 +101,11 @@ is a later opt-in.
   `/files/`, or `/auth/` are visitor-blocked by default — any other GET
   becomes publicly viewable, so check that function when adding routes.
   Visitor static responses are edge-cached (`serveSiteFor` in `app.ts`);
-  members always bypass the cache.
+  members always bypass the cache. `OPEN_PAGES` (just `/llms.txt`) is the one
+  exception that applies on private instances too — it holds only the repo's
+  docs, and agents can't log in to read it. Those pages have their own routes
+  in `app.ts` that read the worker asset directly, so a deployed `home` site
+  can't shadow them the way it shadows `/docs`; keep it that way.
 
 ## Working on it
 
