@@ -162,7 +162,7 @@ const header = `# Brisk
 
 Brisk is for internal use behind a login. Every site is visible and writable by every authenticated teammate; there are no permissions, no site owners, no custom backends, no build steps, no cron jobs, and no seventh primitive. Those constraints are the product. It runs on Cloudflare (one Worker + R2 + D1 + Durable Objects) or self-hosted on any Node box (SQLite plus a disk or an S3 bucket) from the same code.
 
-This file is generated at build time for Brisk ${version} from the repository and the pages of the instance serving it, so it matches what is running here. Root-relative links (\`/docs\`) resolve on this instance.
+This file is generated at build time for Brisk ${version} from the repository and the pages of the instance serving it, so it matches what is running here. Root-relative links (\`/docs\`) resolve on this instance — but on a private instance they need a signed-in browser, and \`/llms.txt\` is the one page served without a login. The copies mirrored below are what an agent should read.
 
 ## Pages on this instance
 
