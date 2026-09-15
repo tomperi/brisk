@@ -13,7 +13,7 @@
     "build": "node scripts/build-changelog.mjs && node scripts/build-llms.mjs && pnpm run build:widgets && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.widget.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.widget.json --noEmit",
     "start": "NODE_OPTIONS=--disable-warning=ExperimentalWarning node dist/index.node.js",
-    "test": "vitest run && vitest run --config vitest.node.config.ts"
+    "test": "node scripts/build-changelog.mjs && node scripts/build-llms.mjs && vitest run && vitest run --config vitest.node.config.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.60.0",
