@@ -230,8 +230,8 @@ npx wrangler secret put DEPLOY_TOKEN       # optional, for CI</code></pre>
 
       <h2 id="visibility"><a href="#visibility">Public demo mode</a></h2>
       <p>
-        Instances are private by default — everything needs a login. To let strangers
-        <em>see</em> your sites without being able to touch them, set
+        Instances are private by default — everything but <code>/llms.txt</code> needs a login. To
+        let strangers <em>see</em> your sites without being able to touch them, set
         <code>VISIBILITY=public</code> alongside <code>AUTH=google</code>.
       </p>
       <ul>

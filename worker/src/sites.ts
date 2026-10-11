@@ -41,6 +41,23 @@ export function isValidSiteName(name: string): boolean {
   return SITE_NAME.test(name) && !RESERVED.has(name);
 }
 
+/**
+ * `foo.brisk.example.com` → `foo`. `foo.localhost` always works too, whatever
+ * BASE_HOST says — local dev shouldn't depend on production config.
+ */
+export function siteFromHost(host: string, baseHost = ''): string | null {
+  const bare = host.split(':')[0]!.toLowerCase();
+  const bases = [...new Set([baseHost.split(':')[0]!.toLowerCase(), 'localhost'])].filter(Boolean);
+  for (const base of bases) {
+    if (bare === base) return null;
+    if (bare.endsWith(`.${base}`)) {
+      const label = bare.slice(0, -(base.length + 1));
+      return label.includes('.') ? null : label;
+    }
+  }
+  return null;
+}
+
 function parsePlugins(raw: string | null): string[] {
   if (!raw) return [];
   try {

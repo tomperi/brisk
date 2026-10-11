@@ -1,6 +1,6 @@
 ---
 name: brisk
-description: Use when creating, deploying, or iterating on a Brisk app or site. Brisk is drop-a-folder hosting with zero-config browser APIs (db, identity, ai, files, channels). Triggers on "build a brisk app/site", "deploy to brisk", "make me a … site" on a Brisk instance.
+description: Use when creating, deploying, or iterating on a Brisk app or site. Brisk is drop-a-folder hosting with zero-config browser APIs (db, identity, ai, files, channels). Triggers on "build a brisk app/site", "deploy to brisk", "make me a … site" on a Brisk instance, and on acting on comments left on a Brisk site.
 ---
 
 # Building and deploying Brisk apps
@@ -103,10 +103,58 @@ brisk list             # everything deployed on the instance
 brisk pull <site> dir  # download a site's source to remix it
 ```
 
+## Plugins
+
+Plugins are first-party features a site switches on, injected into its pages by
+the platform: a curated layer sites _consume_, not a seventh primitive. You can't
+upload one — the set is fixed per instance (a fork adds them server-side). Each
+is `mandatory`, on by `default`, or `optional`, and a site opts in or out in
+`brisk.json`:
+
+```json
+{ "name": "my-site", "plugins": { "comments": false } }
+```
+
+**Discover what the instance has — never assume.** The registry differs between
+instances and forks, and the CLI knows nothing about any specific plugin: it
+reads the list and each plugin's verbs live from the server.
+
+```sh
+brisk plugin list           # every plugin on this instance: id, requirement, description
+brisk plugin <id> --help    # one plugin's CLI verbs and their arguments
+brisk deploy                # prints which plugins are enabled on the site it shipped
+```
+
+The same data is JSON on the instance: `GET /api/plugins` is the list,
+`GET /api/plugins/<id>` a plugin's manifest (its actions, their args, how to
+render results), and every verb is `POST /api/plugins/<id>/actions/<action>`
+with `{ "args": { "site": "…", … } }`. Widget-only plugins have no verbs.
+
+Plugin data lives in reserved `_plugin:*` collections: a page may read and
+subscribe to them like any collection, but writes go only through the plugin's
+actions — direct writes are refused so authorship and the audit trail stay
+honest.
+
+**Comments** (on by default) closes the feedback loop with you: teammates click
+any element on the deployed site and leave a note. Pull the open feedback, act
+on it, and report back:
+
+```sh
+brisk plugin comments export my-site          # open feedback as markdown — read this first
+brisk plugin comments list   my-site          # the same, as a table
+brisk plugin comments reply  my-site <id> "fixed — sentence-cased the heading"
+brisk plugin comments resolve my-site <id>
+```
+
+Only published comments reach the server; a teammate's unpublished drafts stay
+in their browser, so an empty export means nothing was published yet.
+
 ## Escape hatches (when this skill isn't enough)
 
 - `brisk --help` — the full CLI command + option list.
 - The folder's generated `AGENTS.md` — full per-site SDK reference.
 - `/docs` on any instance — the live one-page SDK reference.
+- `/llms.txt` on any instance — everything as one text file: this skill, the
+  docs and hosting pages, the architecture, and the changelog.
 - https://github.com/tomperi/brisk — README + architecture; websearch it for
   deeper questions (wire protocol, worker internals, deploying the platform).
