@@ -302,11 +302,13 @@ interface BdDoc {
       .list { overflow: auto; padding: 8px 12px 16px; flex: 1; }
       /* Sticky action bar: the list scrolls, actions stay reachable. Filters
          (view state) live at the top; verbs live down here. */
-      .dfoot {
-        display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 14px;
-        border-top: 1.5px solid var(--line);
-      }
-      .dfoot .primary { margin-left: auto; }
+      .dfoot { border-top: 1.5px solid var(--line); }
+      .frow { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 14px; }
+      /* Dashed like a draft pin: this row acts on your drafts only. */
+      .frow + .frow { border-top: 1.5px dashed var(--line); }
+      /* Fits "99 drafts", so the buttons don't move as the count changes. */
+      .frow .flabel { color: var(--ink-dim); font-size: 0.74rem; min-width: 9ch; }
+      .frow .primary { margin-left: auto; }
       .item {
         border: 1.5px solid var(--ink); border-radius: 9px; margin: 8px 0; padding: 10px;
         background: var(--paper-raised); cursor: pointer;
@@ -330,6 +332,9 @@ interface BdDoc {
         padding: 4px 9px; transition: transform 110ms var(--ease);
       }
       .btn:active { transform: scale(0.97); }
+      .btn:disabled, .mi:disabled { opacity: 0.45; cursor: default; }
+      .btn:disabled:active { transform: none; }
+      .menu .mi:disabled:hover { background: none; }
       .btn.primary { background: var(--accent); color: var(--paper); }
       .seg .btn.on { background: var(--ink); color: var(--paper); }
       .btn.danger, .mi.danger { background: var(--warn); color: var(--paper); }
@@ -819,6 +824,13 @@ interface BdDoc {
     );
   }
 
+  function deleteAllDrafts() {
+    drafts = [];
+    saveDrafts();
+    render();
+    toast('drafts deleted');
+  }
+
   // ---- markdown export ------------------------------------------------------
   function draftsMarkdown(): string {
     let out = `# comment drafts on ${SITE}\n`;
@@ -979,6 +991,7 @@ interface BdDoc {
       )
       .join('');
     const drafts0 = drafts.length;
+    const nothing = !views().some((v) => !v.parentId);
     drawer.innerHTML = `<div class="dhead">
         <span class="title">Comments</span>
         <button class="btn" data-pins aria-label="toggle numbers" data-tip="${pinsHidden ? 'show numbers' : 'hide numbers'}">${pinsHidden ? EYE_OFF : EYE}</button>
@@ -986,7 +999,10 @@ interface BdDoc {
         <div class="seg">${chips}</div>
       </div>
       <div class="list">${rows || `<div class="empty">no ${filter} comments</div>`}</div>
-      <div class="dfoot"><button class="btn" data-copyall data-tip="everything as markdown">copy all</button>${drafts0 ? `<button class="btn" data-copy data-tip="your unpublished drafts as markdown">copy ${drafts0} draft${drafts0 === 1 ? '' : 's'}</button><button class="btn primary" data-puball>publish all</button>` : ''}</div>`;
+      <div class="dfoot">
+        <div class="frow"><button class="btn" data-copyall ${nothing ? 'disabled data-tip="no comments yet"' : 'data-tip="everything as markdown"'}>copy all</button></div>
+        ${drafts0 ? `<div class="frow"><span class="flabel">${drafts0} draft${drafts0 === 1 ? '' : 's'}</span><button class="btn" data-copy data-tip="your drafts as markdown">copy</button><button class="btn" data-delall data-tip="remove from this browser">delete</button><button class="btn primary" data-puball>publish</button></div>` : ''}
+      </div>`;
     drawer.querySelector<HTMLElement>('[data-close]')!.onclick = toggleDrawer;
     drawer.querySelectorAll<HTMLElement>('[data-f]').forEach((b) => {
       b.onclick = () => {
@@ -1007,6 +1023,8 @@ interface BdDoc {
     if (copy) copy.onclick = () => void clip(`comment-drafts-${SITE}.md`, draftsMarkdown());
     const puball = drawer.querySelector<HTMLElement>('[data-puball]');
     if (puball) puball.onclick = () => void publishAll();
+    const delall = drawer.querySelector<HTMLElement>('[data-delall]');
+    if (delall) armConfirm(delall, 'delete', deleteAllDrafts);
     drawer.querySelectorAll<HTMLElement>('.item').forEach((item) => {
       item.onclick = () => {
         const v = views().find((x) => x.id === item.dataset.id && x.kind === item.dataset.kind);
@@ -1084,7 +1102,7 @@ interface BdDoc {
     menu.innerHTML = [
       `<div class="mhead">${escapeHtml(SITE)} · ${openN} open · ${ds}</div>`,
       `<button class="mi" data-m="pick">✎ new comment</button>`,
-      `<button class="mi" data-m="copyall">⧉ copy all</button>`,
+      `<button class="mi" data-m="copyall"${views().some((v) => !v.parentId) ? '' : ' disabled'}>⧉ copy all</button>`,
       ...(n
         ? [
             `<button class="mi" data-m="copydrafts">⧉ copy ${ds}</button>`,
@@ -1104,11 +1122,8 @@ interface BdDoc {
         // Armed confirm: the first click flips the item to "confirm?" and keeps
         // the menu open; only the second click deletes.
         armConfirm(b, `⌫ delete ${ds}`, () => {
-          drafts = [];
-          saveDrafts();
           closeMenu();
-          render();
-          toast('drafts deleted');
+          deleteAllDrafts();
         });
         return;
       }

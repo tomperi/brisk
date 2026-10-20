@@ -19,6 +19,10 @@ releases are published to
 - **Skill** — the Brisk skill explains plugins and how an agent discovers the
   ones an instance has (`brisk plugin list`, `/api/plugins`) instead of
   assuming a registry, and how to act on teammates' comments.
+- **Comments** — the panel can delete all your drafts at once. Draft actions
+  sit on their own row under "copy all" — copy, delete, publish — shown only
+  while you have drafts. Delete asks for a second click, like deleting one
+  draft. "Copy all" is disabled while there are no comments to copy.
 
 ## [0.4.2] - 2026-08-30
 
