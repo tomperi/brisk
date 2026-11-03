@@ -7,6 +7,20 @@
  *
  * Look: "Notecard" — Brisk's warm paper + hyperlink blue + monospace, ink
  * borders and hard offset shadows (the deploy modal's family), light/dark aware. */
+import {
+  anchorFields,
+  anchorLines,
+  anchorOfRecord,
+  captureQuote,
+  flatten,
+  locateQuote,
+  SCAN_MAX,
+  type Anchor,
+  type AnchorFields,
+  type FlatText,
+  type Quote,
+} from './anchor';
+
 type Brisk = {
   db: {
     collection(name: string): {
@@ -57,18 +71,17 @@ interface BdDoc {
   }
 
   // ---- local draft store ----------------------------------------------------
-  interface Draft {
+  type Draft = AnchorFields & {
     id: string;
     text: string;
     page: string;
-    selector: string;
     label: string;
     textSnippet: string;
     html: string;
     /** The element's data-* attributes — often the fastest grep for an agent. */
     dataAttrs?: string;
     createdAt: string;
-  }
+  };
   const loadDrafts = (): Draft[] => {
     try {
       return JSON.parse(localStorage.getItem(key('drafts')) || '[]') as Draft[];
@@ -231,6 +244,15 @@ interface BdDoc {
            the cursor, and short enough to feel attached to it */
         transition: all 50ms linear;
       }
+      .hi .hl {
+        position: absolute; left: -1.5px; bottom: calc(100% + 3px); max-width: 280px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 6px;
+        border-radius: 4px; background: var(--accent); color: var(--paper);
+        font-size: 11px; line-height: 17px;
+        -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+      }
+      /* No room above an element at the top of the viewport — tuck the label inside. */
+      .hi.inside .hl { bottom: auto; top: 2px; left: 2px; }
 
       /* pins — bold ink-bordered circles with a hard offset shadow */
       .pin {
@@ -284,6 +306,17 @@ interface BdDoc {
       .reply .txt { font-size: 0.82rem; }
       .composebar { margin-top: 14px; padding-top: 12px; border-top: 1.5px solid var(--line); }
       .ctx { color: var(--ink-dim); font-size: 0.72rem; margin-bottom: 6px; word-break: break-word; }
+      .quote {
+        border-left: 2px solid var(--line); padding-left: 8px; margin-bottom: 8px;
+        color: var(--ink-dim); font-size: 0.78rem; font-style: italic; word-break: break-word;
+      }
+      .quote .lost { font-style: normal; color: var(--warn); }
+      .item .quote { margin: 4px 0 0; }
+      /* translate, not transform: .pop's open/close scale rides on transform. */
+      .pop.shake { animation: pop-shake 320ms var(--ease); }
+      @keyframes pop-shake {
+        20% { translate: -6px 0; } 40% { translate: 5px 0; } 60% { translate: -3px 0; } 80% { translate: 2px 0; }
+      }
 
       /* drawer — slides on transform only */
       .drawer {
@@ -442,10 +475,11 @@ interface BdDoc {
 
       @media (prefers-reduced-motion: reduce) {
         *, .drawer, .pop, .pin, .toast { transition: none !important; animation: none !important; }
+        .pop.shake { border-color: var(--warn); }
       }
     </style>
     <div class="layer">
-      <div class="hi" id="hi"></div>
+      <div class="hi" id="hi"><span class="hl" id="hl"></span></div>
       <div id="pins"></div>
       <div class="pop" id="pop"></div>
       <aside class="drawer" id="drawer"></aside>
@@ -460,6 +494,7 @@ interface BdDoc {
     </div>`;
   const $ = (id: string) => root.getElementById(id)!;
   const hi = $('hi'),
+    hiLabel = $('hl'),
     pins = $('pins'),
     pop = $('pop'),
     drawer = $('drawer'),
@@ -510,7 +545,7 @@ interface BdDoc {
     kind: 'draft' | 'published';
     text: string;
     page: string;
-    selector: string;
+    anchor: Anchor;
     label: string;
     status: Exclude<Status, 'all'>;
     author: string;
@@ -530,7 +565,7 @@ interface BdDoc {
       kind: 'draft' as const,
       text: d.text,
       page: d.page,
-      selector: d.selector,
+      anchor: anchorOfRecord(d),
       label: d.label,
       status: 'open' as const,
       author: 'you',
@@ -545,7 +580,7 @@ interface BdDoc {
       kind: 'published' as const,
       text: String(d.text ?? ''),
       page: String(d.page ?? ''),
-      selector: String(d.selector ?? ''),
+      anchor: anchorOfRecord(d),
       label: String(d.label ?? ''),
       status: statusOfDoc(d),
       author: String(d.createdBy ?? ''),
@@ -569,6 +604,7 @@ interface BdDoc {
   let picking = false;
   const setPick = (on: boolean) => {
     picking = on;
+    snapshot = null;
     hi.style.display = 'none';
     const b = $('fab').querySelector<HTMLElement>('[data-act="pick"]')!;
     b.classList.toggle('on', on);
@@ -593,15 +629,150 @@ interface BdDoc {
       width: `${r.width}px`,
       height: `${r.height}px`,
     });
+    hiLabel.textContent = labelOf(el);
+    hi.classList.toggle('inside', r.top < 22);
+  };
+
+  // ---- quote capture --------------------------------------------------------
+  type XY = { x: number; y: number };
+  /** What a pick gesture comments on. `range` is the selection a quote came from. */
+  interface Capture {
+    el: Element;
+    anchor: Anchor;
+    range: Range | null;
+  }
+
+  const SKIP_TEXT = new Set(['script', 'style', 'noscript', 'template']);
+  /** The one text model: capture, re-finding, and cache checks all read through it. */
+  const textFilter = (n: Node) =>
+    n.nodeType === Node.TEXT_NODE
+      ? NodeFilter.FILTER_ACCEPT
+      : SKIP_TEXT.has((n as Element).localName)
+        ? NodeFilter.FILTER_REJECT
+        : NodeFilter.FILTER_SKIP;
+  const textWalker = (root: Node) =>
+    document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, textFilter);
+
+  /** The scope's text nodes in document order, or null past SCAN_MAX raw chars. */
+  function textNodes(scope: Element): Text[] | null {
+    const out: Text[] = [];
+    let n = 0;
+    const w = textWalker(scope);
+    for (let t = w.nextNode() as Text | null; t; t = w.nextNode() as Text | null) {
+      n += t.data.length;
+      if (n > SCAN_MAX) return null;
+      out.push(t);
+    }
+    return out;
+  }
+
+  const liveRange = (): Range | null => {
+    const sel = document.getSelection();
+    if (!sel || !sel.rangeCount || sel.isCollapsed) return null;
+    const r = sel.getRangeAt(0);
+    return host.contains(r.startContainer) || host.contains(r.endContainer) ? null : r;
+  };
+
+  /** Nearest ancestor that is its own box: a selection inside <b> scopes to its <p>. */
+  const blockAncestor = (node: Node): Element | null => {
+    let el = node instanceof Element ? node : node.parentElement;
+    while (el && el !== document.body && /^(inline|contents)$/.test(getComputedStyle(el).display))
+      el = el.parentElement;
+    return el;
+  };
+
+  /** A range boundary as a flat offset; one between nodes snaps to the next text node. */
+  function flatAt(nodes: Text[], flat: FlatText, container: Node, offset: number): number {
+    const k = nodes.indexOf(container as Text);
+    if (k >= 0) return flat.toFlat(k, offset);
+    const probe = document.createRange();
+    probe.setStart(container, offset);
+    const next = nodes.findIndex((t) => probe.comparePoint(t, 0) >= 0);
+    return next >= 0 ? flat.toFlat(next, 0) : flat.text.length;
+  }
+
+  const fractionIn = (el: Element, x: number, y: number) => {
+    const r = el.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    const f = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 1e4) / 1e4;
+    return { x: f((x - r.left) / r.width), y: f((y - r.top) / r.height) };
+  };
+
+  function quoteAt(range: Range, x: number, y: number): Capture | null {
+    const scope = blockAncestor(range.commonAncestorContainer);
+    const selector = scope ? cssPath(scope) : '';
+    const nodes = scope && selector ? textNodes(scope) : null;
+    if (!scope || !nodes) return null;
+    const flat = flatten(nodes.map((t) => t.data));
+    const quote = captureQuote(
+      flat.text,
+      flatAt(nodes, flat, range.startContainer, range.startOffset),
+      flatAt(nodes, flat, range.endContainer, range.endOffset),
+    );
+    if (!quote) return null;
+    return {
+      el: scope,
+      anchor: { kind: 'text', selector, quote, point: fractionIn(scope, x, y) },
+      range: range.cloneRange(),
+    };
+  }
+  const elementAt = (el: Element, x: number, y: number): Capture => {
+    const selector = cssPath(el);
+    const anchor: Anchor = selector
+      ? { kind: 'element', selector, point: fractionIn(el, x, y) }
+      : { kind: 'page' };
+    return { el, anchor, range: null };
+  };
+
+  /** Just past the range's last character, on its line; null when it has no box. */
+  function caretAfter(range: Range): XY | null {
+    const end = range.cloneRange();
+    end.collapse(false);
+    const caret = end.getClientRects()[0];
+    const r = caret?.height ? caret : [...range.getClientRects()].filter((b) => b.height).pop();
+    return r ? { x: r.right, y: r.top } : null;
+  }
+
+  // Gesture contract: a click collapses the selection before `click` fires, so
+  // mousedown keeps a copy; a drag-select opens compose on mouseup and its
+  // trailing click is swallowed. Each gesture opens at most one compose.
+  let snapshot: Range | null = null;
+  let swallowClick = false;
+  const startCompose = (hit: Capture, x: number, y: number) => {
+    if (!openCompose(hit, x, y)) return false;
+    setPick(false);
+    return true;
+  };
+  const onDown = (e: MouseEvent) => {
+    swallowClick = false;
+    snapshot =
+      picking && !e.composedPath().includes(host) ? (liveRange()?.cloneRange() ?? null) : null;
+  };
+  const onUp = (e: MouseEvent) => {
+    if (!picking) return;
+    const el = elAt(e.clientX, e.clientY);
+    const range = liveRange();
+    const hit = el && range?.intersectsNode(el) ? quoteAt(range, e.clientX, e.clientY) : null;
+    if (hit && startCompose(hit, e.clientX, e.clientY)) swallowClick = true;
   };
   const onClick = (e: MouseEvent) => {
+    if (swallowClick) {
+      swallowClick = false;
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     if (!picking) return;
     const el = elAt(e.clientX, e.clientY);
     if (!el) return;
     e.preventDefault();
     e.stopPropagation();
-    setPick(false);
-    openCompose(el, e.clientX, e.clientY);
+    const range = liveRange() ?? snapshot;
+    snapshot = null;
+    const hit =
+      (range?.intersectsNode(el) && quoteAt(range, e.clientX, e.clientY)) ||
+      elementAt(el, e.clientX, e.clientY);
+    startCompose(hit, e.clientX, e.clientY);
   };
 
   function placePop(x: number, y: number) {
@@ -627,15 +798,63 @@ interface BdDoc {
   const closePop = () => {
     pop.classList.remove('in');
     popCloseTimer = setTimeout(() => pop.classList.remove('show'), 150);
+    if (focusId || pendingRange) {
+      focusId = '';
+      pendingRange = null;
+      paint();
+    }
   };
-
-  // ---- new draft popover ----------------------------------------------------
-  function openCompose(el: Element, x: number, y: number) {
-    pop.innerHTML = `<div class="ctx">draft · ${escapeHtml(labelOf(el))}</div>
-      <textarea placeholder="what about this element? (saved locally)"></textarea>
-      <div class="row"><button class="btn" data-cancel>cancel</button><button class="btn primary" data-save>save draft</button></div>`;
+  /** Typed text the user has not saved; an untouched edit (value === defaultValue) is clean. */
+  const popDirty = () =>
+    pop.classList.contains('in') &&
+    [...pop.querySelectorAll('textarea')].some(
+      (ta) => ta.value.trim() !== '' && ta.value !== ta.defaultValue,
+    );
+  let shakeTimer: ReturnType<typeof setTimeout> | undefined;
+  const nudge = () => {
+    pop.classList.remove('shake');
+    void pop.offsetWidth;
+    pop.classList.add('shake');
+    clearTimeout(shakeTimer);
+    shakeTimer = setTimeout(() => pop.classList.remove('shake'), 400);
+    pop.querySelector('textarea')?.focus();
+  };
+  /** The only writer of the popover's content: refuses (and shakes) over unsaved text. */
+  function showPop(html: string, x: number, y: number): boolean {
+    if (popDirty()) {
+      nudge();
+      return false;
+    }
+    pop.innerHTML = html;
     placePop(x, y);
     openPop();
+    return true;
+  }
+  const ellipsis = (s: string, n: number) => {
+    const cs = [...s];
+    return cs.length > n ? `${cs.slice(0, n).join('')}…` : s;
+  };
+  const quoteHtml = (q: Quote, lost: boolean, max: number) =>
+    `<div class="quote">“${escapeHtml(ellipsis(q.exact, max))}”${lost ? '<span class="lost"> · no longer on the page</span>' : ''}</div>`;
+
+  // ---- new draft popover ----------------------------------------------------
+  function openCompose({ el, anchor, range }: Capture, x: number, y: number): boolean {
+    const q = anchor.kind === 'text' ? anchor.quote : null;
+    const opened = showPop(
+      `<div class="ctx">draft · ${escapeHtml(labelOf(el))}</div>${q ? quoteHtml(q, false, 200) : ''}
+      <textarea placeholder="what about ${q ? 'these words' : 'this element'}? (saved locally)"></textarea>
+      <div class="row"><button class="btn" data-cancel>cancel</button><button class="btn primary" data-save>save draft</button></div>`,
+      x,
+      y,
+    );
+    if (!opened) return false;
+    if (range) {
+      // The quote is captured: trade the native selection (which a later pick
+      // would re-capture) for our own mark on the same words.
+      document.getSelection()?.removeAllRanges();
+      pendingRange = range;
+      paint();
+    }
     const ta = pop.querySelector('textarea')!;
     ta.focus();
     ta.addEventListener('input', () => autogrow(ta));
@@ -650,7 +869,7 @@ interface BdDoc {
         id: `d-${Date.now().toString(36)}-${Math.floor(performance.now())}`,
         text,
         page: pageId(),
-        selector: cssPath(el),
+        ...anchorFields(anchor),
         label: labelOf(el),
         textSnippet: clean(el.textContent ?? '', 140),
         html: clean(el.outerHTML, 300),
@@ -675,11 +894,13 @@ interface BdDoc {
         pop.querySelector<HTMLElement>('[data-save]')!.click();
       if (ev.key === 'Escape') closePop();
     };
+    return true;
   }
 
   // ---- thread popover -------------------------------------------------------
   function openThread(v: View, x: number, y: number) {
     const head = `<div class="chead">${statusIcon(v.status)}${whoTag(v.author, v.email)}<span>· ${v.at}</span></div>`;
+    const quote = v.anchor.kind === 'text' ? quoteHtml(v.anchor.quote, quoteLost(v), 280) : '';
     const body = `<div class="txt">${escapeHtml(v.text)}</div>`;
     const replies = published
       .filter((p) => String(p.parentId ?? '') === v.id && !p.deleted)
@@ -693,9 +914,9 @@ interface BdDoc {
       v.kind === 'draft'
         ? `<div class="composebar"><div class="row"><button class="btn" data-del>delete draft</button><button class="btn" data-edit>edit</button><button class="btn primary" data-publish>publish</button></div></div>`
         : `<div class="composebar"><textarea placeholder="reply…"></textarea><div class="row"><button class="btn" data-del>delete</button><button class="btn" data-res>${v.status === 'resolved' ? 'reopen' : 'resolve'}</button><button class="btn primary" data-reply>reply</button></div></div>`;
-    pop.innerHTML = `${head}${body}${threadHtml}${actions}`;
-    placePop(x, y);
-    openPop();
+    if (!showPop(`${head}${quote}${body}${threadHtml}${actions}`, x, y)) return;
+    focusId = v.id;
+    paint();
     const ta = pop.querySelector('textarea');
     if (ta) {
       ta.addEventListener('input', () => autogrow(ta));
@@ -754,13 +975,17 @@ interface BdDoc {
   function openDraftEdit(id: string, x: number, y: number) {
     const d = drafts.find((it) => it.id === id);
     if (!d) return;
-    pop.innerHTML = `<div class="ctx">editing draft · ${escapeHtml(d.label)}</div>
+    const a = anchorOfRecord(d);
+    const opened = showPop(
+      `<div class="ctx">editing draft · ${escapeHtml(d.label)}</div>${a.kind === 'text' ? quoteHtml(a.quote, false, 200) : ''}
       <textarea></textarea>
-      <div class="row"><button class="btn" data-cancel>cancel</button><button class="btn primary" data-save>save</button></div>`;
-    placePop(x, y);
-    openPop();
+      <div class="row"><button class="btn" data-cancel>cancel</button><button class="btn primary" data-save>save</button></div>`,
+      x,
+      y,
+    );
+    if (!opened) return;
     const ta = pop.querySelector('textarea')!;
-    ta.value = d.text;
+    ta.defaultValue = d.text;
     ta.focus();
     autogrow(ta);
     ta.addEventListener('input', () => autogrow(ta));
@@ -791,7 +1016,7 @@ interface BdDoc {
       await action('create', {
         text: d.text,
         page: d.page,
-        selector: d.selector,
+        ...anchorFields(anchorOfRecord(d)),
         label: d.label,
         textSnippet: d.textSnippet,
         html: d.html,
@@ -823,7 +1048,8 @@ interface BdDoc {
   function draftsMarkdown(): string {
     let out = `# comment drafts on ${SITE}\n`;
     for (const d of drafts) {
-      out += `\n## ${d.text}\n- page: \`${d.page}\`\n- selector: \`${d.selector}\`\n`;
+      out += `\n## ${d.text}\n- page: \`${d.page}\`\n`;
+      for (const line of anchorLines(anchorOfRecord(d))) out += `${line}\n`;
       if (d.textSnippet) out += `- text: "${d.textSnippet}"\n`;
       if (d.dataAttrs) out += `- data: \`${d.dataAttrs}\`\n`;
     }
@@ -837,7 +1063,7 @@ interface BdDoc {
     for (const v of views().filter((x) => !x.parentId)) {
       out += `\n## [${v.kind === 'draft' ? 'draft' : v.status}] ${v.text}\n`;
       out += `- by: ${v.author}\n- page: \`${v.page}\`\n`;
-      if (v.selector) out += `- selector: \`${v.selector}\`\n`;
+      for (const line of anchorLines(v.anchor)) out += `${line}\n`;
       for (const r of published.filter((p) => String(p.parentId ?? '') === v.id && !p.deleted))
         out += `- reply (${String(r.createdBy ?? '')}): ${String(r.text ?? '')}\n`;
     }
@@ -889,23 +1115,191 @@ interface BdDoc {
     return r.width > 0 || r.height > 0;
   };
 
-  const placePin = (pin: HTMLElement, selector: string) => {
-    const target = findTarget(selector);
-    // Gone and hidden are different: a comment whose element no longer exists
-    // still shows (detached, parked in the corner), one whose element is merely
-    // hidden waits for it to come back.
-    pin.classList.toggle('detached', !target && !!selector);
-    const visible = !target || onScreen(target);
-    pin.style.display = visible ? '' : 'none';
-    if (!visible) return;
-    const r = target?.getBoundingClientRect();
-    pin.style.left = `${(r?.left ?? 12) + 10}px`;
-    pin.style.top = `${(r?.top ?? 12) + 10}px`;
+  /** Where a comment sits right now, derived each frame from (anchor, DOM).
+   *  Gone and hidden differ: a comment whose element no longer exists still
+   *  shows (detached, parked in the corner), one whose element is merely hidden
+   *  waits for it to come back. A quote that is not found falls back to `element`. */
+  type Placement =
+    | { kind: 'page' }
+    | { kind: 'detached' }
+    | { kind: 'hidden' }
+    | { kind: 'text'; range: Range; at: XY }
+    | { kind: 'element'; at: XY };
+  interface Slot {
+    view: View;
+    pin: HTMLElement;
+    placement: Placement;
+  }
+  const slots: Slot[] = [];
+  const quoteLost = (v: View) => {
+    const p = slots.find((s) => s.view.id === v.id)?.placement.kind;
+    return p === 'element' || p === 'detached';
   };
+
+  /** One per text-anchored comment on screen, kept across render(). `dirty`:
+   *  a mutation landed inside `scope` since the last resolve. */
+  interface TextCache {
+    scope: Element;
+    range: Range | null;
+    dirty: boolean;
+    scannedAt: number;
+  }
+  const textCache = new Map<string, TextCache>();
+  const RESCAN_MS = 1000;
+  let rescanTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** Whether a cached range still reads as the quote. Bounded: gives up past ~4× the quote. */
+  function spells(range: Range, exact: string): boolean {
+    if (range.collapsed) return false;
+    const max = exact.length * 4 + 64;
+    const chunks: string[] = [];
+    let n = 0;
+    const w = textWalker(range.commonAncestorContainer);
+    w.currentNode = range.startContainer;
+    let t: Node | null =
+      range.startContainer.nodeType === Node.TEXT_NODE ? range.startContainer : w.nextNode();
+    for (; t; t = w.nextNode()) {
+      if (!range.intersectsNode(t)) {
+        if (range.comparePoint(t, 0) > 0) break;
+        continue;
+      }
+      const data = (t as Text).data;
+      const s = t === range.startContainer ? range.startOffset : 0;
+      const e = t === range.endContainer ? range.endOffset : data.length;
+      n += e - s;
+      if (n > max) return false;
+      chunks.push(data.slice(s, e));
+    }
+    return flatten(chunks).text === exact;
+  }
+
+  /** The quote's live range inside `scope`; scans the scope only when it changed or was mutated. */
+  function quoteRange(id: string, scope: Element, q: Quote): Range | null {
+    let c = textCache.get(id);
+    if (!c || c.scope !== scope) {
+      c = { scope, range: null, dirty: true, scannedAt: -Infinity };
+      textCache.set(id, c);
+    }
+    if (!c.dirty) return c.range;
+    if (c.range && spells(c.range, q.exact)) {
+      c.dirty = false;
+      return c.range;
+    }
+    const wait = c.scannedAt + RESCAN_MS - performance.now();
+    if (!c.range && wait > 0) {
+      // A lost quote in a busy scope rescans at most once a second.
+      rescanTimer ??= setTimeout(() => {
+        rescanTimer = undefined;
+        scheduleReposition();
+      }, wait);
+      return null;
+    }
+    c.dirty = false;
+    c.scannedAt = performance.now();
+    c.range = null;
+    const nodes = textNodes(scope);
+    if (!nodes) return null;
+    const flat = flatten(nodes.map((n) => n.data));
+    const hit = locateQuote(flat.text, q);
+    if (!hit) return null;
+    const s = flat.toRaw(hit.start, 'start');
+    const e = flat.toRaw(hit.end, 'end');
+    c.range = document.createRange();
+    c.range.setStart(nodes[s.chunk]!, s.offset);
+    c.range.setEnd(nodes[e.chunk]!, e.offset);
+    return c.range;
+  }
+
+  function place(v: View): Placement {
+    const a = v.anchor;
+    if (a.kind === 'page') return { kind: 'page' };
+    const el = findTarget(a.selector);
+    if (!el) {
+      textCache.delete(v.id);
+      return { kind: 'detached' };
+    }
+    if (!onScreen(el)) return { kind: 'hidden' };
+    if (a.kind === 'text') {
+      const range = quoteRange(v.id, el, a.quote);
+      if (range) {
+        const end = caretAfter(range);
+        return end
+          ? { kind: 'text', range, at: { x: end.x + 10, y: end.y - 4 } }
+          : { kind: 'hidden' };
+      }
+    }
+    const r = el.getBoundingClientRect();
+    const at = a.point
+      ? { x: r.left + a.point.x * r.width, y: r.top + a.point.y * r.height }
+      : { x: r.left + 10, y: r.top + 10 };
+    return { kind: 'element', at };
+  }
+  const applyPin = (pin: HTMLElement, p: Placement) => {
+    pin.classList.toggle('detached', p.kind === 'detached');
+    pin.style.display = p.kind === 'hidden' ? 'none' : '';
+    const at = p.kind === 'text' || p.kind === 'element' ? p.at : { x: 22, y: 22 };
+    pin.style.left = `${at.x}px`;
+    pin.style.top = `${at.y}px`;
+  };
+
+  // ---- highlights -----------------------------------------------------------
+  // ::highlight() only styles ranges in the tree that owns their nodes, so the
+  // sheet is adopted by the document, not the shadow root. Never wraps page DOM.
+  const HL_CSS = `
+    ::highlight(brisk-comment) { background-color: oklch(46% 0.19 262 / 0.16); }
+    ::highlight(brisk-comment-focus) {
+      background-color: oklch(46% 0.19 262 / 0.3); text-decoration: underline 2px oklch(46% 0.19 262);
+    }
+    @media (prefers-color-scheme: dark) {
+      ::highlight(brisk-comment) { background-color: oklch(72% 0.13 262 / 0.22); }
+      ::highlight(brisk-comment-focus) {
+        background-color: oklch(72% 0.13 262 / 0.38); text-decoration: underline 2px oklch(72% 0.13 262);
+      }
+    }`;
+  let marks: { all: Highlight; focus: Highlight; sheet: CSSStyleSheet } | null = null;
+  try {
+    if (CSS.highlights && typeof Highlight === 'function') {
+      const sheet = new CSSStyleSheet();
+      sheet.replaceSync(HL_CSS);
+      marks = { all: new Highlight(), focus: new Highlight(), sheet };
+    }
+  } catch (err) {
+    console.warn('[comments] highlights unavailable:', err);
+  }
+  /** The open thread's comment, painted as focus. */
+  let focusId = '';
+  /** The words of the compose in progress, painted as focus until it closes. */
+  let pendingRange: Range | null = null;
+
+  /** The only writer of the highlight registry, rebuilt from the slots, so a
+   *  resolved, deleted, filtered or hidden comment cannot leave paint behind. */
+  function paint() {
+    if (!marks) return;
+    try {
+      const { all, focus, sheet } = marks;
+      // A page may replace these wholesale; put ours back.
+      if (!document.adoptedStyleSheets.includes(sheet))
+        document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+      if (CSS.highlights.get('brisk-comment') !== all) CSS.highlights.set('brisk-comment', all);
+      if (CSS.highlights.get('brisk-comment-focus') !== focus)
+        CSS.highlights.set('brisk-comment-focus', focus);
+      all.clear();
+      focus.clear();
+      if (hidden || collapsed) return;
+      if (pendingRange) focus.add(pendingRange);
+      if (pinsHidden) return;
+      for (const s of slots) {
+        if (s.placement.kind !== 'text' || s.view.status !== 'open') continue;
+        (s.view.id === focusId ? focus : all).add(s.placement.range);
+      }
+    } catch (err) {
+      marks = null;
+      console.warn('[comments] highlights disabled:', err);
+    }
+  }
 
   /** Full rebuild — call when the data changes, not on scroll (rebuilding per
    *  scroll event restarts the pin-in animation and churns the DOM). */
-  const pinRefs: { el: HTMLElement; selector: string }[] = [];
   /** Comment number by id: chronological within each author, so yours count 1,
    *  2, 3 whatever anyone else leaves alongside them. Numbers repeat across
    *  authors — the pin's tooltip and the panel row say whose a comment is. */
@@ -925,21 +1319,25 @@ interface BdDoc {
   function render() {
     nums = numberPerAuthor(views());
     pins.innerHTML = '';
-    pinRefs.length = 0;
+    slots.length = 0;
     for (const v of views().filter((v) => here(v) && !v.parentId && shown(v))) {
       const pin = document.createElement('div');
       pin.className = `pin ${v.kind === 'draft' ? 'draft' : v.status}`;
       pin.title = `${v.author} · ${clean(v.text, 60)}`;
       pin.textContent = String(nums.get(v.id) ?? '');
-      placePin(pin, v.selector);
+      const slot: Slot = { view: v, pin, placement: place(v) };
+      applyPin(pin, slot.placement);
       pin.onclick = (e) => {
         e.stopPropagation();
         openThread(v, e.clientX, e.clientY);
       };
       pins.appendChild(pin);
-      pinRefs.push({ el: pin, selector: v.selector });
+      slots.push(slot);
     }
+    const live = new Set(slots.map((s) => s.view.id));
+    for (const id of textCache.keys()) if (!live.has(id)) textCache.delete(id);
     pins.style.display = pinsHidden ? 'none' : '';
+    paint();
     if (drawer.classList.contains('open')) renderPanel();
     updateNub();
   }
@@ -951,7 +1349,11 @@ interface BdDoc {
     repositionQueued = true;
     requestAnimationFrame(() => {
       repositionQueued = false;
-      for (const { el, selector } of pinRefs) placePin(el, selector);
+      for (const s of slots) {
+        s.placement = place(s.view);
+        applyPin(s.pin, s.placement);
+      }
+      paint();
     });
   };
 
@@ -975,7 +1377,7 @@ interface BdDoc {
       .filter((v) => !v.parentId && shown(v))
       .map(
         (v) =>
-          `<div class="item" data-id="${escapeHtml(v.id)}" data-kind="${v.kind}"><div class="txt">${v.kind === 'draft' ? `<span class="num draft">${nums.get(v.id) ?? ''}</span>` : `<span class="num" style="background:${badgeColor(v)}">${nums.get(v.id) ?? ''}</span>`}<span>${escapeHtml(v.text.slice(0, 90))}</span></div><div class="meta">${whoTag(v.author, v.email)} · ${v.kind === 'draft' ? 'draft' : v.status} · ${escapeHtml(v.page)}</div></div>`,
+          `<div class="item" data-id="${escapeHtml(v.id)}" data-kind="${v.kind}"><div class="txt">${v.kind === 'draft' ? `<span class="num draft">${nums.get(v.id) ?? ''}</span>` : `<span class="num" style="background:${badgeColor(v)}">${nums.get(v.id) ?? ''}</span>`}<span>${escapeHtml(v.text.slice(0, 90))}</span></div>${v.anchor.kind === 'text' ? quoteHtml(v.anchor.quote, quoteLost(v), 80) : ''}<div class="meta">${whoTag(v.author, v.email)} · ${v.kind === 'draft' ? 'draft' : v.status} · ${escapeHtml(v.page)}</div></div>`,
       )
       .join('');
     const drafts0 = drafts.length;
@@ -1011,12 +1413,7 @@ interface BdDoc {
       item.onclick = () => {
         const v = views().find((x) => x.id === item.dataset.id && x.kind === item.dataset.kind);
         if (!v) return;
-        let target: Element | null = null;
-        try {
-          target = v.selector ? document.querySelector(v.selector) : null;
-        } catch {
-          /* ignore */
-        }
+        const target = v.anchor.kind === 'page' ? null : findTarget(v.anchor.selector);
         target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         const r = target?.getBoundingClientRect();
         openThread(v, r?.left ?? innerWidth / 2, r?.top ?? innerHeight / 2);
@@ -1051,12 +1448,23 @@ interface BdDoc {
       if (drawerOpen) toggleDrawer();
     }
     updateNub();
+    paint();
   }
   function applyHidden() {
     host.style.display = hidden ? 'none' : '';
+    paint();
   }
   const fab = $('fab');
-  fab.querySelector<HTMLElement>('[data-act="pick"]')!.onclick = () => setPick(!picking);
+  const pickBtn = fab.querySelector<HTMLElement>('[data-act="pick"]')!;
+  // Pressing ✎ must not collapse a selection made first: comment on it at once.
+  pickBtn.addEventListener('mousedown', (e) => e.preventDefault());
+  pickBtn.onclick = () => {
+    const range = picking ? null : liveRange();
+    const end = range && caretAfter(range);
+    const hit = range && end && quoteAt(range, end.x, end.y);
+    if (hit && end) startCompose(hit, end.x, end.y);
+    else setPick(!picking);
+  };
   fab.querySelector<HTMLElement>('[data-act="log"]')!.onclick = toggleDrawer;
   fab.querySelector<HTMLElement>('[data-act="min"]')!.onclick = () => {
     collapsed = true;
@@ -1177,14 +1585,18 @@ interface BdDoc {
   };
 
   document.addEventListener('mousemove', onMove, true);
+  document.addEventListener('mousedown', onDown, true);
+  document.addEventListener('mouseup', onUp, true);
   document.addEventListener('click', onClick, true);
   document.addEventListener('keydown', onKey, true);
-  // Click-away closes the open popover, mirroring Esc. Bubble phase on purpose:
-  // interaction inside the widget stops at the shadow root (isolation guard
-  // above), so any mousedown that reaches here happened on the page itself.
-  // Pick-clicks are safe too — the popover only opens on the later click event.
+  // Click-away closes the open popover, mirroring Esc — unless it holds unsaved
+  // text, which shakes instead. Bubble phase on purpose: interaction inside the
+  // widget stops at the shadow root (isolation guard above), so any mousedown
+  // that reaches here happened on the page itself. Pick gestures are safe too —
+  // the popover only opens on the later mouseup or click.
   document.addEventListener('mousedown', () => {
-    if (pop.classList.contains('show')) closePop();
+    if (popDirty()) nudge();
+    else if (pop.classList.contains('show')) closePop();
     closeMenu();
   });
   // Reposition pins on scroll; the popover stays put (it's fixed) so a scrolling
@@ -1197,9 +1609,24 @@ interface BdDoc {
   addEventListener('animationend', scheduleReposition, true);
   // Slides, tabs and accordions swap what's on screen with a class or style
   // flip and fire no event of their own — watch the markup so pins follow.
-  new MutationObserver(scheduleReposition).observe(document.documentElement, {
+  // Text edits matter only inside a quote's scope; they mark that cache dirty.
+  new MutationObserver((records) => {
+    let move = false;
+    for (const r of records) {
+      if (r.type !== 'characterData') move = true;
+      if (r.type === 'attributes') continue;
+      for (const c of textCache.values()) {
+        if (!c.dirty && c.scope.contains(r.target)) {
+          c.dirty = true;
+          move = true;
+        }
+      }
+    }
+    if (move) scheduleReposition();
+  }).observe(document.documentElement, {
     subtree: true,
     childList: true,
+    characterData: true,
     attributes: true,
     attributeFilter: ['class', 'style', 'hidden', 'aria-hidden', 'open'],
   });
