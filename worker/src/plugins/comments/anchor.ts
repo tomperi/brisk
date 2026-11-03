@@ -1,7 +1,3 @@
-/* What a comment is about, how that travels, and how it reads back. Pure (no
- * DOM, no imports): the server parses and exports with it, and the widget
- * bundles it to capture, re-find, and copy the same way. */
-
 export const QUOTE_MAX = 500;
 export const CONTEXT_MAX = 32;
 /** Raw text chars of one scope the widget will flatten; past this a quote is not searched. */
@@ -11,9 +7,7 @@ export const SCAN_MAX = 200_000;
 export const ANCHOR_ARGS = ['quote', 'quotePrefix', 'quoteSuffix', 'point'] as const;
 type AnchorArg = (typeof ANCHOR_ARGS)[number];
 
-/** How an anchor travels and rests: action args, the stored doc, a local draft. */
 export type AnchorFields = { selector?: string } & { [K in AnchorArg]?: string };
-/** Untrusted input: a raw POST or an old record may hold anything in these fields. */
 export type RawAnchor = Readonly<Record<string, unknown>>;
 
 /** Fractions of the element's box, each in [0, 1]. */
@@ -30,7 +24,6 @@ export interface Quote {
   suffix: string;
 }
 
-/** Derived from which fields are set, never stored as a kind. */
 export type Anchor =
   | { kind: 'page' }
   | { kind: 'element'; selector: string; point: Point | null }
@@ -91,7 +84,6 @@ export function anchorOfRecord(rec: RawAnchor): Anchor {
   }
 }
 
-/** The only serializer: spread the result into a doc, an action call, or a draft. */
 export function anchorFields(a: Anchor): AnchorFields {
   if (a.kind === 'page') return { selector: '' };
   const point = a.point ? { point: `${a.point.x.toFixed(4)},${a.point.y.toFixed(4)}` } : {};
@@ -105,14 +97,11 @@ export function anchorFields(a: Anchor): AnchorFields {
   };
 }
 
-// ---- flattening: the one definition of "the text of an element" -------------
-
 /** Normalized concatenation of raw text chunks (one per DOM text node, in
  *  document order) with a two-way offset map. Whitespace runs (NBSP included)
  *  collapse to one space across chunk boundaries. */
 export interface FlatText {
   text: string;
-  /** Raw boundary (chunk, offset) → flat boundary. */
   toFlat(chunk: number, offset: number): number;
   /** Flat boundary → raw boundary. 'start' lands on the raw char of `flat`;
    *  'end' lands just past the raw char of `flat - 1`. */
@@ -151,8 +140,6 @@ export function flatten(chunks: readonly string[]): FlatText {
 }
 
 export const normalizeText = (s: string): string => flatten([s]).text;
-
-// ---- matching -----------------------------------------------------------------
 
 const isHigh = (code: number) => code >= 0xd800 && code <= 0xdbff;
 const isLow = (code: number) => code >= 0xdc00 && code <= 0xdfff;
@@ -206,13 +193,9 @@ export function locateQuote(text: string, q: Quote): { start: number; end: numbe
   for (let i = text.indexOf(q.exact); i !== -1; i = text.indexOf(q.exact, i + 1)) {
     const before = contextBefore(text, i);
     const after = contextAfter(text, i + len);
-    // The equality bonus lets a window cut short by the scope's edge beat a
-    // longer one that merely shares its characters.
+    const exactContextBonus = (before === q.prefix ? 1 : 0) + (after === q.suffix ? 1 : 0);
     const score =
-      commonSuffixLen(before, q.prefix) +
-      commonPrefixLen(after, q.suffix) +
-      (before === q.prefix ? 1 : 0) +
-      (after === q.suffix ? 1 : 0);
+      commonSuffixLen(before, q.prefix) + commonPrefixLen(after, q.suffix) + exactContextBonus;
     if (score > bestScore) {
       best = { start: i, end: i + len };
       bestScore = score;
@@ -222,9 +205,6 @@ export function locateQuote(text: string, q: Quote): { start: number; end: numbe
   return best;
 }
 
-// ---- agent output ---------------------------------------------------------------
-
-/** The anchor's markdown lines for export, `show`, and the widget's copy. */
 export function anchorLines(a: Anchor): string[] {
   if (a.kind === 'page') return [];
   const lines = [`- selector: \`${a.selector}\``];

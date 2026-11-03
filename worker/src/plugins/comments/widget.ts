@@ -251,8 +251,7 @@ interface BdDoc {
         font-size: 11px; line-height: 17px;
         -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
       }
-      /* No room above an element at the top of the viewport — tuck the label inside. */
-      .hi.inside .hl { bottom: auto; top: 2px; left: 2px; }
+      .hi.no-room-above .hl { bottom: auto; top: 2px; left: 2px; }
 
       /* pins — bold ink-bordered circles with a hard offset shadow */
       .pin {
@@ -630,12 +629,10 @@ interface BdDoc {
       height: `${r.height}px`,
     });
     hiLabel.textContent = labelOf(el);
-    hi.classList.toggle('inside', r.top < 22);
+    hi.classList.toggle('no-room-above', r.top < 22);
   };
 
-  // ---- quote capture --------------------------------------------------------
   type XY = { x: number; y: number };
-  /** What a pick gesture comments on. `range` is the selection a quote came from. */
   interface Capture {
     el: Element;
     anchor: Anchor;
@@ -643,7 +640,6 @@ interface BdDoc {
   }
 
   const SKIP_TEXT = new Set(['script', 'style', 'noscript', 'template']);
-  /** The one text model: capture, re-finding, and cache checks all read through it. */
   const textFilter = (n: Node) =>
     n.nodeType === Node.TEXT_NODE
       ? NodeFilter.FILTER_ACCEPT
@@ -653,7 +649,6 @@ interface BdDoc {
   const textWalker = (root: Node) =>
     document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, textFilter);
 
-  /** The scope's text nodes in document order, or null past SCAN_MAX raw chars. */
   function textNodes(scope: Element): Text[] | null {
     const out: Text[] = [];
     let n = 0;
@@ -673,7 +668,6 @@ interface BdDoc {
     return host.contains(r.startContainer) || host.contains(r.endContainer) ? null : r;
   };
 
-  /** Nearest ancestor that is its own box: a selection inside <b> scopes to its <p>. */
   const blockAncestor = (node: Node): Element | null => {
     let el = node instanceof Element ? node : node.parentElement;
     while (el && el !== document.body && /^(inline|contents)$/.test(getComputedStyle(el).display))
@@ -681,7 +675,6 @@ interface BdDoc {
     return el;
   };
 
-  /** A range boundary as a flat offset; one between nodes snaps to the next text node. */
   function flatAt(nodes: Text[], flat: FlatText, container: Node, offset: number): number {
     const k = nodes.indexOf(container as Text);
     if (k >= 0) return flat.toFlat(k, offset);
@@ -724,7 +717,6 @@ interface BdDoc {
     return { el, anchor, range: null };
   };
 
-  /** Just past the range's last character, on its line; null when it has no box. */
   function caretAfter(range: Range): XY | null {
     const end = range.cloneRange();
     end.collapse(false);
@@ -804,8 +796,7 @@ interface BdDoc {
       paint();
     }
   };
-  /** Typed text the user has not saved; an untouched edit (value === defaultValue) is clean. */
-  const popDirty = () =>
+  const popHasUnsavedText = () =>
     pop.classList.contains('in') &&
     [...pop.querySelectorAll('textarea')].some(
       (ta) => ta.value.trim() !== '' && ta.value !== ta.defaultValue,
@@ -819,9 +810,8 @@ interface BdDoc {
     shakeTimer = setTimeout(() => pop.classList.remove('shake'), 400);
     pop.querySelector('textarea')?.focus();
   };
-  /** The only writer of the popover's content: refuses (and shakes) over unsaved text. */
   function showPop(html: string, x: number, y: number): boolean {
-    if (popDirty()) {
+    if (popHasUnsavedText()) {
       nudge();
       return false;
     }
@@ -836,8 +826,6 @@ interface BdDoc {
   };
   const quoteHtml = (q: Quote, lost: boolean, max: number) =>
     `<div class="quote">“${escapeHtml(ellipsis(q.exact, max))}”${lost ? '<span class="lost"> · no longer on the page</span>' : ''}</div>`;
-
-  // ---- new draft popover ----------------------------------------------------
   function openCompose({ el, anchor, range }: Capture, x: number, y: number): boolean {
     const q = anchor.kind === 'text' ? anchor.quote : null;
     const opened = showPop(
@@ -849,8 +837,6 @@ interface BdDoc {
     );
     if (!opened) return false;
     if (range) {
-      // The quote is captured: trade the native selection (which a later pick
-      // would re-capture) for our own mark on the same words.
       document.getSelection()?.removeAllRanges();
       pendingRange = range;
       paint();
@@ -1115,10 +1101,6 @@ interface BdDoc {
     return r.width > 0 || r.height > 0;
   };
 
-  /** Where a comment sits right now, derived each frame from (anchor, DOM).
-   *  Gone and hidden differ: a comment whose element no longer exists still
-   *  shows (detached, parked in the corner), one whose element is merely hidden
-   *  waits for it to come back. A quote that is not found falls back to `element`. */
   type Placement =
     | { kind: 'page' }
     | { kind: 'detached' }
@@ -1136,20 +1118,17 @@ interface BdDoc {
     return p === 'element' || p === 'detached';
   };
 
-  /** One per text-anchored comment on screen, kept across render(). `dirty`:
-   *  a mutation landed inside `scope` since the last resolve. */
   interface TextCache {
     scope: Element;
     range: Range | null;
-    dirty: boolean;
+    mutatedSinceResolve: boolean;
     scannedAt: number;
   }
   const textCache = new Map<string, TextCache>();
-  const RESCAN_MS = 1000;
+  const LOST_QUOTE_RESCAN_MS = 1000;
   let rescanTimer: ReturnType<typeof setTimeout> | undefined;
 
-  /** Whether a cached range still reads as the quote. Bounded: gives up past ~4× the quote. */
-  function spells(range: Range, exact: string): boolean {
+  function rangeStillReadsAs(range: Range, exact: string): boolean {
     if (range.collapsed) return false;
     const max = exact.length * 4 + 64;
     const chunks: string[] = [];
@@ -1173,28 +1152,26 @@ interface BdDoc {
     return flatten(chunks).text === exact;
   }
 
-  /** The quote's live range inside `scope`; scans the scope only when it changed or was mutated. */
   function quoteRange(id: string, scope: Element, q: Quote): Range | null {
     let c = textCache.get(id);
     if (!c || c.scope !== scope) {
-      c = { scope, range: null, dirty: true, scannedAt: -Infinity };
+      c = { scope, range: null, mutatedSinceResolve: true, scannedAt: -Infinity };
       textCache.set(id, c);
     }
-    if (!c.dirty) return c.range;
-    if (c.range && spells(c.range, q.exact)) {
-      c.dirty = false;
+    if (!c.mutatedSinceResolve) return c.range;
+    if (c.range && rangeStillReadsAs(c.range, q.exact)) {
+      c.mutatedSinceResolve = false;
       return c.range;
     }
-    const wait = c.scannedAt + RESCAN_MS - performance.now();
+    const wait = c.scannedAt + LOST_QUOTE_RESCAN_MS - performance.now();
     if (!c.range && wait > 0) {
-      // A lost quote in a busy scope rescans at most once a second.
       rescanTimer ??= setTimeout(() => {
         rescanTimer = undefined;
         scheduleReposition();
       }, wait);
       return null;
     }
-    c.dirty = false;
+    c.mutatedSinceResolve = false;
     c.scannedAt = performance.now();
     c.range = null;
     const nodes = textNodes(scope);
@@ -1242,9 +1219,8 @@ interface BdDoc {
     pin.style.top = `${at.y}px`;
   };
 
-  // ---- highlights -----------------------------------------------------------
   // ::highlight() only styles ranges in the tree that owns their nodes, so the
-  // sheet is adopted by the document, not the shadow root. Never wraps page DOM.
+  // sheet is adopted by the document, not the shadow root.
   const HL_CSS = `
     ::highlight(brisk-comment) { background-color: oklch(46% 0.19 262 / 0.16); }
     ::highlight(brisk-comment-focus) {
@@ -1266,13 +1242,9 @@ interface BdDoc {
   } catch (err) {
     console.warn('[comments] highlights unavailable:', err);
   }
-  /** The open thread's comment, painted as focus. */
   let focusId = '';
-  /** The words of the compose in progress, painted as focus until it closes. */
   let pendingRange: Range | null = null;
 
-  /** The only writer of the highlight registry, rebuilt from the slots, so a
-   *  resolved, deleted, filtered or hidden comment cannot leave paint behind. */
   function paint() {
     if (!marks) return;
     try {
@@ -1589,16 +1561,12 @@ interface BdDoc {
   document.addEventListener('mouseup', onUp, true);
   document.addEventListener('click', onClick, true);
   document.addEventListener('keydown', onKey, true);
-  // Click-away closes the open popover, mirroring Esc — unless it holds unsaved
-  // text, which shakes instead. Bubble phase on purpose: interaction inside the
-  // widget stops at the shadow root (isolation guard above), so any mousedown
-  // that reaches here happened on the page itself. Pick gestures are safe too —
-  // the popover only opens on the later mouseup or click.
-  document.addEventListener('mousedown', () => {
-    if (popDirty()) nudge();
+  const onClickAway = () => {
+    if (popHasUnsavedText()) nudge();
     else if (pop.classList.contains('show')) closePop();
     closeMenu();
-  });
+  };
+  document.addEventListener('mousedown', onClickAway, false);
   // Reposition pins on scroll; the popover stays put (it's fixed) so a scrolling
   // textarea can't dismiss it.
   addEventListener('scroll', scheduleReposition, true);
@@ -1609,15 +1577,14 @@ interface BdDoc {
   addEventListener('animationend', scheduleReposition, true);
   // Slides, tabs and accordions swap what's on screen with a class or style
   // flip and fire no event of their own — watch the markup so pins follow.
-  // Text edits matter only inside a quote's scope; they mark that cache dirty.
   new MutationObserver((records) => {
     let move = false;
     for (const r of records) {
       if (r.type !== 'characterData') move = true;
       if (r.type === 'attributes') continue;
       for (const c of textCache.values()) {
-        if (!c.dirty && c.scope.contains(r.target)) {
-          c.dirty = true;
+        if (!c.mutatedSinceResolve && c.scope.contains(r.target)) {
+          c.mutatedSinceResolve = true;
           move = true;
         }
       }

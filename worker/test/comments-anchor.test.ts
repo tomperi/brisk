@@ -14,7 +14,6 @@ import {
   type Anchor,
 } from '../src/plugins/comments/anchor';
 
-/** Capture the first occurrence of `words` in the flattened chunks, as the widget does. */
 const captureIn = (chunks: string[], words: string, from = 0) => {
   const { text } = flatten(chunks);
   const start = text.indexOf(words, from);
@@ -25,10 +24,10 @@ describe('flatten', () => {
   it('collapses whitespace runs across node boundaries, NBSP included', () => {
     expect(flatten(['Hello\n', '  ', 'world']).text).toBe('Hello world');
     expect(flatten(['a  b', ' \t', '\nc']).text).toBe('a b c');
+    expect(flatten(['billed ', ' monthly']).text).toBe('billed monthly');
   });
 
   it('reads text split across inline nodes as one string', () => {
-    // <p>Hello <b>wor</b>ld</p>
     const flat = flatten(['Hello ', 'wor', 'ld']);
     expect(flat.text).toBe('Hello world');
     const hit = locateQuote(flat.text, { exact: 'world', prefix: 'Hello ', suffix: '' })!;
@@ -41,7 +40,7 @@ describe('flatten', () => {
     expect(flat.text).toBe('ab cd');
     expect(flat.toFlat(0, 0)).toBe(0);
     expect(flat.toFlat(0, 2)).toBe(2);
-    expect(flat.toFlat(1, 1)).toBe(3); // inside the collapsed run, after the one space
+    expect(flat.toFlat(1, 1)).toBe(3);
     expect(flat.toFlat(1, 3)).toBe(5);
     expect(flat.toRaw(3, 'start')).toEqual({ chunk: 1, offset: 1 });
     expect(flat.toRaw(5, 'end')).toEqual({ chunk: 1, offset: 3 });
