@@ -13,8 +13,8 @@ type AnchorArg = (typeof ANCHOR_ARGS)[number];
 
 /** How an anchor travels and rests: action args, the stored doc, a local draft. */
 export type AnchorFields = { selector?: string } & { [K in AnchorArg]?: string };
-/** The same fields as untrusted input (a raw POST or an old record may hold anything). */
-export type RawAnchor = { readonly [K in 'selector' | AnchorArg]?: unknown };
+/** Untrusted input: a raw POST or an old record may hold anything in these fields. */
+export type RawAnchor = Readonly<Record<string, unknown>>;
 
 /** Fractions of the element's box, each in [0, 1]. */
 export interface Point {
@@ -43,7 +43,7 @@ const POINT_RE = /^(0(?:\.\d{1,4})?|1(?:\.0{1,4})?),(0(?:\.\d{1,4})?|1(?:\.0{1,4
 /** Strict parse at the write boundary: normalizes, enforces caps and
  *  combinations, throws AnchorError naming the field. */
 export function parseAnchor(raw: RawAnchor): Anchor {
-  const str = (name: keyof RawAnchor): string => {
+  const str = (name: 'selector' | AnchorArg): string => {
     const v = raw[name];
     if (v === undefined) return '';
     if (typeof v !== 'string') throw new AnchorError(`${name} must be a string`);

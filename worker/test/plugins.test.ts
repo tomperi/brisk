@@ -442,7 +442,17 @@ const act = async (name: string, args: Record<string, string>) =>
 // site the comments tests touch is deployed up front (comments is default-on,
 // so a plain deploy enables it).
 beforeAll(async () => {
-  for (const site of ['csite', 'evsite', 'nested', 'frozen', 'dsite', 'rsite', 'xsite', 'hsite']) {
+  for (const site of [
+    'csite',
+    'evsite',
+    'nested',
+    'frozen',
+    'dsite',
+    'rsite',
+    'xsite',
+    'hsite',
+    'qsite',
+  ]) {
     const form = new FormData();
     form.append('files', new File(['<h1>x</h1>'], 'index.html', { type: 'text/html' }));
     await cc(`/api/deploy/${site}`, { method: 'POST', body: form });
@@ -608,6 +618,103 @@ describe('comments read actions', () => {
       action: string;
     }[];
     expect(hist.map((h) => h.action)).toEqual(['create', 'resolve', 'reopen']);
+  });
+});
+
+describe('comment anchors', () => {
+  const post = (args: Record<string, unknown>) =>
+    cc('/api/plugins/comments/actions/create', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ args: { site: 'qsite', text: 'x', ...args } }),
+    });
+
+  it('stores a quote normalized and a point as sent', async () => {
+    const { result } = await act('create', {
+      site: 'qsite',
+      text: 'say per user',
+      page: '/pricing',
+      selector: '#plans > p',
+      quote: 'starts at $9   per\nseat',
+      quotePrefix: 'For small teams,\u00a0pricing ',
+      quoteSuffix: ', billed monthly.',
+      point: '0.4213,0.8800',
+    });
+    expect(result).toMatchObject({
+      selector: '#plans > p',
+      quote: 'starts at $9 per seat',
+      quotePrefix: 'For small teams, pricing ',
+      quoteSuffix: ', billed monthly.',
+      point: '0.4213,0.8800',
+    });
+    const stored = await (
+      await cc(`/api/db/_plugin:comments/${String(result.id)}`, {
+        headers: { 'x-brisk-site': 'qsite' },
+      })
+    ).json<Record<string, unknown>>();
+    expect(stored.quote).toBe('starts at $9 per seat');
+  });
+
+  it.each([
+    [{ selector: 'p', quote: 'a'.repeat(501) }, 'quote'],
+    [{ selector: 'p', point: '1.5,0' }, 'point'],
+    [{ quote: 'orphan words' }, 'selector'],
+    [{ selector: 'p', quote: 42 }, 'quote'],
+  ])('400s a bad anchor %#, naming the field', async (args, field) => {
+    const res = await post(args);
+    expect(res.status).toBe(400);
+    expect((await res.json<{ error: string }>()).error).toContain(field);
+  });
+
+  it('stores no anchor fields for a legacy create', async () => {
+    const { result } = await act('create', {
+      site: 'qsite',
+      text: 'old style',
+      page: '/',
+      selector: 'h1',
+    });
+    expect(result.selector).toBe('h1');
+    for (const k of ['quote', 'quotePrefix', 'quoteSuffix', 'point'])
+      expect(result).not.toHaveProperty(k);
+  });
+
+  it('exports the quote, its context, and the spot', async () => {
+    await act('create', {
+      site: 'qsite',
+      text: 'quoted one',
+      selector: 'main > p',
+      quote: 'per "seat"',
+      quotePrefix: 'at $9 ',
+      quoteSuffix: ', billed',
+    });
+    await act('create', { site: 'qsite', text: 'spot one', selector: 'svg', point: '0.82,0.12' });
+    const md = (await act('export', { site: 'qsite' })).result as unknown as string;
+    const block = (title: string) => md.slice(md.indexOf(title)).split('\n## ')[0]!;
+    expect(block('quoted one')).toContain(
+      '- selector: `main > p`\n- quote: "per \\"seat\\""\n- before: "at $9 "\n- after: ", billed"\n',
+    );
+    expect(block('spot one')).toContain('- spot: 82% from left, 12% from top of the element\n');
+  });
+
+  it('keeps the first seven create args in place and appends the anchor fields', async () => {
+    const manifest = await (
+      await cc('/api/plugins/comments')
+    ).json<{
+      actions: { create: { args: { name: string }[] } };
+    }>();
+    expect(manifest.actions.create.args.map((a) => a.name)).toEqual([
+      'site',
+      'text',
+      'page',
+      'selector',
+      'label',
+      'textSnippet',
+      'html',
+      'quote',
+      'quotePrefix',
+      'quoteSuffix',
+      'point',
+    ]);
   });
 });
 
