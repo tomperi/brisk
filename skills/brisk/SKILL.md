@@ -146,6 +146,11 @@ brisk plugin comments reply  my-site <id> "fixed — sentence-cased the heading"
 brisk plugin comments resolve my-site <id>
 ```
 
+A comment that quotes text exports `quote:`, `before:` and `after:` lines
+(JSON-quoted) — grep the source for the quote, and use the context when it
+occurs more than once. One without a quote may carry a `spot:` (where in the
+element the teammate clicked).
+
 Only published comments reach the server; a teammate's unpublished drafts stay
 in their browser, so an empty export means nothing was published yet.
 
