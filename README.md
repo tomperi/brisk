@@ -392,7 +392,10 @@ Sites opt in via `brisk.json`; each plugin is `mandatory`, on-by-`default`, or
 ```
 
 **The comments plugin** (on by default) is `html-grab` made native: click any
-element, leave a note. Comments start as **local drafts** (localStorage — copy
+element, leave a note. Select text first and the comment quotes those exact
+words — highlighted on the page, found again after a redeploy (when the words
+are gone it falls back to the element and says so); a plain click pins the
+comment where you clicked. Comments start as **local drafts** (localStorage — copy
 them as markdown to hand an agent, zero server writes; note drafts are local to
 the browser, not private — on a path-mode instance every site shares one
 origin's storage), and you **publish** when you want to share. Published
@@ -402,7 +405,7 @@ close the loop:
 
 ```sh
 brisk plugin comments list   my-site        # open feedback, as a table
-brisk plugin comments export my-site        # markdown an agent can act on
+brisk plugin comments export my-site        # markdown an agent can act on: quote, before/after, selector
 brisk plugin comments reply  my-site <id> "fixed — sentence-cased the heading"
 brisk plugin comments resolve my-site <id>
 ```
