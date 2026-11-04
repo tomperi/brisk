@@ -27,6 +27,10 @@ releases are published to
   corner. `export` and the widget's copy buttons print the quote with the text
   around it, so an agent knows exactly which words a comment is about. In pick
   mode, the element under the cursor shows its name.
+- **Comments** — Brisk remembers, per person, which comment threads you have
+  read. `brisk plugin comments seen <site> <id>` marks one read for you and
+  `unseen` marks it unread again; a later reply from someone else makes it
+  unread too.
 
 ### Fixed
 
