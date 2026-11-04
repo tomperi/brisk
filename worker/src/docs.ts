@@ -74,10 +74,16 @@ export class DocStore {
     return row ? toDoc(row) : null;
   }
 
-  async create(site: string, collection: string, fields: Record<string, unknown>): Promise<Doc> {
+  /** With `opts.id`, a second create under that id throws instead of overwriting. */
+  async create(
+    site: string,
+    collection: string,
+    fields: Record<string, unknown>,
+    opts: { id?: string } = {},
+  ): Promise<Doc> {
     const data = ownFields(fields);
     const now = new Date().toISOString();
-    const id = crypto.randomUUID().replaceAll('-', '').slice(0, 12);
+    const id = opts.id ?? crypto.randomUUID().replaceAll('-', '').slice(0, 12);
     await this.db
       .prepare(
         'INSERT INTO docs (site, collection, id, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',

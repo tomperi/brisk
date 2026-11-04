@@ -739,6 +739,13 @@ describe('DocStore optimistic concurrency', () => {
     expect(await s.get('cas', 'c', doc.id)).toMatchObject({ v: 2 });
   });
 
+  it('creates under a caller-chosen id exactly once', async () => {
+    const s = store();
+    expect(await s.create('cas', 'fixed', { v: 1 }, { id: 'only' })).toMatchObject({ id: 'only' });
+    await expect(s.create('cas', 'fixed', { v: 2 }, { id: 'only' })).rejects.toThrow();
+    expect(await s.get('cas', 'fixed', 'only')).toMatchObject({ v: 1 });
+  });
+
   it('applies an update whose snapshot is current', async () => {
     const s = store();
     const doc = await s.create('cas', 'c2', { v: 1 });
