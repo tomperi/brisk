@@ -452,6 +452,7 @@ beforeAll(async () => {
     'xsite',
     'hsite',
     'qsite',
+    'seensite',
   ]) {
     const form = new FormData();
     form.append('files', new File(['<h1>x</h1>'], 'index.html', { type: 'text/html' }));
@@ -618,6 +619,104 @@ describe('comments read actions', () => {
       action: string;
     }[];
     expect(hist.map((h) => h.action)).toEqual(['create', 'resolve', 'reopen']);
+  });
+});
+
+describe('comments seen state', () => {
+  const SITE = 'seensite';
+  type Seen = { id: string; user: string; seen: Record<string, string> };
+  const readSeen = async (email: string) => {
+    const res = await cc(`/api/db/_plugin:comments:seen/${encodeURIComponent(email)}`, {
+      headers: { 'x-brisk-site': SITE },
+    });
+    return res.status === 404 ? null : res.json<Seen>();
+  };
+  const listSeen = async () =>
+    (
+      await (
+        await cc('/api/db/_plugin:comments:seen', { headers: { 'x-brisk-site': SITE } })
+      ).json<{ docs: Seen[] }>()
+    ).docs;
+  const comment = async () => String((await act('create', { site: SITE, text: 'x' })).result.id);
+  const as = (email: string, publish = vi.fn()) => ({
+    platform: buildCloudflarePlatform(env, createExecutionContext()),
+    user: { email, name: email },
+    publish,
+  });
+  const actAs = (email: string, name: 'seen' | 'unseen', id: string) =>
+    comments.actions![name]!.handler(as(email), { site: SITE, id }) as Promise<Seen>;
+
+  it('marks a comment seen for me, readable through the db route, and unseen again', async () => {
+    const id = await comment();
+    const { result } = await act('seen', { site: SITE, id });
+    expect(result).toMatchObject({ user: 'dev@localhost', seen: { [id]: expect.any(String) } });
+    expect((await readSeen('dev@localhost'))!.seen[id]).toBe((result as Seen).seen[id]);
+
+    await act('unseen', { site: SITE, id });
+    expect((await readSeen('dev@localhost'))!.seen).not.toHaveProperty(id);
+  });
+
+  it('is idempotent and keeps one doc per person', async () => {
+    const id = await comment();
+    await actAs('idem@example.com', 'seen', id);
+    await actAs('idem@example.com', 'seen', id);
+    expect((await listSeen()).filter((d) => d.user === 'idem@example.com')).toHaveLength(1);
+
+    await actAs('idem@example.com', 'unseen', id);
+    const again = await actAs('idem@example.com', 'unseen', id);
+    expect(again.seen).not.toHaveProperty(id);
+  });
+
+  it('keeps each person to their own seen doc', async () => {
+    const id = await comment();
+    await actAs('ana@example.com', 'seen', id);
+    await actAs('bo@example.com', 'seen', id);
+    await actAs('bo@example.com', 'unseen', id);
+    expect((await readSeen('ana@example.com'))!.seen).toHaveProperty(id);
+    expect((await readSeen('bo@example.com'))!.seen).not.toHaveProperty(id);
+  });
+
+  it('stamps the session user, never a user named in the args', async () => {
+    const id = await comment();
+    await comments.actions!.seen!.handler(as('real@example.com'), {
+      site: SITE,
+      id,
+      user: 'forged@example.com',
+    });
+    expect(await readSeen('forged@example.com')).toBeNull();
+    expect((await readSeen('real@example.com'))!.seen).toHaveProperty(id);
+  });
+
+  it('rejects an id that is not a top-level comment on the site', async () => {
+    const id = await comment();
+    const { result: r } = await act('reply', { site: SITE, id, text: 'r' });
+    for (const bad of ['nope', String(r.id)]) {
+      const res = await cc('/api/plugins/comments/actions/seen', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ args: { site: SITE, id: bad } }),
+      });
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it('keeps both ids when one person marks two comments at once', async () => {
+    const [a, b, c] = [await comment(), await comment(), await comment()];
+    await Promise.all([a, b, c].map((id) => actAs('race@example.com', 'seen', id)));
+    expect(Object.keys((await readSeen('race@example.com'))!.seen).sort()).toEqual(
+      [a, b, c].sort(),
+    );
+  });
+
+  it("publishes the person's seen doc so their other tabs update", async () => {
+    const id = await comment();
+    const publish = vi.fn();
+    await comments.actions!.seen!.handler(as('pub@example.com', publish), { site: SITE, id });
+    expect(publish).toHaveBeenCalledWith(SITE, {
+      collection: '_plugin:comments:seen',
+      event: expect.stringMatching(/^(create|update)$/),
+      doc: expect.objectContaining({ user: 'pub@example.com', seen: { [id]: expect.any(String) } }),
+    });
   });
 });
 

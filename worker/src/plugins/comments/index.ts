@@ -2,9 +2,11 @@ import { DocStore, type Doc } from '../../docs';
 import type { User } from '../../env';
 import { PLUGIN_COLLECTION_PREFIX, type Plugin, type PluginActionCtx } from '../types';
 import { ANCHOR_ARGS, anchorFields, anchorLines, anchorOfRecord, parseAnchor } from './anchor';
+import { seenDocId } from './inbox';
 
 export const COMMENTS = `${PLUGIN_COLLECTION_PREFIX}comments`;
 export const EVENTS = `${PLUGIN_COLLECTION_PREFIX}comments:events`;
+export const SEEN = `${PLUGIN_COLLECTION_PREFIX}comments:seen`;
 
 /** Display identity for attribution — mirrors how deploys attribute an owner. */
 const authorOf = (user: User): string => user.name || user.email;
@@ -133,6 +135,43 @@ async function softDelete(ctx: PluginActionCtx, args: Record<string, string>): P
   return doc;
 }
 
+/** Sets (a timestamp) or clears (null) the caller's seen stamp on one thread.
+ *  The doc lives under a fixed per-person id, so racing first writes collide on
+ *  the key instead of forking two docs; a lost create or CAS re-reads. */
+async function writeSeen(
+  ctx: PluginActionCtx,
+  args: Record<string, string>,
+  stamp: string | null,
+): Promise<Doc> {
+  const { site, id } = args;
+  if (!site || !id) throw new Error('site and id are required');
+  const store = new DocStore(ctx.platform.db);
+  const target = await requireComment(store, site, id);
+  if (target.parentId) {
+    throw new Error(`${id} is a reply — use its thread ${String(target.parentId)}`);
+  }
+  const user = seenDocId(ctx.user.email);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const existing = await store.get(site, SEEN, user);
+    const seen = { ...(existing?.seen as Record<string, string> | undefined) };
+    if (stamp !== null) seen[id] = stamp;
+    else if (existing && !Object.hasOwn(seen, id)) return existing;
+    else delete seen[id];
+
+    const doc = existing
+      ? await store.update(site, SEEN, user, { seen }, { ifUpdatedAt: existing.updatedAt })
+      : await store.create(site, SEEN, { user, seen }, { id: user }).catch(async (err: unknown) => {
+          if (await store.get(site, SEEN, user)) return null;
+          throw err;
+        });
+    if (doc) {
+      ctx.publish(site, { collection: SEEN, event: existing ? 'update' : 'create', doc });
+      return doc;
+    }
+  }
+  throw new Error(`seen state for ${id} is changing concurrently — retry`);
+}
+
 type Status = 'open' | 'resolved' | 'deleted' | 'all';
 const STATUSES = new Set<string>(['open', 'resolved', 'deleted', 'all']);
 
@@ -257,6 +296,18 @@ export const comments: Plugin = {
       args: [siteArg, idArg],
       render: 'json',
       handler: softDelete,
+    },
+    seen: {
+      summary: 'mark a comment read for you',
+      args: [siteArg, idArg],
+      render: 'json',
+      handler: (ctx, args) => writeSeen(ctx, args, new Date().toISOString()),
+    },
+    unseen: {
+      summary: 'mark a comment unread for you',
+      args: [siteArg, idArg],
+      render: 'json',
+      handler: (ctx, args) => writeSeen(ctx, args, null),
     },
     list: {
       summary: "list a site's comments",
