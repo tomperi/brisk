@@ -5,17 +5,18 @@ router, dashboard. Request flow and storage layout: README → Architecture.
 
 ## Map
 
-| File           | Owns                                                                                                                                           |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/app.ts`   | All HTTP routes, site resolution, the static-serving fallback                                                                                  |
-| `src/sites.ts` | Deploys (atomic pointer swap), serving from R2, site CRUD, name rules                                                                          |
-| `src/docs.ts`  | The document store on D1 (`docs` table)                                                                                                        |
-| `src/room.ts`  | `SiteRoom` Durable Object: db events, channels, presence ([protocol](../docs/realtime-protocol.md))                                            |
-| `src/auth.ts`  | Google OAuth, session cookies, dev identity, personal CLI tokens (`/auth/cli`) + CI deploy token                                               |
-| `src/ai.ts`    | Anthropic/OpenAI proxy; provider picked by configured key                                                                                      |
-| `src/plugins/` | Curated, forkable plugin layer (registry, `/api/plugins`, HTML injection) + the `comments` plugin                                              |
-| `assets/`      | The dashboard (the built-in `home` site) + generated `brisk.js`, `changelog.html`, `llms.txt` (`scripts/`) + built plugin widgets (`plugins/`) |
-| `migrations/`  | D1 schema; add new numbered files, never edit applied ones                                                                                     |
+| File            | Owns                                                                                                                                           |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/app.ts`    | All HTTP routes, site resolution, the static-serving fallback                                                                                  |
+| `src/sites.ts`  | Deploys (atomic pointer swap), serving from R2, site CRUD, name rules                                                                          |
+| `src/docs.ts`   | The document store on D1 (`docs` table)                                                                                                        |
+| `src/room.ts`   | `SiteRoom` Durable Object: db events, channels, presence ([protocol](../docs/realtime-protocol.md))                                            |
+| `src/auth.ts`   | Google OAuth, session cookies, dev identity, personal CLI tokens (`/auth/cli`) + CI deploy token                                               |
+| `src/tokens.ts` | Site tokens: store, `/api/tokens`, and the deny-by-default gate. **A new route is closed to site tokens until `tokenNeed` names it.**          |
+| `src/ai.ts`     | Anthropic/OpenAI proxy; provider picked by configured key                                                                                      |
+| `src/plugins/`  | Curated, forkable plugin layer (registry, `/api/plugins`, HTML injection) + the `comments` plugin                                              |
+| `assets/`       | The dashboard (the built-in `home` site) + generated `brisk.js`, `changelog.html`, `llms.txt` (`scripts/`) + built plugin widgets (`plugins/`) |
+| `migrations/`   | D1 schema; add new numbered files, never edit applied ones                                                                                     |
 
 ## Two assemblies, one core
 

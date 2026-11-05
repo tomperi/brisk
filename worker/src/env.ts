@@ -1,4 +1,5 @@
 import type { Platform } from './platform/types';
+import type { SiteToken } from './tokens';
 
 export interface Env {
   DB: D1Database;
@@ -48,6 +49,10 @@ export interface User {
   picture?: string;
 }
 
+/** How the request authenticated. `dev` is AUTH=none; `cli` is a personal token
+ *  from `brisk login`; `site-token` is a scoped token (see tokens.ts). */
+export type Credential = 'dev' | 'visitor' | 'session' | 'cli' | 'deploy-token' | 'site-token';
+
 /** Hono app environment: bindings plus per-request site + user + platform. */
 export type AppEnv = {
   Bindings: Env;
@@ -55,6 +60,9 @@ export type AppEnv = {
     /** Site this request belongs to (subdomain, /s/<site> prefix, or header). */
     site: string;
     user: User;
+    credential: Credential;
+    /** Set only when credential is `site-token`. */
+    siteToken?: SiteToken;
     /** Storage/db/rooms/assets/cache/waitUntil, wired by the entry point. */
     platform: Platform;
   };
