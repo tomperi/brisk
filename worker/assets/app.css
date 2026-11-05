@@ -478,6 +478,162 @@ td code {
   color: var(--ink-dim);
 }
 
+/* ---- site tokens ------------------------------------------------------------------- */
+
+.token-builder h2 {
+  font-size: 0.85rem;
+  font-weight: 400;
+  color: var(--ink-dim);
+  margin: 0 0 0.5rem;
+}
+
+.token-note {
+  color: var(--ink-dim);
+  font-size: 0.82rem;
+  max-width: 64ch;
+  margin: 0 0 1rem;
+}
+
+.token-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  align-items: end;
+}
+
+.token-fields > label {
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.8rem;
+  color: var(--ink-dim);
+}
+
+.token-fields input:not([type]) {
+  font: inherit;
+  font-size: 0.88rem;
+  color: var(--ink);
+  background: var(--paper-raised);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.3rem 0.6rem;
+  width: 13rem;
+  outline: none;
+}
+
+.token-fields input:not([type]):focus {
+  border-color: var(--accent);
+}
+
+.scope-picks {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  gap: 0.9rem;
+  font-size: 0.88rem;
+}
+
+.scope-picks legend {
+  font-size: 0.8rem;
+  color: var(--ink-dim);
+  padding: 0 0 0.2rem;
+}
+
+.scope-picks input {
+  accent-color: var(--accent);
+}
+
+.scope-help {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0 1rem;
+  font-size: 0.8rem;
+  color: var(--ink-dim);
+  margin: 1rem 0 0.25rem;
+}
+
+.scope-help dt {
+  color: var(--ink);
+}
+
+.scope-help dd {
+  margin: 0;
+}
+
+#new-cmd {
+  white-space: normal;
+}
+
+#new-cmd .cmd-part {
+  white-space: nowrap;
+}
+
+.token-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 1rem;
+  align-items: center;
+  padding: 0.6rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.88rem;
+}
+
+.token-main {
+  display: grid;
+  min-width: 0;
+}
+
+.token-row .name {
+  font-weight: 700;
+}
+
+.token-meta {
+  color: var(--ink-dim);
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.token-id {
+  font-weight: 400;
+  color: var(--ink-dim);
+  font-size: 0.8rem;
+}
+
+.token-status {
+  color: var(--live);
+  font-size: 0.8rem;
+}
+
+.token-row.is-disabled .name {
+  color: var(--ink-dim);
+  text-decoration: line-through;
+}
+
+.token-row.is-disabled .token-status {
+  color: var(--ink-dim);
+}
+
+.token-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+@media (max-width: 40rem) {
+  .token-row {
+    grid-template-columns: 1fr auto;
+    gap: 0.4rem 1rem;
+  }
+  .token-main {
+    grid-column: 1 / -1;
+  }
+  .token-fields input:not([type]) {
+    width: 100%;
+  }
+  .token-fields > label {
+    flex: 1 1 100%;
+  }
+}
+
 /* ---- footer ---------------------------------------------------------------------- */
 
 footer {

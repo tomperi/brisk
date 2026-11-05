@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>site tokens · brisk</title>
+    <meta
+      name="description"
+      content="Long-lived tokens for CI, limited to named sites and scopes."
+    />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/app.css" />
+    <script src="/brisk.js" defer></script>
+    <script src="/header.js" defer></script>
+    <script src="/tokens.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <header>
+        <a class="wordmark" href="/">brisk<span class="cursor">▮</span></a>
+        <nav>
+          <a href="/docs">docs</a>
+          <a href="/host">hosting</a>
+          <a href="/changelog">changelog</a>
+          <a href="https://github.com/tomperi/brisk">source</a>
+          <a href="/auth/login" id="signin" hidden>sign in</a>
+          <span class="whoami" id="whoami" hidden><span id="who"></span></span>
+        </nav>
+      </header>
+
+      <section class="hero">
+        <h1>Site tokens</h1>
+        <p>
+          Long-lived tokens for CI and scripts. Each one works only on the sites it names, with the
+          scopes it names, until someone disables or deletes it.
+        </p>
+      </section>
+
+      <section class="token-builder" id="builder" hidden>
+        <h2>new token</h2>
+        <p class="token-note">
+          Tokens are created from the CLI with your personal login, never from this page: every site
+          is served from this origin, so a page here could read a secret it creates.
+        </p>
+        <div class="token-fields">
+          <label
+            >label
+            <input id="new-label" autocomplete="off" spellcheck="false" placeholder="handbook ci"
+          /></label>
+          <label
+            >sites
+            <input id="new-sites" autocomplete="off" spellcheck="false" placeholder="my-site,other"
+          /></label>
+          <fieldset class="scope-picks">
+            <legend>scopes</legend>
+            <label><input type="checkbox" value="read" /> read</label>
+            <label><input type="checkbox" value="write" checked /> write</label>
+            <label><input type="checkbox" value="update" checked /> update</label>
+            <label><input type="checkbox" value="delete" /> delete</label>
+          </fieldset>
+        </div>
+        <dl class="scope-help">
+          <dt>read</dt>
+          <dd>view the site, its files and its db</dd>
+          <dt>write</dt>
+          <dd>first deploy, db inserts, file uploads</dd>
+          <dt>update</dt>
+          <dd>redeploy over the live site, db edits</dd>
+          <dt>delete</dt>
+          <dd>delete the site, db deletes</dd>
+        </dl>
+        <div class="cmd">
+          <code id="new-cmd"></code><button class="copy" id="new-copy">copy</button>
+        </div>
+      </section>
+
+      <section id="tokens-section" hidden>
+        <div class="sites-head"><h2 id="token-count"></h2></div>
+        <ul class="site-list" id="token-list"></ul>
+      </section>
+
+      <footer>
+        <span>brisk</span>
+        <a href="/">sites</a>
+        <a href="/docs">docs</a>
+        <a href="/changelog">changelog</a>
+      </footer>
+    </main>
+  </body>
+</html>

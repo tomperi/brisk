@@ -130,3 +130,27 @@ describe('node security: fail closed when AUTH is unset on a public host', () =>
     expect(res.status).toBe(200);
   });
 });
+
+describe('node security: upload paths stay inside their site', () => {
+  let srv: { base: string; close: () => Promise<void> };
+  beforeAll(async () => {
+    srv = await boot({ AUTH: 'none' });
+  });
+  afterAll(() => srv.close());
+
+  it('404s an encoded ../ that would climb into another site', async () => {
+    const form = new FormData();
+    form.append('files', new File(['secret b upload'], 'x.txt'));
+    const up = await fetch(`${srv.base}/api/fs/upload`, {
+      method: 'POST',
+      headers: { 'x-brisk-site': 'site-b' },
+      body: form,
+    });
+    const { files } = (await up.json()) as { files: { url: string }[] };
+    const [, , , id, name] = files[0]!.url.split('/');
+    expect((await fetch(`${srv.base}${files[0]!.url}`)).status).toBe(200);
+
+    const climb = `${srv.base}/files/site-a/x/..%2F..%2Fsite-b%2F${id}%2F${name}`;
+    expect((await fetch(climb)).status).toBe(404);
+  });
+});

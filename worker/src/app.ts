@@ -11,6 +11,7 @@ import {
   type SchemeSource,
 } from './auth';
 import { DocStore } from './docs';
+import { registerTokenRoutes, scopeDenied, siteTokenGate } from './tokens';
 import { contentType } from './mime';
 import {
   deleteSite,
@@ -162,6 +163,9 @@ export function createApp(
   app.use('/auth/*', denyFrameNoSniff);
 
   app.use('*', auth());
+  // Before every route below, including /auth/cli: a site token must never
+  // reach one that tokenNeed does not name.
+  app.use('*', siteTokenGate());
 
   // ---- identity ----------------------------------------------------------
 
@@ -171,6 +175,8 @@ export function createApp(
   // GET confirms (consent page for browser sessions); POST mints the token.
   app.get('/auth/cli', cliConsent());
   app.post('/auth/cli', cliMint());
+
+  registerTokenRoutes(app);
 
   // ---- database ----------------------------------------------------------
 
@@ -276,6 +282,11 @@ export function createApp(
 
   app.get('/files/:site/:id/:name', async (c) => {
     const { site, id, name } = c.req.param();
+    // Params arrive decoded, so `..%2F` would climb out of the site's uploads on
+    // stores that normalize keys (the filesystem and S3 adapters do).
+    if ([site, id, name].some((p) => /[/\\]/.test(p) || p === '.' || p === '..')) {
+      return c.notFound();
+    }
     const object = await c.var.platform.storage.get(`uploads/${site}/${id}/${name}`);
     if (!object) return c.notFound();
     const headers = new Headers();
@@ -374,6 +385,11 @@ export function createApp(
     // A trust-based footgun guard, never a permission: deploying over someone
     // else's site needs an explicit --force. NULL/unowned sites never block.
     const existing = await getSite(c.var.platform, site);
+    // The gate checked before the (possibly slow) upload; the site may have
+    // appeared or vanished since.
+    const token = c.var.siteToken;
+    const scope = existing ? 'update' : 'write';
+    if (token && !token.scopes.includes(scope)) return scopeDenied(c, token, scope);
     if (existing?.owner && existing.owner !== who && !force) {
       return c.json(
         {
