@@ -6,7 +6,8 @@ export interface ThreadEntry {
   deleted?: unknown;
 }
 
-/** One per (site, person): when that person last opened each top-level comment. */
+/** One per (site, person): when that person last opened each top-level comment.
+ *  '' is an explicit mark-unread, which holds until they open the thread again. */
 export interface SeenState {
   user: string;
   seen: Record<string, string>;
@@ -39,6 +40,7 @@ export function isUnread(
   me: string,
   seenAt: string | undefined,
 ): boolean {
+  if (seenAt === '') return true;
   const activity = lastActivityByOthers(comment, replies, me);
   if (activity === null) return false;
   return seenAt === undefined || Date.parse(activity) > Date.parse(seenAt);

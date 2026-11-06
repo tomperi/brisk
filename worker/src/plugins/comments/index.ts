@@ -135,13 +135,14 @@ async function softDelete(ctx: PluginActionCtx, args: Record<string, string>): P
   return doc;
 }
 
-/** Sets (a timestamp) or clears (null) the caller's seen stamp on one thread.
- *  The doc lives under a fixed per-person id, so racing first writes collide on
- *  the key instead of forking two docs; a lost create or CAS re-reads. */
+/** Sets the caller's seen stamp on one thread: a timestamp, or '' for an
+ *  explicit unread. The doc lives under a fixed per-person id, so racing first
+ *  writes collide on the key instead of forking two docs; a lost create or CAS
+ *  re-reads. */
 async function writeSeen(
   ctx: PluginActionCtx,
   args: Record<string, string>,
-  stamp: string | null,
+  stamp: string,
 ): Promise<Doc> {
   const { site, id } = args;
   if (!site || !id) throw new Error('site and id are required');
@@ -154,9 +155,8 @@ async function writeSeen(
   for (let attempt = 0; attempt < 5; attempt++) {
     const existing = await store.get(site, SEEN, user);
     const seen = { ...(existing?.seen as Record<string, string> | undefined) };
-    if (stamp !== null) seen[id] = stamp;
-    else if (existing && !Object.hasOwn(seen, id)) return existing;
-    else delete seen[id];
+    if (existing && seen[id] === stamp) return existing;
+    seen[id] = stamp;
 
     const doc = existing
       ? await store.update(site, SEEN, user, { seen }, { ifUpdatedAt: existing.updatedAt })
@@ -307,7 +307,7 @@ export const comments: Plugin = {
       summary: 'mark a comment unread for you',
       args: [siteArg, idArg],
       render: 'json',
-      handler: (ctx, args) => writeSeen(ctx, args, null),
+      handler: (ctx, args) => writeSeen(ctx, args, ''),
     },
     list: {
       summary: "list a site's comments",

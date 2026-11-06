@@ -653,7 +653,14 @@ describe('comments seen state', () => {
     expect((await readSeen('dev@localhost'))!.seen[id]).toBe((result as Seen).seen[id]);
 
     await act('unseen', { site: SITE, id });
-    expect((await readSeen('dev@localhost'))!.seen).not.toHaveProperty(id);
+    expect((await readSeen('dev@localhost'))!.seen[id]).toBe('');
+  });
+
+  it('records an explicit unread for a thread I never opened', async () => {
+    const id = await comment();
+    const doc = await actAs('fresh@example.com', 'unseen', id);
+    expect(doc.seen[id]).toBe('');
+    expect((await readSeen('fresh@example.com'))!.seen[id]).toBe('');
   });
 
   it('is idempotent and keeps one doc per person', async () => {
@@ -664,7 +671,8 @@ describe('comments seen state', () => {
 
     await actAs('idem@example.com', 'unseen', id);
     const again = await actAs('idem@example.com', 'unseen', id);
-    expect(again.seen).not.toHaveProperty(id);
+    expect(again.seen[id]).toBe('');
+    expect((await listSeen()).filter((d) => d.user === 'idem@example.com')).toHaveLength(1);
   });
 
   it('keeps each person to their own seen doc', async () => {
@@ -673,7 +681,7 @@ describe('comments seen state', () => {
     await actAs('bo@example.com', 'seen', id);
     await actAs('bo@example.com', 'unseen', id);
     expect((await readSeen('ana@example.com'))!.seen).toHaveProperty(id);
-    expect((await readSeen('bo@example.com'))!.seen).not.toHaveProperty(id);
+    expect((await readSeen('bo@example.com'))!.seen[id]).toBe('');
   });
 
   it('stamps the session user, never a user named in the args', async () => {

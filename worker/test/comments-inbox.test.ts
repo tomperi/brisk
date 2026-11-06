@@ -32,10 +32,9 @@ describe('isUnread', () => {
     expect(isUnread(by(ME, 0), replies, ME, at(3))).toBe(true);
   });
 
-  it('is unread again after mark-unread drops the seen stamp', () => {
-    const replies = [by('ana@example.com', 2)];
-    expect(isUnread(by(ME, 0), replies, ME, at(3))).toBe(false);
-    expect(isUnread(by(ME, 0), replies, ME, undefined)).toBe(true);
+  it('is unread after an explicit mark-unread, even on a thread only I posted in', () => {
+    expect(isUnread(by(ME, 0), [by(ME, 1)], ME, '')).toBe(true);
+    expect(isUnread(by('ana@example.com', 0), [], ME, '')).toBe(true);
   });
 
   it('matches me by email regardless of case and padding', () => {
