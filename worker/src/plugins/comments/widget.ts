@@ -24,7 +24,7 @@ import {
 import { icon } from './icons';
 import { seenDocId } from './inbox';
 import { escapeHtml, menuHtml, panelHtml, quoteHtml, threadHtml, type MenuItem } from './panel';
-import { HIGHLIGHT_CSS, PANEL_W, WIDGET_CSS } from './styles';
+import { DOCK_MIN, HIGHLIGHT_CSS, PANEL_W, WIDGET_CSS } from './styles';
 import {
   buildThreads,
   matches,
@@ -1121,10 +1121,30 @@ type Brisk = {
   };
 
   // ---- docking ----------------------------------------------------------------
-  const docked = false;
+  // The page gets a right margin on <html> the width of the panel, so it
+  // reflows beside it. Elements the page pins with position: fixed do not move.
+  const wide = matchMedia(`(min-width: ${DOCK_MIN}px)`);
+  let docked: { value: string; priority: string; hadStyle: boolean } | null = null;
   function applyDock() {
+    const want = panel.open && wide.matches && !hidden && !collapsed;
+    const html = document.documentElement;
+    if (want && !docked) {
+      docked = {
+        value: html.style.getPropertyValue('margin-right'),
+        priority: html.style.getPropertyPriority('margin-right'),
+        hadStyle: html.hasAttribute('style'),
+      };
+      html.style.setProperty('margin-right', `${PANEL_W}px`, 'important');
+    } else if (!want && docked) {
+      if (docked.value) html.style.setProperty('margin-right', docked.value, docked.priority);
+      else html.style.removeProperty('margin-right');
+      if (!docked.hadStyle && !html.style.length) html.removeAttribute('style');
+      docked = null;
+    }
+    layer.classList.toggle('docked', !!docked);
     scheduleReposition();
   }
+  wide.addEventListener('change', applyDock);
 
   // ---- menus ------------------------------------------------------------------
   let menuOpen: { items: () => MenuItem[]; head?: () => string } | null = null;
