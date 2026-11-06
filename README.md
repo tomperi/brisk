@@ -410,8 +410,13 @@ brisk plugin comments reply  my-site <id> "fixed — sentence-cased the heading"
 brisk plugin comments resolve my-site <id>
 ```
 
-The widget minimizes to a corner bubble you click to reopen; `Shift+C` fully
-hides it. `brisk plugin list` shows what's installed; `brisk plugin <id> --help`
+The comments panel lists this page's threads (or every page of the site), the
+ones you haven't read first: open one to read and answer its replies, resolve,
+reopen or delete it, or mark it unread to come back to it. A new reply from
+someone else makes a thread unread again; your own never do. On screens 900px
+and wider the panel docks and pushes the page aside (elements the page pins
+with `position: fixed` stay put); narrower, it overlays. The widget minimizes
+to a corner bubble you click to reopen; `Shift+C` fully hides it. `brisk plugin list` shows what's installed; `brisk plugin <id> --help`
 lists a plugin's verbs, loaded live from the server.
 
 ## Architecture

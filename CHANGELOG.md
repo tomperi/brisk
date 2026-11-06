@@ -31,6 +31,17 @@ releases are published to
   read. `brisk plugin comments seen <site> <id>` marks one read for you and
   `unseen` marks it unread again; a later reply from someone else makes it
   unread too.
+- **Comments** — the panel shows each thread's replies and lets you reply,
+  resolve, reopen and delete without leaving it. Threads you haven't read carry
+  a dot and list first; opening one marks it read, and "Mark unread" keeps it
+  on your list, even on a thread only you have posted in. Switch between this
+  page and every page of the site; a thread on another page takes you there.
+
+### Changed
+
+- **Comments** — the panel docks beside the page and pushes it aside instead of
+  covering it (on screens 900px and wider; narrower, it overlays). The widget
+  has a new look: system type, one blue accent, soft shadows, light and dark.
 
 ### Fixed
 
