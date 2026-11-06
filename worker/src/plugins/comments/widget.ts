@@ -3,10 +3,12 @@
  * brisk.db via the plugin's server actions, which stamp the author and append
  * an audit event. Reads use the SDK when the page loads /brisk.js and fall
  * back to the same fetch the write path uses when it doesn't — only realtime
- * needs the SDK (without it the list refreshes after each of our own actions).
+ * needs the SDK (without it the data refreshes after each of our own actions).
  *
- * Look: "Notecard" — Brisk's warm paper + hyperlink blue + monospace, ink
- * borders and hard offset shadows (the deploy modal's family), light/dark aware. */
+ * State lives in a few plain values (drafts, published docs, my seen stamps,
+ * PanelState); render() derives the Thread model from them and redraws the
+ * pins, panel, and popover. Look: the category's comments sidebar, system type,
+ * one Brisk-blue accent, light and dark. */
 import {
   anchorFields,
   anchorLines,
@@ -16,28 +18,40 @@ import {
   locateQuote,
   SCAN_MAX,
   type Anchor,
-  type AnchorFields,
   type FlatText,
   type Quote,
 } from './anchor';
+import { icon } from './icons';
+import { seenDocId } from './inbox';
+import { escapeHtml, menuHtml, panelHtml, quoteHtml, threadHtml, type MenuItem } from './panel';
+import { HIGHLIGHT_CSS, PANEL_W, WIDGET_CSS } from './styles';
+import {
+  buildThreads,
+  matches,
+  panelView,
+  parseFilter,
+  parseScope,
+  pinShown,
+  type Draft,
+  type Filter,
+  type PanelState,
+  type StoredDoc,
+  type Thread,
+} from './threads';
 
+type Handlers = {
+  onCreate?: (d: StoredDoc) => void;
+  onUpdate?: (d: StoredDoc) => void;
+  onDelete?: (id: string) => void;
+};
 type Brisk = {
   db: {
     collection(name: string): {
-      list(opts?: { limit?: number; sort?: string }): Promise<BdDoc[]>;
-      subscribe(h: {
-        onCreate?: (d: BdDoc) => void;
-        onUpdate?: (d: BdDoc) => void;
-        onDelete?: (id: string) => void;
-      }): () => void;
+      list(opts?: { limit?: number; sort?: string }): Promise<StoredDoc[]>;
+      subscribe(h: Handlers): () => void;
     };
   };
 };
-interface BdDoc {
-  id: string;
-  createdAt: string;
-  [k: string]: unknown;
-}
 
 (() => {
   const tag = document.querySelector<HTMLScriptElement>('script[data-brisk-plugin="comments"]');
@@ -51,67 +65,68 @@ interface BdDoc {
   const sdk = (window as { brisk?: Brisk }).brisk;
 
   const COLLECTION = '_plugin:comments';
+  const SEEN = '_plugin:comments:seen';
   const key = (k: string) => `brisk:comments:${SITE}:${k}`;
-  type Status = 'open' | 'resolved' | 'deleted' | 'all';
-
-  const escapeHtml = (s: string) =>
-    (s || '').replace(
-      /[&<>"]/g,
-      (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]!,
-    );
+  const recall = (k: string) => localStorage.getItem(key(k));
+  const remember = (k: string, v: string) => localStorage.setItem(key(k), v);
   const clean = (s: string, n: number) => (s || '').replace(/\s+/g, ' ').trim().slice(0, n);
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
-  function timeAgo(iso: string): string {
-    const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
-    if (Number.isNaN(s)) return '';
-    if (s < 60) return 'just now';
-    if (s < 3600) return `${Math.floor(s / 60)}m`;
-    if (s < 86400) return `${Math.floor(s / 3600)}h`;
-    return `${Math.floor(s / 86400)}d`;
-  }
-
-  // ---- local draft store ----------------------------------------------------
-  type Draft = AnchorFields & {
-    id: string;
-    text: string;
-    page: string;
-    label: string;
-    textSnippet: string;
-    html: string;
-    /** The element's data-* attributes — often the fastest grep for an agent. */
-    dataAttrs?: string;
-    createdAt: string;
-  };
+  // ---- state ----------------------------------------------------------------
   const loadDrafts = (): Draft[] => {
     try {
-      return JSON.parse(localStorage.getItem(key('drafts')) || '[]') as Draft[];
+      return JSON.parse(recall('drafts') || '[]') as Draft[];
     } catch {
       return [];
     }
   };
   let drafts = loadDrafts();
-  const saveDrafts = () => localStorage.setItem(key('drafts'), JSON.stringify(drafts));
+  const saveDrafts = () => remember('drafts', JSON.stringify(drafts));
 
-  let hidden = localStorage.getItem(key('hidden')) === '1';
-  let collapsed = localStorage.getItem(key('collapsed')) === '1';
-  let filter = (localStorage.getItem(key('filter')) as Status) || 'open';
-  /** Hides the numbered pins only — independent of collapsing the toolbar. */
-  let pinsHidden = localStorage.getItem(key('pins')) === '1';
+  let hidden = recall('hidden') === '1';
+  let collapsed = recall('collapsed') === '1';
+  /** Hides the pins only — independent of collapsing the toolbar. */
+  let pinsHidden = recall('pins') === '1';
+  const panel: PanelState = {
+    open: recall('panel') === '1',
+    scope: parseScope(recall('scope')),
+    filter: parseFilter(recall('filter')),
+    expanded: null,
+  };
+  /** The thread whose Delete (or a draft's Discard) waits for a second click. */
+  let armed: string | null = null;
+  /** The thread shown in the popover, when the panel is closed. */
+  let popThread: { id: string; since: string | undefined } | null = null;
+  /** Unsent reply and draft-edit text, by data-keep key, so a re-render keeps it. */
+  const buffers = new Map<string, string>();
 
-  // ---- published comments (brisk.db) ---------------------------------------
-  let published: BdDoc[] = [];
+  let published: StoredDoc[] = [];
+  let me = { email: '', name: '' };
+  /** My seen doc as the server last reported it, and my stamps still in flight. */
+  let serverSeen: Record<string, string> = {};
+  const pendingSeen = new Map<string, string>();
+  let seenReady = false;
+  let threads: Thread[] = [];
+  const threadById = (id: string | undefined) => threads.find((t) => t.id === id);
+
+  // ---- data -----------------------------------------------------------------
   const refreshPublished = async () => {
     if (sdk) {
       published = await sdk.db.collection(COLLECTION).list({ limit: 500, sort: '-created' });
     } else {
-      // No /brisk.js on this page: read the collection through the same route
-      // the SDK wraps, so published comments still show up.
       const res = await fetch(`/api/db/${COLLECTION}?limit=500&sort=-created`, {
         headers: { 'x-brisk-site': SITE },
       });
       if (!res.ok) return;
-      published = ((await res.json()) as { docs: BdDoc[] }).docs;
+      published = ((await res.json()) as { docs: StoredDoc[] }).docs;
     }
+    render();
+  };
+
+  const myDocId = () => seenDocId(me.email);
+  const applySeen = (doc: StoredDoc) => {
+    if (doc.id !== myDocId()) return;
+    serverSeen = { ...(doc.seen as Record<string, string> | undefined) };
     render();
   };
   if (sdk) {
@@ -129,9 +144,10 @@ interface BdDoc {
         render();
       },
     });
+    sdk.db.collection(SEEN).subscribe({ onCreate: applySeen, onUpdate: applySeen });
   }
 
-  const action = async (name: string, args: Record<string, string>): Promise<BdDoc> => {
+  const action = async (name: string, args: Record<string, string>): Promise<StoredDoc> => {
     const res = await fetch(`/api/plugins/comments/actions/${name}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -139,25 +155,52 @@ interface BdDoc {
     });
     if (!res.ok) throw new Error(`${name} failed: ${res.status}`);
     // With realtime unavailable, our own mutations won't push back — re-read.
-    if (!sdk) void refreshPublished();
-    return ((await res.json()) as { result: BdDoc }).result;
+    if (!sdk && name !== 'seen' && name !== 'unseen') void refreshPublished();
+    return ((await res.json()) as { result: StoredDoc }).result;
   };
 
-  /** What the numbering groups on: the stamped email, else the display name. */
-  const identityOf = (email: string, name: string) => (email || name).trim().toLowerCase();
-
-  // A draft has to count in the same sequence as the comments this account has
-  // already published, or publishing one renumbers it. Async — until it lands,
-  // drafts number as their own author.
-  let meKey = '';
+  // Unread needs both who I am and what I have seen; until both land nothing
+  // shows as unread, so the page doesn't flash every pin blue on load.
   void fetch('/api/me')
     .then((r) => (r.ok ? (r.json() as Promise<{ email?: string; name?: string }>) : null))
-    .then((me) => {
-      if (!me) throw new Error('/api/me refused');
-      meKey = identityOf(me.email ?? '', me.name ?? '');
+    .then(async (who) => {
+      if (!who?.email) throw new Error('/api/me refused');
+      me = { email: who.email, name: who.name ?? '' };
+      const res = await fetch(`/api/db/${SEEN}/${encodeURIComponent(myDocId())}`, {
+        headers: { 'x-brisk-site': SITE },
+      });
+      if (!res.ok && res.status !== 404) throw new Error(`seen state: ${res.status}`);
+      serverSeen = res.ok
+        ? { ...((await res.json()) as { seen?: Record<string, string> }).seen }
+        : {};
+      seenReady = true;
       render();
     })
-    .catch((err: unknown) => console.warn('[comments] identity unavailable:', err));
+    .catch((err: unknown) => console.warn('[comments] unread state unavailable:', err));
+
+  /** Stamps a thread read (an ISO time) or explicitly unread (''), shown at once. */
+  async function writeSeen(id: string, stamp: string) {
+    const t = threadById(id);
+    if (!t || t.kind === 'draft' || !seenReady) return;
+    if (pendingSeen.get(id) === stamp) return;
+    pendingSeen.set(id, stamp);
+    render();
+    try {
+      const doc = await action(stamp ? 'seen' : 'unseen', { id });
+      if (pendingSeen.get(id) === stamp) pendingSeen.delete(id);
+      applySeen(doc);
+    } catch {
+      if (pendingSeen.get(id) === stamp) pendingSeen.delete(id);
+      render();
+      toast(stamp ? 'Could not mark it read' : 'Could not mark it unread');
+    }
+  }
+  const markRead = (id: string) => void writeSeen(id, new Date().toISOString());
+  const markUnread = (id: string) => {
+    if (panel.expanded?.id === id) panel.expanded = null;
+    if (popThread?.id === id) closePop();
+    void writeSeen(id, '');
+  };
 
   // ---- element anchoring (ported from html-grab) ---------------------------
   function cssPath(el: Element): string {
@@ -193,7 +236,7 @@ interface BdDoc {
   const root = host.attachShadow({ mode: 'open' });
   // Keep widget interaction off the host page's own handlers — typing 'w' in a
   // comment must not scroll a game, arrows must not move tiles, wheel over the
-  // drawer must not feed a scroll-jack library (html-grab lesson). Bubble-phase
+  // panel must not feed a scroll-jack library (html-grab lesson). Bubble-phase
   // on the shadow root: every widget handler runs earlier (document-capture
   // onKey on the way down, per-element listeners at target), so only the leak
   // out to the page is cut. Capture-phase page listeners on document still see
@@ -201,302 +244,30 @@ interface BdDoc {
   for (const type of ['keydown', 'keypress', 'keyup', 'wheel', 'mousedown'] as const) {
     root.addEventListener(type, (e) => e.stopPropagation());
   }
-  root.innerHTML = `
-    <style>
-      :host {
-        --paper: oklch(96.5% 0.012 85);
-        --paper-raised: oklch(93.5% 0.014 85);
-        --paper-sunk: oklch(99% 0.008 85);
-        --ink: oklch(24% 0.015 75);
-        --ink-dim: oklch(48% 0.014 75);
-        --line: oklch(87% 0.013 85);
-        --accent: oklch(46% 0.19 262);
-        --accent-soft: oklch(46% 0.19 262 / 0.09);
-        --live: oklch(58% 0.15 150);
-        --warn: oklch(52% 0.17 25);
-        --ease: cubic-bezier(0.23, 1, 0.32, 1);
-        --shadow-hard: 0.4rem 0.4rem 0 var(--line);
-      }
-      @media (prefers-color-scheme: dark) {
-        :host {
-          --paper: oklch(21% 0.012 75);
-          --paper-raised: oklch(26% 0.014 75);
-          --paper-sunk: oklch(17% 0.012 75);
-          --ink: oklch(89% 0.012 85);
-          --ink-dim: oklch(62% 0.012 85);
-          --line: oklch(32% 0.012 75);
-          --accent: oklch(72% 0.13 262);
-          --accent-soft: oklch(72% 0.13 262 / 0.14);
-          --live: oklch(72% 0.14 150);
-          --warn: oklch(64% 0.16 25);
-          --shadow-hard: 0.4rem 0.4rem 0 oklch(0% 0 0 / 0.4);
-        }
-      }
-      * { box-sizing: border-box; }
-      .layer {
-        position: fixed; inset: 0; pointer-events: none;
-        font: 13px/1.5 ui-monospace, 'SF Mono', Menlo, Consolas, monospace; color: var(--ink);
-      }
-      .hi {
-        position: fixed; pointer-events: none; border: 1.5px solid var(--accent);
-        background: var(--accent-soft); border-radius: 5px; display: none;
-        /* glide between elements instead of snapping; linear because it tracks
-           the cursor, and short enough to feel attached to it */
-        transition: all 50ms linear;
-      }
-      .hi .hl {
-        position: absolute; left: -1.5px; bottom: calc(100% + 3px); max-width: 280px;
-        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 6px;
-        border-radius: 4px; background: var(--accent); color: var(--paper);
-        font-size: 11px; line-height: 17px;
-        -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
-      }
-      .hi.no-room-above .hl { bottom: auto; top: 2px; left: 2px; }
-
-      /* pins — bold ink-bordered circles with a hard offset shadow */
-      .pin {
-        position: fixed; width: 24px; height: 24px; margin: -12px 0 0 -12px; border-radius: 50%;
-        background: var(--accent); color: var(--paper); font-weight: 700; font-size: 0.72rem;
-        display: grid; place-items: center; cursor: pointer; pointer-events: auto;
-        border: 1.5px solid var(--ink); box-shadow: 0.12rem 0.12rem 0 var(--ink); user-select: none;
-        animation: pin-in 220ms var(--ease) both;
-      }
-      @keyframes pin-in { from { opacity: 0; transform: scale(0.85); } }
-      .pin:active { transform: scale(0.94); }
-      /* Status is fill + line style, not hue alone: dashed outline = draft
-         (penciled in, not yet real), solid accent = published open, solid gray
-         = resolved, red + faded = deleted. Identical fills to the sidebar
-         badges, so a pale resolved pin can't be mistaken for a draft. */
-      .pin.resolved { background: var(--ink-dim); color: var(--paper); }
-      .pin.deleted { background: var(--warn); color: var(--paper); opacity: 0.65; }
-      .pin.detached { background: var(--warn); }
-      .pin.draft { background: var(--paper); color: var(--ink); border-style: dashed; }
-
-      /* popover (compose + thread) */
-      .pop {
-        position: fixed; pointer-events: auto; width: 288px; background: var(--paper);
-        border: 1.5px solid var(--ink); border-radius: 12px; padding: 13px;
-        box-shadow: var(--shadow-hard); display: none; opacity: 0; transform: scale(0.96);
-        transform-origin: var(--po, top left);
-        transition: opacity 140ms ease-out, transform 150ms var(--ease);
-      }
-      .pop.show { display: block; }
-      .pop.in { opacity: 1; transform: scale(1); }
-      .pop textarea {
-        width: 100%; min-height: 58px; max-height: 180px; height: 58px; resize: vertical;
-        overflow-y: auto; font: inherit; font-size: 0.82rem; line-height: 1.5; color: var(--ink);
-        background: var(--paper-sunk); border: 1.5px solid var(--line); border-radius: 8px;
-        padding: 7px 8px;
-      }
-      .pop textarea:focus { outline: none; border-color: var(--accent); }
-      .row { display: flex; gap: 6px; justify-content: flex-end; margin-top: 8px; }
-
-      .chead {
-        display: flex; align-items: center; gap: 6px; font-size: 0.74rem; color: var(--ink-dim);
-        margin-bottom: 6px;
-      }
-      .chead strong { color: var(--ink); font-weight: 700; }
-      .chead .sicon { font-size: 0.8em; }
-      .who { cursor: help; text-decoration: underline dotted var(--ink-dim); text-underline-offset: 2px; }
-      .txt { font-size: 0.85rem; white-space: pre-wrap; word-break: break-word; }
-      .thread { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
-      .reply { position: relative; padding-left: 15px; }
-      .reply::before { content: '↳'; position: absolute; left: 0; top: 0; color: var(--ink-dim); }
-      .reply .txt { font-size: 0.82rem; }
-      .composebar { margin-top: 14px; padding-top: 12px; border-top: 1.5px solid var(--line); }
-      .ctx { color: var(--ink-dim); font-size: 0.72rem; margin-bottom: 6px; word-break: break-word; }
-      .quote {
-        border-left: 2px solid var(--line); padding-left: 8px; margin-bottom: 8px;
-        color: var(--ink-dim); font-size: 0.78rem; font-style: italic; word-break: break-word;
-      }
-      .quote .lost { font-style: normal; color: var(--warn); }
-      .item .quote { margin: 4px 0 0; }
-      /* translate, not transform: .pop's open/close scale rides on transform. */
-      .pop.shake { animation: pop-shake 320ms var(--ease); }
-      @keyframes pop-shake {
-        20% { translate: -6px 0; } 40% { translate: 5px 0; } 60% { translate: -3px 0; } 80% { translate: 2px 0; }
-      }
-
-      /* drawer — slides on transform only */
-      .drawer {
-        position: fixed; top: 0; right: 0; bottom: 0; width: min(360px, 92vw); pointer-events: auto;
-        display: flex; flex-direction: column; background: var(--paper);
-        border-left: 1.5px solid var(--ink); box-shadow: var(--shadow-hard);
-        transform: translateX(calc(100% + 24px)); transition: transform 260ms var(--ease);
-        will-change: transform;
-      }
-      .drawer.open { transform: translateX(0); }
-      .dhead {
-        display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 14px 14px 10px;
-      }
-      .dhead .title { font-weight: 700; flex: 1; }
-      .seg { display: inline-flex; flex-wrap: wrap; gap: 6px; flex-basis: 100%; margin-top: 4px; }
-      .list { overflow: auto; padding: 8px 12px 16px; flex: 1; }
-      /* Sticky action bar: the list scrolls, actions stay reachable. Filters
-         (view state) live at the top; verbs live down here. */
-      .dfoot {
-        display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 10px 14px;
-        border-top: 1.5px solid var(--line);
-      }
-      .dfoot .primary { margin-left: auto; }
-      .item {
-        border: 1.5px solid var(--ink); border-radius: 9px; margin: 8px 0; padding: 10px;
-        background: var(--paper-raised); cursor: pointer;
-      }
-      .item .meta { color: var(--ink-dim); font-size: 0.72rem; margin-top: 4px; }
-      .item .txt { display: flex; align-items: center; gap: 6px; }
-      .item .num {
-        flex: none; display: inline-grid; place-items: center; min-width: 17px; height: 17px;
-        padding: 0 3px; border-radius: 999px; color: var(--paper);
-        font-size: 0.62rem; font-weight: 700;
-        -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
-      }
-      /* Draft badge matches the draft pin: dashed outline, no fill. */
-      .item .num.draft { background: none; color: var(--ink); border: 1.5px dashed var(--ink); }
-      .empty { color: var(--ink-dim); padding: 14px; font-size: 0.8rem; }
-
-      /* buttons */
-      .btn {
-        font: inherit; font-size: 0.8rem; font-weight: 600; cursor: pointer; pointer-events: auto;
-        background: var(--paper); color: var(--ink); border: 1.5px solid var(--ink); border-radius: 8px;
-        padding: 4px 9px; transition: transform 110ms var(--ease);
-      }
-      .btn:active { transform: scale(0.97); }
-      .btn.primary { background: var(--accent); color: var(--paper); }
-      .seg .btn.on { background: var(--ink); color: var(--paper); }
-      .btn.danger, .mi.danger { background: var(--warn); color: var(--paper); }
-      .mi.danger:hover { background: var(--warn); }
-
-      /* fab — icon toolbar. Collapse morphs it into the bubble: the pill and the
-         bubble share the bottom-right anchor and a 43px height, the pill scales
-         toward the bubble's center while the bubble scales up in its place —
-         transform/opacity only, one shared duration so they read as one shape. */
-      .fab {
-        position: fixed; right: 16px; bottom: 16px; pointer-events: auto; display: flex;
-        align-items: center; gap: 8px; background: var(--paper); border: 1.5px solid var(--ink);
-        border-radius: 999px; padding: 5px 13px; box-shadow: var(--shadow-hard);
-        transform-origin: calc(100% - 21.5px) center;
-        transition: transform 260ms var(--ease), opacity 160ms ease-out, visibility 0s;
-      }
-      .layer.collapsed .fab {
-        opacity: 0; transform: scale(0.45); visibility: hidden; pointer-events: none;
-        transition: transform 260ms var(--ease), opacity 160ms ease-out, visibility 0s 260ms;
-      }
-      /* The drawer owns the bottom-right corner while open (its action footer
-         lives there) — the toolbar slides out of its way, sharing the drawer's
-         duration and ease so the two read as one movement. */
-      .layer.drawer-open .fab { transform: translateX(calc(-1 * min(360px, 92vw))); }
-      @media (max-width: 560px) {
-        /* No room beside a 92vw drawer — fade the toolbar out instead. */
-        .layer.drawer-open .fab {
-          opacity: 0; transform: scale(0.45); visibility: hidden; pointer-events: none;
-          transition: transform 260ms var(--ease), opacity 160ms ease-out, visibility 0s 260ms;
-        }
-      }
-      .fab .btn { width: 30px; height: 30px; padding: 0; display: grid; place-items: center; font-size: 0.95rem; line-height: 1; }
-      .fab [data-act='pick'] { font-size: 1.25rem; }
-      .drawer [data-close],
-      .drawer [data-pins] { width: 28px; height: 28px; padding: 0; display: grid; place-items: center; font-size: 1rem; line-height: 1; }
-      .drawer [data-pins] svg { display: block; }
-      .btn[data-tip] { position: relative; }
-      /* Positioned by layout, not translateX(-50%) — a transform leaves
-         odd-width tips on a half-pixel and the text rasterizes soft. Right-
-         aligned to the button: every tip-bearing control hugs the right edge of
-         the screen (toolbar, bubble, drawer head), so tips grow leftward and
-         never overflow the viewport. Whole-px font size + antialiased because
-         tiny light-on-dark text fringes under subpixel AA. */
-      .btn[data-tip]::after,
-      .nub[data-tip]::after {
-        content: attr(data-tip); position: absolute; bottom: calc(100% + 8px);
-        right: 0; width: max-content;
-        transform: translateY(4px); background: var(--ink); color: var(--paper);
-        font-size: 11px; white-space: nowrap; padding: 3px 7px; border-radius: 6px; opacity: 0;
-        -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
-        pointer-events: none; transition: opacity 120ms ease, transform 120ms var(--ease); z-index: 5;
-      }
-      .btn[data-tip]:hover::after,
-      .nub[data-tip]:hover::after { opacity: 1; transform: translateY(0); }
-      /* The drawer head sits at the top of the screen — its tips open downward.
-         (Head only: the action footer's tips keep opening upward.) */
-      .dhead .btn[data-tip]::after { bottom: auto; top: calc(100% + 8px); transform: translateY(-4px); }
-      .dhead .btn[data-tip]:hover::after { transform: translateY(0); }
-      /* Footer buttons hug the drawer's left edge — their tips grow rightward. */
-      .dfoot .btn[data-tip]::after { right: auto; left: 0; }
-
-      /* minimized bubble — the always-visible way back; diameter == pill height */
-      .nub {
-        position: fixed; right: 16px; bottom: 16px; pointer-events: none; display: grid;
-        width: 43px; height: 43px; border-radius: 50%; place-items: center; cursor: pointer;
-        background: var(--accent); color: var(--paper); font: inherit; font-weight: 700;
-        font-size: 0.95rem; border: 1.5px solid var(--ink); box-shadow: var(--shadow-hard);
-        -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
-        opacity: 0; transform: scale(0.45); visibility: hidden;
-        transition: transform 240ms var(--ease), opacity 160ms ease-out, visibility 0s 240ms;
-      }
-      .layer.collapsed .nub {
-        opacity: 1; transform: scale(1); visibility: visible; pointer-events: auto;
-        transition: transform 240ms var(--ease), opacity 160ms ease-out, visibility 0s;
-      }
-      .layer.collapsed .nub:active { transform: scale(0.96); }
-      .layer.collapsed #pins { display: none; }
-
-      /* right-click command menu — anchored above the toolbar/bubble corner */
-      .menu {
-        position: fixed; right: 16px; bottom: 68px; min-width: 190px; pointer-events: auto;
-        background: var(--paper); border: 1.5px solid var(--ink); border-radius: 10px;
-        padding: 5px; box-shadow: var(--shadow-hard); display: none; opacity: 0;
-        transform: scale(0.96); transform-origin: bottom right;
-        transition: opacity 120ms ease-out, transform 140ms var(--ease); z-index: 6;
-      }
-      .menu.show { display: block; }
-      .menu.in { opacity: 1; transform: scale(1); }
-      .menu .mhead {
-        color: var(--ink-dim); font-size: 0.7rem; padding: 4px 9px 6px;
-        border-bottom: 1.5px solid var(--line); margin-bottom: 4px; white-space: nowrap;
-      }
-      .menu .mi {
-        display: flex; width: 100%; align-items: center; gap: 8px; padding: 6px 9px; border: 0;
-        background: none; color: var(--ink); font: inherit; font-size: 0.8rem; text-align: left;
-        border-radius: 6px; cursor: pointer;
-      }
-      .menu .mi:hover { background: var(--accent-soft); }
-      .menu .mi svg { flex: none; }
-
-      .toast {
-        position: fixed; left: 0; right: 0; margin: 0 auto; width: max-content; bottom: 74px;
-        transform: translateY(6px);
-        background: var(--ink); color: var(--paper); font-size: 0.78rem; padding: 7px 13px;
-        border-radius: 999px; pointer-events: none; opacity: 0;
-        -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
-        transition: opacity 180ms ease-out, transform 180ms var(--ease);
-      }
-      .toast.show { opacity: 1; transform: translateY(0); }
-
-      @media (prefers-reduced-motion: reduce) {
-        *, .drawer, .pop, .pin, .toast { transition: none !important; animation: none !important; }
-        .pop.shake { border-color: var(--warn); }
-      }
-    </style>
+  root.innerHTML = `<style>${WIDGET_CSS}</style>
     <div class="layer">
       <div class="hi" id="hi"><span class="hl" id="hl"></span></div>
       <div id="pins"></div>
-      <div class="pop" id="pop"></div>
-      <aside class="drawer" id="drawer"></aside>
-      <div class="fab" id="fab">
-        <button class="btn" data-act="pick" data-tip="New comment">✎</button>
-        <button class="btn" data-act="log" data-tip="Comment log">☰</button>
-        <button class="btn" data-act="min" data-tip="Minimize">–</button>
+      <div class="pop" id="pop" role="dialog" aria-label="Comment"></div>
+      <aside class="panel" id="panel" aria-label="Comments"></aside>
+      <div class="fab" id="fab" role="toolbar" aria-label="Comments">
+        <button class="ib" data-act="pick" aria-label="New comment" data-tip="New comment">${icon('comment')}</button>
+        <button class="ib" data-act="panel" aria-label="Comments panel" data-tip="Comments">${icon('panel')}<span class="badge" id="badge" hidden></span></button>
+        <span class="sep" aria-hidden="true"></span>
+        <button class="ib" data-act="min" aria-label="Minimize" data-tip="Minimize">${icon('minimize')}</button>
       </div>
-      <button class="nub" id="nub" data-tip="Comments">✎</button>
-      <div class="menu" id="menu"></div>
-      <div class="toast" id="toast"></div>
+      <button class="nub" id="nub" data-act="restore" aria-label="Show comments" data-tip="Comments"></button>
+      <div class="menu" id="menu" role="menu"></div>
+      <div class="toast" id="toast" role="status"></div>
     </div>`;
   const $ = (id: string) => root.getElementById(id)!;
   const hi = $('hi'),
     hiLabel = $('hl'),
     pins = $('pins'),
     pop = $('pop'),
-    drawer = $('drawer'),
+    panelEl = $('panel'),
+    fab = $('fab'),
+    badge = $('badge'),
     nub = $('nub'),
     menu = $('menu'),
     toastEl = $('toast');
@@ -509,95 +280,14 @@ interface BdDoc {
     // One timer, reset per toast — an earlier toast's timer must not cut a
     // later message (e.g. the publish-all summary) short.
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1600);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1800);
   };
 
-  /** Two-click destructive confirm: first click arms the button ("confirm?"),
-   *  the second fires; hesitation disarms after 2s. Used where the data is
-   *  unrecoverable — draft deletion lives only in this browser. */
-  const armConfirm = (btn: HTMLElement, label: string, fire: () => void) => {
-    btn.onclick = () => {
-      if (btn.dataset.armed) {
-        fire();
-        return;
-      }
-      btn.dataset.armed = '1';
-      btn.textContent = 'confirm?';
-      btn.classList.add('danger');
-      setTimeout(() => {
-        delete btn.dataset.armed;
-        btn.textContent = label;
-        btn.classList.remove('danger');
-      }, 2000);
-    };
-  };
-
-  const statusIcon = (s: Exclude<Status, 'all'>) => {
-    const g = { open: '●', resolved: '✓', deleted: '✕' }[s];
-    const col = { open: 'var(--live)', resolved: 'var(--ink-dim)', deleted: 'var(--warn)' }[s];
-    return `<span class="sicon" title="${s}" style="color:${col}">${g}</span>`;
-  };
-
-  // ---- unified comment view -------------------------------------------------
-  interface View {
-    id: string;
-    kind: 'draft' | 'published';
-    text: string;
-    page: string;
-    anchor: Anchor;
-    label: string;
-    status: Exclude<Status, 'all'>;
-    author: string;
-    email: string;
-    /** Identity the numbering counts under — see identityOf. */
-    authorKey: string;
-    at: string;
-    /** Raw ISO timestamp — the number assignment sorts on it. */
-    created: string;
-    parentId: string;
-  }
-  const statusOfDoc = (d: BdDoc): Exclude<Status, 'all'> =>
-    d.deleted ? 'deleted' : d.resolved ? 'resolved' : 'open';
-  const views = (): View[] => [
-    ...drafts.map((d) => ({
-      id: d.id,
-      kind: 'draft' as const,
-      text: d.text,
-      page: d.page,
-      anchor: anchorOfRecord(d),
-      label: d.label,
-      status: 'open' as const,
-      author: 'you',
-      email: 'draft — not published',
-      authorKey: meKey,
-      at: timeAgo(d.createdAt),
-      created: d.createdAt,
-      parentId: '',
-    })),
-    ...published.map((d) => ({
-      id: d.id,
-      kind: 'published' as const,
-      text: String(d.text ?? ''),
-      page: String(d.page ?? ''),
-      anchor: anchorOfRecord(d),
-      label: String(d.label ?? ''),
-      status: statusOfDoc(d),
-      author: String(d.createdBy ?? ''),
-      email: String(d.createdByEmail ?? ''),
-      authorKey: identityOf(String(d.createdByEmail ?? ''), String(d.createdBy ?? '')),
-      at: timeAgo(d.createdAt),
-      created: d.createdAt,
-      parentId: String(d.parentId ?? ''),
-    })),
-  ];
   // Page identity includes the query string — ?tab=billing is a different page
   // to comment on. Comments saved before this (or via the CLI) may carry a bare
   // pathname, so those still match anywhere on the path.
   const pageId = () => location.pathname + location.search;
-  const here = (v: View) => v.page === pageId() || v.page === location.pathname;
-  const shown = (v: View) => (filter === 'all' ? true : v.status === filter);
-  const whoTag = (author: string, email: string) =>
-    `<strong class="who" title="${escapeHtml(email || author)}">${escapeHtml(author)}</strong>`;
+  const here = (page: string) => page === pageId() || page === location.pathname;
 
   // ---- pick mode ------------------------------------------------------------
   let picking = false;
@@ -605,9 +295,10 @@ interface BdDoc {
     picking = on;
     snapshot = null;
     hi.style.display = 'none';
-    const b = $('fab').querySelector<HTMLElement>('[data-act="pick"]')!;
+    const b = fab.querySelector<HTMLElement>('[data-act="pick"]')!;
     b.classList.toggle('on', on);
     b.setAttribute('data-tip', on ? 'Cancel (Esc)' : 'New comment');
+    if (panel.open) renderPanel();
   };
   const elAt = (x: number, y: number): Element | null => {
     const el = document.elementFromPoint(x, y);
@@ -766,11 +457,22 @@ interface BdDoc {
       elementAt(el, e.clientX, e.clientY);
     startCompose(hit, e.clientX, e.clientY);
   };
+  /** The Comment control: a selection made first gets its comment at once. */
+  const pickOrQuote = () => {
+    const range = picking ? null : liveRange();
+    const end = range && caretAfter(range);
+    const hit = range && end && quoteAt(range, end.x, end.y);
+    if (hit && end) startCompose(hit, end.x, end.y);
+    else setPick(!picking);
+  };
 
+  // ---- popover --------------------------------------------------------------
   function placePop(x: number, y: number) {
-    const w = 288,
-      px = Math.min(Math.max(8, x), innerWidth - w - 8),
-      py = Math.min(Math.max(8, y + 12), innerHeight - 260);
+    const w = 360;
+    const right = innerWidth - (docked ? PANEL_W : 0);
+    const px = Math.min(Math.max(8, x), right - w - 8);
+    const h = pop.offsetHeight || 220;
+    const py = Math.max(8, Math.min(y + 12, innerHeight - h - 8));
     pop.style.left = `${px}px`;
     pop.style.top = `${py}px`;
     pop.style.setProperty('--po', `${x - px}px ${y - py}px`);
@@ -787,15 +489,16 @@ interface BdDoc {
     pop.classList.add('show');
     requestAnimationFrame(() => pop.classList.add('in'));
   }
-  const closePop = () => {
+  function closePop() {
+    const wasShowing = pop.classList.contains('show');
     pop.classList.remove('in');
-    popCloseTimer = setTimeout(() => pop.classList.remove('show'), 150);
-    if (focusId || pendingRange) {
-      focusId = '';
-      pendingRange = null;
-      paint();
-    }
-  };
+    popCloseTimer = setTimeout(() => pop.classList.remove('show'), 160);
+    const hadState = !!popThread || !!pendingRange;
+    popThread = null;
+    pendingRange = null;
+    if (armed && !panel.open) armed = null;
+    if (wasShowing && hadState) render();
+  }
   const popHasUnsavedText = () =>
     pop.classList.contains('in') &&
     [...pop.querySelectorAll('textarea')].some(
@@ -815,23 +518,20 @@ interface BdDoc {
       nudge();
       return false;
     }
+    popThread = null;
     pop.innerHTML = html;
+    pop.classList.add('show');
     placePop(x, y);
     openPop();
     return true;
   }
-  const ellipsis = (s: string, n: number) => {
-    const cs = [...s];
-    return cs.length > n ? `${cs.slice(0, n).join('')}…` : s;
-  };
-  const quoteHtml = (q: Quote, lost: boolean, max: number) =>
-    `<div class="quote">“${escapeHtml(ellipsis(q.exact, max))}”${lost ? '<span class="lost"> · no longer on the page</span>' : ''}</div>`;
+
   function openCompose({ el, anchor, range }: Capture, x: number, y: number): boolean {
     const q = anchor.kind === 'text' ? anchor.quote : null;
     const opened = showPop(
-      `<div class="ctx">draft · ${escapeHtml(labelOf(el))}</div>${q ? quoteHtml(q, false, 200) : ''}
-      <textarea placeholder="what about ${q ? 'these words' : 'this element'}? (saved locally)"></textarea>
-      <div class="row"><button class="btn" data-cancel>cancel</button><button class="btn primary" data-save>save draft</button></div>`,
+      `<div class="compose"><p class="ctx">New comment · ${q ? 'on the selected words' : escapeHtml(labelOf(el))}</p>${q ? quoteHtml(q, false, 200) : ''}
+      <div class="field"><textarea placeholder="Add a comment…" aria-label="Comment"></textarea></div>
+      <div class="bar"><span class="note">Saved in your browser</span><button class="btn sm ghost" data-cancel>Cancel</button><button class="btn sm pri" data-save>Save draft</button></div></div>`,
       x,
       y,
     );
@@ -843,7 +543,6 @@ interface BdDoc {
     }
     const ta = pop.querySelector('textarea')!;
     ta.focus();
-    ta.addEventListener('input', () => autogrow(ta));
     pop.querySelector<HTMLElement>('[data-cancel]')!.onclick = closePop;
     pop.querySelector<HTMLElement>('[data-save]')!.onclick = () => {
       const text = ta.value.trim();
@@ -871,8 +570,8 @@ interface BdDoc {
       saveDrafts();
       closePop();
       render();
-      toast('draft saved — pick the next element · Esc exits');
-      // Stay in comment mode: keep picking until Esc (or the ✎ toggle) ends it.
+      toast('Draft saved. Click the next spot, or Esc to stop.');
+      // Stay in comment mode: keep picking until Esc (or the toggle) ends it.
       setPick(true);
     };
     ta.onkeydown = (ev) => {
@@ -883,123 +582,116 @@ interface BdDoc {
     return true;
   }
 
-  // ---- thread popover -------------------------------------------------------
-  function openThread(v: View, x: number, y: number) {
-    const head = `<div class="chead">${statusIcon(v.status)}${whoTag(v.author, v.email)}<span>· ${v.at}</span></div>`;
-    const quote = v.anchor.kind === 'text' ? quoteHtml(v.anchor.quote, quoteLost(v), 280) : '';
-    const body = `<div class="txt">${escapeHtml(v.text)}</div>`;
-    const replies = published
-      .filter((p) => String(p.parentId ?? '') === v.id && !p.deleted)
-      .map(
-        (r) =>
-          `<div class="reply"><div class="chead">${whoTag(String(r.createdBy ?? ''), String(r.createdByEmail ?? ''))}<span>· ${timeAgo(r.createdAt)}</span></div><div class="txt">${escapeHtml(String(r.text ?? ''))}</div></div>`,
-      )
-      .join('');
-    const threadHtml = replies ? `<div class="thread">${replies}</div>` : '';
-    const actions =
-      v.kind === 'draft'
-        ? `<div class="composebar"><div class="row"><button class="btn" data-del>delete draft</button><button class="btn" data-edit>edit</button><button class="btn primary" data-publish>publish</button></div></div>`
-        : `<div class="composebar"><textarea placeholder="reply…"></textarea><div class="row"><button class="btn" data-del>delete</button><button class="btn" data-res>${v.status === 'resolved' ? 'reopen' : 'resolve'}</button><button class="btn primary" data-reply>reply</button></div></div>`;
-    if (!showPop(`${head}${quote}${body}${threadHtml}${actions}`, x, y)) return;
-    focusId = v.id;
-    paint();
-    const ta = pop.querySelector('textarea');
-    if (ta) {
-      ta.addEventListener('input', () => autogrow(ta));
+  const threadOpts = (t: Thread, surface: 'panel' | 'pop') => ({
+    open: surface === 'pop' || panel.expanded?.id === t.id,
+    armed: armed === t.id,
+    since: surface === 'pop' ? popThread?.since : panel.expanded?.since,
+    lost: anchorLost(t.id),
+    me: me.email,
+    surface,
+  });
+
+  function openThreadPop(t: Thread, at: DOMRect) {
+    if (!showPop(threadHtml(t, threadOpts(t, 'pop')), at.right + 4, at.top - 8)) return;
+    popThread = { id: t.id, since: t.seenAt };
+    armed = null;
+    if (t.unread) markRead(t.id);
+    render();
+  }
+
+  // ---- keeping typed text across re-renders ---------------------------------
+  /** Re-renders replace the markup under the cursor; text, focus and scroll
+   *  survive through `buffers` and the data-keep keys. */
+  function redraw(container: HTMLElement, html: string) {
+    const list = container.querySelector('.list');
+    const scroll = list?.scrollTop ?? 0;
+    const active = root.activeElement as HTMLTextAreaElement | null;
+    const focusKey = active && container.contains(active) ? active.dataset.keep : undefined;
+    const sel = focusKey ? [active!.selectionStart, active!.selectionEnd] : null;
+    container.innerHTML = html;
+    const newList = container.querySelector('.list');
+    if (newList) newList.scrollTop = scroll;
+    for (const ta of container.querySelectorAll<HTMLTextAreaElement>('textarea[data-keep]')) {
+      const draft = drafts.find((d) => d.id === ta.dataset.draft);
+      if (draft) ta.defaultValue = draft.text;
+      ta.value = buffers.get(ta.dataset.keep!) ?? draft?.text ?? '';
+      const send = ta.parentElement?.querySelector<HTMLButtonElement>('.send');
+      if (send) send.disabled = !ta.value.trim();
       autogrow(ta);
-      // Same keyboard affordances as compose: Cmd/Ctrl+Enter sends, Esc closes.
-      ta.onkeydown = (ev) => {
-        if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey))
-          pop.querySelector<HTMLElement>('[data-reply]')!.click();
-        if (ev.key === 'Escape') closePop();
-      };
-    }
-    if (v.kind === 'draft') {
-      // Unrecoverable (local-only), so deletion takes an armed second click.
-      armConfirm(pop.querySelector<HTMLElement>('[data-del]')!, 'delete draft', () => {
-        drafts = drafts.filter((d) => d.id !== v.id);
-        saveDrafts();
-        closePop();
-        render();
-        toast('draft deleted');
-      });
-      pop.querySelector<HTMLElement>('[data-edit]')!.onclick = () => openDraftEdit(v.id, x, y);
-      pop.querySelector<HTMLElement>('[data-publish]')!.onclick = () => void publishDraft(v.id);
-    } else {
-      pop.querySelector<HTMLElement>('[data-reply]')!.onclick = async () => {
-        const text = ta!.value.trim();
-        if (!text) return;
-        try {
-          await action('reply', { id: v.id, text });
-          closePop();
-          toast('replied');
-        } catch {
-          toast('reply failed');
-        }
-      };
-      pop.querySelector<HTMLElement>('[data-res]')!.onclick = async () => {
-        try {
-          await action(v.status === 'resolved' ? 'reopen' : 'resolve', { id: v.id });
-          closePop();
-        } catch {
-          toast('failed');
-        }
-      };
-      pop.querySelector<HTMLElement>('[data-del]')!.onclick = async () => {
-        try {
-          await action('delete', { id: v.id });
-          closePop();
-        } catch {
-          toast('failed');
-        }
-      };
+      if (ta.dataset.keep === focusKey) {
+        ta.focus();
+        if (sel) ta.setSelectionRange(sel[0], sel[1]);
+      }
     }
   }
 
-  // Editing gets its own clean compose-shaped view, never an input spliced
-  // into the thread bubble — that's the state tangle html-grab hit and undid.
-  function openDraftEdit(id: string, x: number, y: number) {
-    const d = drafts.find((it) => it.id === id);
-    if (!d) return;
-    const a = anchorOfRecord(d);
-    const opened = showPop(
-      `<div class="ctx">editing draft · ${escapeHtml(d.label)}</div>${a.kind === 'text' ? quoteHtml(a.quote, false, 200) : ''}
-      <textarea></textarea>
-      <div class="row"><button class="btn" data-cancel>cancel</button><button class="btn primary" data-save>save</button></div>`,
-      x,
-      y,
-    );
-    if (!opened) return;
-    const ta = pop.querySelector('textarea')!;
-    ta.defaultValue = d.text;
-    ta.focus();
-    autogrow(ta);
-    ta.addEventListener('input', () => autogrow(ta));
-    pop.querySelector<HTMLElement>('[data-cancel]')!.onclick = closePop;
-    pop.querySelector<HTMLElement>('[data-save]')!.onclick = () => {
-      const text = ta.value.trim();
-      if (!text) {
-        ta.focus();
-        return;
-      }
-      d.text = text;
-      saveDrafts();
-      closePop();
+  // ---- actions ----------------------------------------------------------------
+  async function sendReply(id: string) {
+    const k = `reply:${id}`;
+    const text = (buffers.get(k) ?? '').trim();
+    if (!text) return;
+    try {
+      await action('reply', { id, text });
+      buffers.delete(k);
       render();
-      toast('draft updated');
-    };
-    ta.onkeydown = (ev) => {
-      if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey))
-        pop.querySelector<HTMLElement>('[data-save]')!.click();
-      if (ev.key === 'Escape') closePop();
-    };
+    } catch {
+      toast('Reply failed. Your text is still here.');
+    }
+  }
+
+  async function setStatus(id: string, to: 'resolve' | 'reopen') {
+    try {
+      await action(to, { id });
+      if (to === 'resolve' && panel.expanded?.id === id) panel.expanded = null;
+      toast(to === 'resolve' ? 'Resolved' : 'Reopened');
+      render();
+    } catch {
+      toast(to === 'resolve' ? 'Could not resolve it' : 'Could not reopen it');
+    }
+  }
+
+  async function deleteThread(id: string) {
+    armed = null;
+    try {
+      await action('delete', { id });
+      if (panel.expanded?.id === id) panel.expanded = null;
+      if (popThread?.id === id) closePop();
+      toast('Deleted');
+      render();
+    } catch {
+      toast('Could not delete it');
+      render();
+    }
+  }
+
+  function discardDraft(id: string) {
+    drafts = drafts.filter((d) => d.id !== id);
+    saveDrafts();
+    buffers.delete(`draft:${id}`);
+    armed = null;
+    if (panel.expanded?.id === id) panel.expanded = null;
+    if (popThread?.id === id) closePop();
+    render();
+    toast('Draft discarded');
+  }
+
+  function saveDraftEdit(id: string): boolean {
+    const d = drafts.find((x) => x.id === id);
+    const text = buffers.get(`draft:${id}`)?.trim();
+    if (!d || text === undefined) return !!d;
+    if (!text) return false;
+    d.text = text;
+    saveDrafts();
+    buffers.delete(`draft:${id}`);
+    return true;
   }
 
   async function publishDraft(id: string): Promise<boolean> {
+    if (!saveDraftEdit(id)) return false;
     const d = drafts.find((x) => x.id === id);
     if (!d) return true; // already gone — nothing left to publish
     try {
-      await action('create', {
+      const doc = await action('create', {
         text: d.text,
         page: d.page,
         ...anchorFields(anchorOfRecord(d)),
@@ -1009,12 +701,13 @@ interface BdDoc {
       });
       drafts = drafts.filter((x) => x.id !== id);
       saveDrafts();
-      closePop();
-      toast('published');
+      if (panel.expanded?.id === id)
+        panel.expanded = { id: doc.id, since: undefined, wasUnread: false };
+      if (popThread?.id === id) closePop();
       render();
       return true;
     } catch {
-      toast('publish failed — draft kept');
+      toast('Publish failed. The draft is kept.');
       return false;
     }
   }
@@ -1025,8 +718,8 @@ interface BdDoc {
     for (const d of [...drafts]) (await publishDraft(d.id)) ? ok++ : failed++;
     toast(
       failed
-        ? `published ${ok}/${ok + failed} — failed drafts kept`
-        : `published ${ok} draft${ok === 1 ? '' : 's'}`,
+        ? `Published ${ok} of ${ok + failed}. The failed drafts are kept.`
+        : `Published ${ok} draft${ok === 1 ? '' : 's'}`,
     );
   }
 
@@ -1046,12 +739,11 @@ interface BdDoc {
    *  twin of `brisk plugin comments export`. */
   function commentsMarkdown(): string {
     let out = `# comments on ${SITE}\n`;
-    for (const v of views().filter((x) => !x.parentId)) {
-      out += `\n## [${v.kind === 'draft' ? 'draft' : v.status}] ${v.text}\n`;
-      out += `- by: ${v.author}\n- page: \`${v.page}\`\n`;
-      for (const line of anchorLines(v.anchor)) out += `${line}\n`;
-      for (const r of published.filter((p) => String(p.parentId ?? '') === v.id && !p.deleted))
-        out += `- reply (${String(r.createdBy ?? '')}): ${String(r.text ?? '')}\n`;
+    for (const t of threads) {
+      out += `\n## [${t.kind === 'draft' ? 'draft' : t.status}] ${t.text}\n`;
+      out += `- by: ${t.author}\n- page: \`${t.page}\`\n`;
+      for (const line of anchorLines(t.anchor)) out += `${line}\n`;
+      for (const r of t.replies) out += `- reply (${r.author}): ${r.text}\n`;
     }
     return out;
   }
@@ -1067,14 +759,14 @@ interface BdDoc {
   }
   const clip = (name: string, text: string) =>
     navigator.clipboard.writeText(text).then(
-      () => toast('copied — paste to your agent'),
+      () => toast('Copied. Paste it to your agent.'),
       () => {
         download(name, text);
-        toast('clipboard blocked — downloaded instead');
+        toast('Clipboard blocked, so it downloaded instead');
       },
     );
 
-  // ---- render ---------------------------------------------------------------
+  // ---- pins -----------------------------------------------------------------
   const findTarget = (selector: string): Element | null => {
     try {
       return selector ? document.querySelector(selector) : null;
@@ -1108,14 +800,16 @@ interface BdDoc {
     | { kind: 'text'; range: Range; at: XY }
     | { kind: 'element'; at: XY };
   interface Slot {
-    view: View;
-    pin: HTMLElement;
+    thread: Thread;
+    pin: HTMLButtonElement;
     placement: Placement;
   }
-  const slots: Slot[] = [];
-  const quoteLost = (v: View) => {
-    const p = slots.find((s) => s.view.id === v.id)?.placement.kind;
-    return p === 'element' || p === 'detached';
+  let slots = new Map<string, Slot>();
+  /** Its words (or its element) are gone from the page; it pins where it can. */
+  const anchorLost = (id: string) => {
+    const s = slots.get(id);
+    const p = s?.placement.kind;
+    return p === 'detached' || (p === 'element' && s!.thread.anchor.kind === 'text');
   };
 
   interface TextCache {
@@ -1190,62 +884,118 @@ interface BdDoc {
     return c.range;
   }
 
-  function place(v: View): Placement {
-    const a = v.anchor;
+  /** Where the pin's tip goes: just past a quote's last word, the clicked spot,
+   *  or an element's top-right corner. */
+  function place(t: Thread): Placement {
+    const a = t.anchor;
     if (a.kind === 'page') return { kind: 'page' };
     const el = findTarget(a.selector);
     if (!el) {
-      textCache.delete(v.id);
+      textCache.delete(t.id);
       return { kind: 'detached' };
     }
     if (!onScreen(el)) return { kind: 'hidden' };
     if (a.kind === 'text') {
-      const range = quoteRange(v.id, el, a.quote);
+      const range = quoteRange(t.id, el, a.quote);
       if (range) {
         const end = caretAfter(range);
         return end
-          ? { kind: 'text', range, at: { x: end.x + 10, y: end.y - 4 } }
+          ? { kind: 'text', range, at: { x: end.x - 4, y: end.y + 3 } }
           : { kind: 'hidden' };
       }
     }
     const r = el.getBoundingClientRect();
     const at = a.point
       ? { x: r.left + a.point.x * r.width, y: r.top + a.point.y * r.height }
-      : { x: r.left + 10, y: r.top + 10 };
+      : { x: r.right - 11, y: r.top + 11 };
     return { kind: 'element', at };
   }
   const applyPin = (pin: HTMLElement, p: Placement) => {
     pin.classList.toggle('detached', p.kind === 'detached');
     pin.style.display = p.kind === 'hidden' ? 'none' : '';
-    const at = p.kind === 'text' || p.kind === 'element' ? p.at : { x: 22, y: 22 };
+    const at = p.kind === 'text' || p.kind === 'element' ? p.at : { x: 12, y: 34 };
     pin.style.left = `${at.x}px`;
     pin.style.top = `${at.y}px`;
   };
 
-  // ::highlight() only styles ranges in the tree that owns their nodes, so the
-  // sheet is adopted by the document, not the shadow root.
-  const HL_CSS = `
-    ::highlight(brisk-comment) { background-color: oklch(46% 0.19 262 / 0.16); }
-    ::highlight(brisk-comment-focus) {
-      background-color: oklch(46% 0.19 262 / 0.3); text-decoration: underline 2px oklch(46% 0.19 262);
-    }
-    @media (prefers-color-scheme: dark) {
-      ::highlight(brisk-comment) { background-color: oklch(72% 0.13 262 / 0.22); }
-      ::highlight(brisk-comment-focus) {
-        background-color: oklch(72% 0.13 262 / 0.38); text-decoration: underline 2px oklch(72% 0.13 262);
+  const focusedId = () => popThread?.id ?? (panel.open ? panel.expanded?.id : undefined) ?? '';
+
+  /** Reuses each thread's pin across renders so only new pins animate in. */
+  function renderPins() {
+    const next = new Map<string, Slot>();
+    for (const t of threads) {
+      if (!here(t.page) || !pinShown(t, panel.filter)) continue;
+      let s = slots.get(t.id);
+      if (!s) {
+        const pin = document.createElement('button');
+        pin.dataset.act = 'pin';
+        pin.dataset.id = t.id;
+        pins.appendChild(pin);
+        s = { thread: t, pin, placement: { kind: 'hidden' } };
       }
-    }`;
+      s.thread = t;
+      const { pin } = s;
+      pin.className = [
+        'pin',
+        t.kind === 'draft' ? 'draft' : t.status !== 'open' ? t.status : t.unread ? '' : 'read',
+        t.id === focusedId() ? 'on' : '',
+        pin.classList.contains('flash') ? 'flash' : '',
+      ]
+        .filter(Boolean)
+        .join(' ');
+      pin.textContent = String(t.num);
+      pin.title = `${t.author} · ${clean(t.text, 60)}`;
+      pin.setAttribute(
+        'aria-label',
+        `${t.unread ? 'Unread comment' : 'Comment'} ${t.num} by ${t.author}`,
+      );
+      s.placement = place(t);
+      applyPin(pin, s.placement);
+      next.set(t.id, s);
+    }
+    for (const [id, s] of slots) if (!next.has(id)) s.pin.remove();
+    slots = next;
+    for (const id of textCache.keys()) if (!slots.has(id)) textCache.delete(id);
+    pins.style.display = pinsHidden ? 'none' : '';
+  }
+
+  const flash = (id: string) => {
+    const pin = slots.get(id)?.pin;
+    if (!pin || reducedMotion.matches) return;
+    pin.classList.remove('flash');
+    void pin.offsetWidth;
+    pin.classList.add('flash');
+    setTimeout(() => pin.classList.remove('flash'), 1900);
+  };
+
+  /** Scrolls the page to a thread's spot when it is off screen, then flashes its pin. */
+  function revealOnPage(t: Thread) {
+    const s = slots.get(t.id);
+    const target = t.anchor.kind === 'page' ? null : findTarget(t.anchor.selector);
+    const box =
+      s?.placement.kind === 'text'
+        ? s.placement.range.getBoundingClientRect()
+        : target?.getBoundingClientRect();
+    const off = box && (box.bottom < 0 || box.top > innerHeight);
+    if (off && target)
+      target.scrollIntoView({
+        block: 'center',
+        behavior: reducedMotion.matches ? 'auto' : 'smooth',
+      });
+    setTimeout(() => flash(t.id), off ? 450 : 0);
+  }
+
+  // ---- highlights -----------------------------------------------------------
   let marks: { all: Highlight; focus: Highlight; sheet: CSSStyleSheet } | null = null;
   try {
     if (CSS.highlights && typeof Highlight === 'function') {
       const sheet = new CSSStyleSheet();
-      sheet.replaceSync(HL_CSS);
+      sheet.replaceSync(HIGHLIGHT_CSS);
       marks = { all: new Highlight(), focus: new Highlight(), sheet };
     }
   } catch (err) {
     console.warn('[comments] highlights unavailable:', err);
   }
-  let focusId = '';
   let pendingRange: Range | null = null;
 
   function paint() {
@@ -1263,9 +1013,10 @@ interface BdDoc {
       if (hidden || collapsed) return;
       if (pendingRange) focus.add(pendingRange);
       if (pinsHidden) return;
-      for (const s of slots) {
-        if (s.placement.kind !== 'text' || s.view.status !== 'open') continue;
-        (s.view.id === focusId ? focus : all).add(s.placement.range);
+      const focused = focusedId();
+      for (const s of slots.values()) {
+        if (s.placement.kind !== 'text' || s.thread.status !== 'open') continue;
+        (s.thread.id === focused ? focus : all).add(s.placement.range);
       }
     } catch (err) {
       marks = null;
@@ -1273,48 +1024,26 @@ interface BdDoc {
     }
   }
 
-  /** Full rebuild — call when the data changes, not on scroll (rebuilding per
-   *  scroll event restarts the pin-in animation and churns the DOM). */
-  /** Comment number by id: chronological within each author, so yours count 1,
-   *  2, 3 whatever anyone else leaves alongside them. Numbers repeat across
-   *  authors — the pin's tooltip and the panel row say whose a comment is. */
-  let nums = new Map<string, number>();
-  const numberPerAuthor = (all: View[]): Map<string, number> => {
-    const next = new Map<string, number>();
-    const out = new Map<string, number>();
-    for (const v of all
-      .filter((v) => !v.parentId)
-      .sort((a, b) => (a.created < b.created ? -1 : 1))) {
-      const n = (next.get(v.authorKey) ?? 0) + 1;
-      next.set(v.authorKey, n);
-      out.set(v.id, n);
-    }
-    return out;
-  };
+  // ---- render -----------------------------------------------------------------
   function render() {
-    nums = numberPerAuthor(views());
-    pins.innerHTML = '';
-    slots.length = 0;
-    for (const v of views().filter((v) => here(v) && !v.parentId && shown(v))) {
-      const pin = document.createElement('div');
-      pin.className = `pin ${v.kind === 'draft' ? 'draft' : v.status}`;
-      pin.title = `${v.author} · ${clean(v.text, 60)}`;
-      pin.textContent = String(nums.get(v.id) ?? '');
-      const slot: Slot = { view: v, pin, placement: place(v) };
-      applyPin(pin, slot.placement);
-      pin.onclick = (e) => {
-        e.stopPropagation();
-        openThread(v, e.clientX, e.clientY);
-      };
-      pins.appendChild(pin);
-      slots.push(slot);
-    }
-    const live = new Set(slots.map((s) => s.view.id));
-    for (const id of textCache.keys()) if (!live.has(id)) textCache.delete(id);
-    pins.style.display = pinsHidden ? 'none' : '';
+    const seen = { ...serverSeen, ...Object.fromEntries(pendingSeen) };
+    threads = buildThreads({ drafts, docs: published, seen, me: me.email });
+    if (!seenReady) for (const t of threads) t.unread = false;
+    if (panel.expanded && !threadById(panel.expanded.id)) panel.expanded = null;
+    renderPins();
     paint();
-    if (drawer.classList.contains('open')) renderPanel();
-    updateNub();
+    if (panel.open) renderPanel();
+    if (popThread) {
+      const t = threadById(popThread.id);
+      if (t) redraw(pop, threadHtml(t, threadOpts(t, 'pop')));
+      else closePop();
+    }
+    updateBadges();
+    // A thread open in front of me stays read as replies arrive.
+    for (const id of [popThread?.id, panel.open ? panel.expanded?.id : undefined]) {
+      const t = threadById(id);
+      if (t?.unread && !pendingSeen.has(t.id)) markRead(t.id);
+    }
   }
 
   /** Scroll/resize path: move the existing pins, coalesced to one rAF. */
@@ -1324,213 +1053,338 @@ interface BdDoc {
     repositionQueued = true;
     requestAnimationFrame(() => {
       repositionQueued = false;
-      for (const s of slots) {
-        s.placement = place(s.view);
+      for (const s of slots.values()) {
+        s.placement = place(s.thread);
         applyPin(s.pin, s.placement);
       }
       paint();
     });
   };
 
-  /* Badge fill mirrors the pins (drafts are the dashed-outline .draft class,
-     handled in markup): accent = open, dim = resolved, red = deleted. */
-  const badgeColor = (v: View) =>
-    v.status === 'resolved'
-      ? 'var(--ink-dim)'
-      : v.status === 'deleted'
-        ? 'var(--warn)'
-        : 'var(--accent)';
-
-  const EYE = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.6"/></svg>`;
-  const EYE_OFF = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.6"/><line x1="4" y1="20" x2="20" y2="4"/></svg>`;
-
+  // ---- panel ------------------------------------------------------------------
   function renderPanel() {
-    const chips = (['open', 'resolved', 'deleted', 'all'] as Status[])
-      .map((s) => `<button class="btn ${s === filter ? 'on' : ''}" data-f="${s}">${s}</button>`)
-      .join('');
-    const rows = views()
-      .filter((v) => !v.parentId && shown(v))
-      .map(
-        (v) =>
-          `<div class="item" data-id="${escapeHtml(v.id)}" data-kind="${v.kind}"><div class="txt">${v.kind === 'draft' ? `<span class="num draft">${nums.get(v.id) ?? ''}</span>` : `<span class="num" style="background:${badgeColor(v)}">${nums.get(v.id) ?? ''}</span>`}<span>${escapeHtml(v.text.slice(0, 90))}</span></div>${v.anchor.kind === 'text' ? quoteHtml(v.anchor.quote, quoteLost(v), 80) : ''}<div class="meta">${whoTag(v.author, v.email)} · ${v.kind === 'draft' ? 'draft' : v.status} · ${escapeHtml(v.page)}</div></div>`,
-      )
-      .join('');
-    const drafts0 = drafts.length;
-    drawer.innerHTML = `<div class="dhead">
-        <span class="title">Comments</span>
-        <button class="btn" data-pins aria-label="toggle numbers" data-tip="${pinsHidden ? 'show numbers' : 'hide numbers'}">${pinsHidden ? EYE_OFF : EYE}</button>
-        <button class="btn" data-close aria-label="close">✕</button>
-        <div class="seg">${chips}</div>
-      </div>
-      <div class="list">${rows || `<div class="empty">no ${filter} comments</div>`}</div>
-      <div class="dfoot"><button class="btn" data-copyall data-tip="everything as markdown">copy all</button>${drafts0 ? `<button class="btn" data-copy data-tip="your unpublished drafts as markdown">copy ${drafts0} draft${drafts0 === 1 ? '' : 's'}</button><button class="btn primary" data-puball>publish all</button>` : ''}</div>`;
-    drawer.querySelector<HTMLElement>('[data-close]')!.onclick = toggleDrawer;
-    drawer.querySelectorAll<HTMLElement>('[data-f]').forEach((b) => {
-      b.onclick = () => {
-        filter = b.dataset.f as Status;
-        localStorage.setItem(key('filter'), filter);
-        render();
-      };
-    });
-    // Pin visibility only — the toolbar keeps its own minimize/hide controls.
-    drawer.querySelector<HTMLElement>('[data-pins]')!.onclick = () => {
-      pinsHidden = !pinsHidden;
-      localStorage.setItem(key('pins'), pinsHidden ? '1' : '0');
-      render();
-    };
-    drawer.querySelector<HTMLElement>('[data-copyall]')!.onclick = () =>
-      void clip(`comments-${SITE}.md`, commentsMarkdown());
-    const copy = drawer.querySelector<HTMLElement>('[data-copy]');
-    if (copy) copy.onclick = () => void clip(`comment-drafts-${SITE}.md`, draftsMarkdown());
-    const puball = drawer.querySelector<HTMLElement>('[data-puball]');
-    if (puball) puball.onclick = () => void publishAll();
-    drawer.querySelectorAll<HTMLElement>('.item').forEach((item) => {
-      item.onclick = () => {
-        const v = views().find((x) => x.id === item.dataset.id && x.kind === item.dataset.kind);
-        if (!v) return;
-        const target = v.anchor.kind === 'page' ? null : findTarget(v.anchor.selector);
-        target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        const r = target?.getBoundingClientRect();
-        openThread(v, r?.left ?? innerWidth / 2, r?.top ?? innerHeight / 2);
-      };
-    });
+    const view = panelView(threads, panel, here);
+    redraw(
+      panelEl,
+      panelHtml(view, panel, { site: SITE, picking, thread: (t) => threadOpts(t, 'panel') }),
+    );
+  }
+  const rowOf = (id: string) =>
+    panelEl.querySelector<HTMLElement>(`.th[data-id="${CSS.escape(id)}"]`);
+
+  function setPanelOpen(open: boolean) {
+    if (open && popThread) {
+      const t = threadById(popThread.id);
+      if (t) panel.expanded = { id: t.id, since: popThread.since, wasUnread: false };
+      closePop();
+    }
+    panel.open = open;
+    remember('panel', open ? '1' : '0');
+    if (!open) {
+      panel.expanded = null;
+      armed = null;
+    }
+    panelEl.classList.toggle('open', open);
+    layer.classList.toggle('panel-open', open);
+    applyDock();
+    render();
+    if (open)
+      panelEl.querySelector<HTMLElement>('[data-act="close"]')?.focus({ preventScroll: true });
   }
 
-  let drawerOpen = false;
-  function toggleDrawer() {
-    drawerOpen = !drawerOpen;
-    renderPanel();
-    drawer.classList.toggle('open', drawerOpen);
-    // The toolbar yields the bottom-right corner to the drawer's action footer.
-    layer.classList.toggle('drawer-open', drawerOpen);
+  function setFilter(f: Filter) {
+    panel.filter = f;
+    remember('filter', f);
+    armed = null;
+    render();
   }
+
+  /** Opens a thread in place; the list keeps its position while it is open. */
+  function expand(id: string) {
+    const t = threadById(id);
+    if (!t) return;
+    if (!matches(t, panel.filter, null)) setFilter(t.status);
+    if (panel.scope === 'page' && !here(t.page)) {
+      panel.scope = 'site';
+      remember('scope', 'site');
+    }
+    panel.expanded = { id, since: t.seenAt, wasUnread: t.unread };
+    armed = null;
+    if (t.unread) markRead(id);
+    render();
+    rowOf(id)?.scrollIntoView({ block: 'nearest' });
+  }
+  const collapse = () => {
+    panel.expanded = null;
+    armed = null;
+    render();
+  };
+
+  // ---- docking ----------------------------------------------------------------
+  const docked = false;
+  function applyDock() {
+    scheduleReposition();
+  }
+
+  // ---- menus ------------------------------------------------------------------
+  let menuOpen: { items: () => MenuItem[]; head?: () => string } | null = null;
+  let menuArmed = '';
+  function closeMenu() {
+    if (!menuOpen) return;
+    menuOpen = null;
+    menuArmed = '';
+    menu.classList.remove('in');
+    setTimeout(() => !menuOpen && menu.classList.remove('show'), 140);
+  }
+  function drawMenu() {
+    if (menuOpen) menu.innerHTML = menuHtml(menuOpen.items(), menuOpen.head?.());
+  }
+  function openMenu(items: () => MenuItem[], from: HTMLElement, head?: () => string) {
+    menuOpen = { items, head };
+    menuArmed = '';
+    drawMenu();
+    const r = from.getBoundingClientRect();
+    const above = r.top > innerHeight / 2;
+    Object.assign(menu.style, {
+      right: `${Math.max(8, innerWidth - r.right)}px`,
+      top: above ? 'auto' : `${r.bottom + 4}px`,
+      bottom: above ? `${innerHeight - r.top + 8}px` : 'auto',
+    });
+    menu.style.setProperty('--mo', above ? 'bottom right' : 'top right');
+    menu.classList.add('show');
+    requestAnimationFrame(() => menu.classList.add('in'));
+  }
+  const toggleMenu = (items: () => MenuItem[], from: HTMLElement, head?: () => string) =>
+    menuOpen ? closeMenu() : openMenu(items, from, head);
+
+  const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
+  const commandItems = (fromPanel: boolean) => (): MenuItem[] => {
+    const n = drafts.length;
+    return [
+      ...(fromPanel
+        ? []
+        : ([
+            { act: 'pick', label: 'New comment', icon: 'comment' },
+            { act: 'panel', label: panel.open ? 'Close comments' : 'Open comments', icon: 'panel' },
+            'sep',
+          ] as MenuItem[])),
+      { act: 'copy-all', label: 'Copy all as Markdown', icon: 'copy' },
+      ...(n
+        ? ([
+            { act: 'copy-drafts', label: `Copy ${plural(n, 'draft')}`, icon: 'copy' },
+            { act: 'publish-all', label: `Publish ${plural(n, 'draft')}`, icon: 'publish' },
+            {
+              act: 'discard-drafts',
+              label:
+                menuArmed === 'discard-drafts'
+                  ? `Click again to discard ${plural(n, 'draft')}`
+                  : `Discard ${plural(n, 'draft')}`,
+              icon: 'trash',
+              armed: menuArmed === 'discard-drafts',
+            },
+          ] as MenuItem[])
+        : []),
+      'sep',
+      pinsHidden
+        ? { act: 'toggle-pins', label: 'Show pins', icon: 'eye' }
+        : { act: 'toggle-pins', label: 'Hide pins', icon: 'eyeOff' },
+      ...(fromPanel ? [] : ([{ act: 'min', label: 'Minimize', icon: 'minimize' }] as MenuItem[])),
+      { act: 'hide', label: 'Hide until Shift+C', icon: 'hide' },
+    ];
+  };
+  const commandHead = () => {
+    const open = threads.filter((t) => t.status === 'open').length;
+    const unread = threads.filter((t) => t.unread).length;
+    return `${SITE} · ${open} open · ${unread} unread · ${plural(drafts.length, 'draft')}`;
+  };
+  const statusItems = (): MenuItem[] => {
+    const counts = panelView(threads, panel, here).filterCounts;
+    return (['resolved', 'deleted'] as const).map((f) => ({
+      act: 'filter',
+      v: f,
+      label: f === 'resolved' ? 'Resolved' : 'Deleted',
+      icon: f === 'resolved' ? 'check' : 'trash',
+      k: String(counts[f]),
+      on: panel.filter === f,
+    }));
+  };
 
   // ---- minimize / hide / restore --------------------------------------------
   // Minimize collapses to a small bubble that's always visible — click it to
   // reopen. Shift+C fully hides everything (bubble included) for clean shots.
-  function updateNub() {
-    const open = views().filter((v) => !v.parentId && v.status === 'open').length;
-    nub.textContent = open > 0 ? String(open) : '✎';
-    nub.setAttribute(
-      'data-tip',
-      open > 0 ? `${open} open comment${open === 1 ? '' : 's'}` : 'Comments',
-    );
+  function updateBadges() {
+    const unread = threads.filter((t) => t.unread && here(t.page)).length;
+    badge.hidden = unread === 0;
+    badge.textContent = String(unread);
+    nub.classList.toggle('has', unread > 0);
+    nub.innerHTML = unread > 0 ? String(unread) : icon('comment');
+    nub.setAttribute('data-tip', unread > 0 ? `${plural(unread, 'unread comment')}` : 'Comments');
+  }
+  function setCollapsed(on: boolean) {
+    collapsed = on;
+    remember('collapsed', on ? '1' : '0');
+    applyCollapsed();
   }
   function applyCollapsed() {
     layer.classList.toggle('collapsed', collapsed);
     if (collapsed) {
       closePop();
-      if (drawerOpen) toggleDrawer();
+      if (panel.open) setPanelOpen(false);
     }
-    updateNub();
+    applyDock();
     paint();
   }
   function applyHidden() {
     host.style.display = hidden ? 'none' : '';
+    applyDock();
     paint();
   }
-  const fab = $('fab');
-  const pickBtn = fab.querySelector<HTMLElement>('[data-act="pick"]')!;
-  // Pressing ✎ must not collapse a selection made first: comment on it at once.
-  pickBtn.addEventListener('mousedown', (e) => e.preventDefault());
-  pickBtn.onclick = () => {
-    const range = picking ? null : liveRange();
-    const end = range && caretAfter(range);
-    const hit = range && end && quoteAt(range, end.x, end.y);
-    if (hit && end) startCompose(hit, end.x, end.y);
-    else setPick(!picking);
-  };
-  fab.querySelector<HTMLElement>('[data-act="log"]')!.onclick = toggleDrawer;
-  fab.querySelector<HTMLElement>('[data-act="min"]')!.onclick = () => {
-    collapsed = true;
-    localStorage.setItem(key('collapsed'), '1');
-    applyCollapsed();
-  };
-  nub.onclick = () => {
-    collapsed = false;
-    localStorage.setItem(key('collapsed'), '0');
-    applyCollapsed();
+  const togglePins = () => {
+    pinsHidden = !pinsHidden;
+    remember('pins', pinsHidden ? '1' : '0');
+    render();
   };
 
-  // ---- right-click command menu ---------------------------------------------
-  let menuOpen = false;
-  function closeMenu() {
-    if (!menuOpen) return;
-    menuOpen = false;
-    menu.classList.remove('in');
-    setTimeout(() => menu.classList.remove('show'), 140);
-  }
-  function openMenu() {
-    const openN = views().filter((v) => !v.parentId && v.status === 'open').length;
-    const n = drafts.length;
-    const ds = `${n} draft${n === 1 ? '' : 's'}`;
-    menu.innerHTML = [
-      `<div class="mhead">${escapeHtml(SITE)} · ${openN} open · ${ds}</div>`,
-      `<button class="mi" data-m="pick">✎ new comment</button>`,
-      `<button class="mi" data-m="copyall">⧉ copy all</button>`,
-      ...(n
-        ? [
-            `<button class="mi" data-m="copydrafts">⧉ copy ${ds}</button>`,
-            `<button class="mi" data-m="publish">↑ publish ${ds}</button>`,
-            `<button class="mi" data-m="delall">⌫ delete ${ds}</button>`,
-          ]
-        : []),
-      `<button class="mi" data-m="pins">${pinsHidden ? `${EYE_OFF} show numbers` : `${EYE} hide numbers`}</button>`,
-      `<button class="mi" data-m="min">– minimize</button>`,
-      `<button class="mi" data-m="hide">✕ hide until Shift+C</button>`,
-    ].join('');
-    menu.classList.add('show');
-    requestAnimationFrame(() => menu.classList.add('in'));
-    menuOpen = true;
-    menu.querySelectorAll<HTMLElement>('.mi').forEach((b) => {
-      if (b.dataset.m === 'delall') {
-        // Armed confirm: the first click flips the item to "confirm?" and keeps
-        // the menu open; only the second click deletes.
-        armConfirm(b, `⌫ delete ${ds}`, () => {
-          drafts = [];
-          saveDrafts();
-          closeMenu();
-          render();
-          toast('drafts deleted');
-        });
+  // ---- commands ---------------------------------------------------------------
+  // Every control in the widget names one of these in data-act; one delegated
+  // listener runs them, so the panel and popover markup stay plain strings.
+  const idOf = (el: HTMLElement) => el.closest<HTMLElement>('[data-id]')?.dataset.id ?? '';
+  const commands: Record<string, (el: HTMLElement) => void> = {
+    pin: (el) => {
+      const t = threadById(idOf(el));
+      if (!t) return;
+      if (panel.open) expand(t.id);
+      else openThreadPop(t, el.getBoundingClientRect());
+    },
+    expand: (el) => {
+      const t = threadById(idOf(el));
+      if (!t) return;
+      if (t.page && !here(t.page)) {
+        remember('goto', t.id);
+        location.assign(t.page);
         return;
       }
-      b.onclick = () => {
-        closeMenu();
-        const m = b.dataset.m;
-        if (m === 'pick') setPick(true);
-        else if (m === 'copyall') void clip(`comments-${SITE}.md`, commentsMarkdown());
-        else if (m === 'copydrafts') void clip(`comment-drafts-${SITE}.md`, draftsMarkdown());
-        else if (m === 'publish') void publishAll();
-        else if (m === 'pins') {
-          pinsHidden = !pinsHidden;
-          localStorage.setItem(key('pins'), pinsHidden ? '1' : '0');
-          render();
-        } else if (m === 'min') {
-          collapsed = true;
-          localStorage.setItem(key('collapsed'), '1');
-          applyCollapsed();
-        } else if (m === 'hide') {
-          hidden = true;
-          localStorage.setItem(key('hidden'), '1');
-          applyHidden();
-        }
-      };
-    });
-  }
+      expand(t.id);
+      revealOnPage(t);
+    },
+    collapse,
+    scope: (el) => {
+      panel.scope = parseScope(el.dataset.v ?? null);
+      remember('scope', panel.scope);
+      panel.expanded = null;
+      render();
+    },
+    filter: (el) => setFilter(parseFilter(el.dataset.v ?? null)),
+    'status-menu': (el) => toggleMenu(statusItems, el),
+    'more-menu': (el) => toggleMenu(commandItems(true), el, commandHead),
+    'goto-page': (el) => location.assign(el.dataset.v ?? '/'),
+    close: () => setPanelOpen(false),
+    panel: () => setPanelOpen(!panel.open),
+    pick: pickOrQuote,
+    min: () => setCollapsed(true),
+    restore: () => setCollapsed(false),
+    resolve: (el) => void setStatus(idOf(el), 'resolve'),
+    reopen: (el) => void setStatus(idOf(el), 'reopen'),
+    read: (el) => markRead(idOf(el)),
+    unread: (el) => markUnread(idOf(el)),
+    delete: (el) => {
+      armed = idOf(el);
+      render();
+      (popThread ? pop : panelEl)
+        .querySelector<HTMLElement>('[data-act="confirm-delete"]')
+        ?.focus();
+    },
+    disarm: () => {
+      armed = null;
+      render();
+    },
+    'confirm-delete': (el) => {
+      const t = threadById(idOf(el));
+      if (t?.kind === 'draft') discardDraft(t.id);
+      else if (t) void deleteThread(t.id);
+    },
+    reply: (el) => void sendReply(idOf(el)),
+    publish: (el) => {
+      const id = idOf(el);
+      void publishDraft(id).then((ok) => ok && toast('Published'));
+    },
+    'save-draft': (el) => {
+      if (saveDraftEdit(idOf(el))) {
+        toast('Draft saved');
+        render();
+      }
+    },
+    'copy-all': () => void clip(`comments-${SITE}.md`, commentsMarkdown()),
+    'copy-drafts': () => void clip(`comment-drafts-${SITE}.md`, draftsMarkdown()),
+    'publish-all': () => void publishAll(),
+    'discard-drafts': () => {
+      drafts = [];
+      saveDrafts();
+      render();
+      toast('Drafts discarded');
+    },
+    'toggle-pins': togglePins,
+    hide: () => {
+      hidden = true;
+      remember('hidden', '1');
+      applyHidden();
+    },
+  };
+  /** Menu commands that take a second click before they run. */
+  const ARMED_IN_MENU = new Set(['discard-drafts']);
+
+  root.addEventListener('click', (e) => {
+    const el = (e.target as Element).closest<HTMLElement>('[data-act]');
+    if (!el || (el as HTMLButtonElement).disabled) return;
+    const act = el.dataset.act!;
+    const run = commands[act];
+    if (!run) return;
+    if (el.closest('.menu')) {
+      if (ARMED_IN_MENU.has(act) && menuArmed !== act) {
+        menuArmed = act;
+        drawMenu();
+        return;
+      }
+      closeMenu();
+    } else if (act !== 'status-menu' && act !== 'more-menu') closeMenu();
+    run(el);
+  });
+  // Pressing Comment must not collapse a selection made first.
+  root.addEventListener('mousedown', (e) => {
+    if ((e.target as Element).closest('[data-act="pick"]')) e.preventDefault();
+    if (menuOpen && !e.composedPath().includes(menu)) closeMenu();
+  });
+  root.addEventListener('input', (e) => {
+    const ta = e.target;
+    if (!(ta instanceof HTMLTextAreaElement)) return;
+    autogrow(ta);
+    if (ta.dataset.keep) buffers.set(ta.dataset.keep, ta.value);
+    const send = ta.parentElement?.querySelector<HTMLButtonElement>('.send');
+    if (send) send.disabled = !ta.value.trim();
+  });
+  root.addEventListener('keydown', (ev) => {
+    const e = ev as KeyboardEvent;
+    const t = e.target as HTMLElement;
+    if ((e.key === 'Enter' || e.key === ' ') && t.matches('article[data-act]')) {
+      e.preventDefault();
+      commands.expand!(t);
+      return;
+    }
+    if (!(t instanceof HTMLTextAreaElement) || !t.dataset.keep) return;
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      if (t.dataset.reply) void sendReply(t.dataset.reply);
+      else if (t.dataset.draft) commands['save-draft']!(t);
+    }
+    if (e.key === 'Escape' && !popThread) t.blur();
+  });
   for (const el of [fab, nub]) {
     el.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      if (menuOpen) closeMenu();
-      else openMenu();
+      toggleMenu(commandItems(false), el, commandHead);
     });
   }
-  // Interactions elsewhere in the widget dismiss the menu (page-side clicks are
-  // handled by the document-level closer — they never cross the shadow root).
-  root.addEventListener('mousedown', (e) => {
-    if (menuOpen && !e.composedPath().includes(menu)) closeMenu();
-  });
 
   // The hotkey survives hiding: it toggles the whole host in and out.
   const onKey = (e: KeyboardEvent) => {
@@ -1554,7 +1408,7 @@ interface BdDoc {
       !typing
     ) {
       hidden = !hidden;
-      localStorage.setItem(key('hidden'), hidden ? '1' : '0');
+      remember('hidden', hidden ? '1' : '0');
       applyHidden();
     }
   };
@@ -1604,8 +1458,19 @@ interface BdDoc {
   addEventListener('popstate', () => render());
 
   // ---- boot -----------------------------------------------------------------
+  // A row on another page navigates here with its id, to open once data lands.
+  const goto = recall('goto');
+  if (goto) localStorage.removeItem(key('goto'));
+  panelEl.classList.toggle('open', panel.open);
+  layer.classList.toggle('panel-open', panel.open);
   applyHidden();
   applyCollapsed();
   render();
-  void refreshPublished();
+  void refreshPublished().then(() => {
+    const t = threadById(goto ?? '');
+    if (!t) return;
+    if (!panel.open) setPanelOpen(true);
+    expand(t.id);
+    revealOnPage(t);
+  });
 })();

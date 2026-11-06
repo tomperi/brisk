@@ -1,0 +1,258 @@
+/* HTML for the panel, its thread rows, and the menus, as pure functions of the
+ * thread model. Every control names its command in data-act; widget.ts owns
+ * the one delegated listener that runs them. */
+import type { Point, Quote } from './anchor';
+import { icon, type IconName } from './icons';
+import {
+  isNewReply,
+  type Filter,
+  type PanelState,
+  type PanelView,
+  type Scope,
+  type Thread,
+} from './threads';
+
+export const escapeHtml = (s: string) =>
+  (s || '').replace(
+    /[&<>"']/g,
+    (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!,
+  );
+
+const ellipsis = (s: string, n: number) => {
+  const cs = [...s];
+  return cs.length > n ? `${cs.slice(0, n).join('').trimEnd()}…` : s;
+};
+
+const MONTHS = 'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ');
+export function timeAgo(iso: string, now = Date.now()): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '';
+  const s = Math.max(0, (now - t) / 1000);
+  if (s < 60) return 'Just now';
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  if (s < 2 * 86400) return 'Yesterday';
+  if (s < 7 * 86400) return `${Math.floor(s / 86400)}d`;
+  const d = new Date(t);
+  return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+}
+
+function initials(name: string): string {
+  const words = name
+    .replace(/@.*/, '')
+    .split(/[\s._-]+/)
+    .filter(Boolean);
+  const letters = words.length > 1 ? words[0]![0]! + words[1]![0]! : (words[0] ?? '?')[0]!;
+  return letters.toUpperCase();
+}
+
+const HUES = [262, 292, 330, 25, 55, 150, 185, 220];
+function hueOf(key: string): number {
+  let h = 0;
+  for (const ch of key.toLowerCase()) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return HUES[h % HUES.length]!;
+}
+
+const avatar = (name: string, key: string, draft = false) =>
+  `<span class="av${draft ? ' draft' : ''}" style="--h:${hueOf(key || name)}" aria-hidden="true">${escapeHtml(initials(name))}</span>`;
+
+export const quoteHtml = (q: Quote, lost: boolean, max: number) =>
+  `<p class="q"><span>“${escapeHtml(ellipsis(q.exact, max))}”</span>${lost ? '<span class="lost"> · no longer on the page</span>' : ''}</p>`;
+
+function spotWords(p: Point): string {
+  const x = p.x < 0.34 ? 'left' : p.x > 0.66 ? 'right' : '';
+  const y = p.y < 0.34 ? 'top' : p.y > 0.66 ? 'bottom' : '';
+  return [y, x].filter(Boolean).join(' ') || 'center';
+}
+
+/** "Enterprise Custom pricing… · top right": the element's own words, else its tag. */
+function spotLine(t: Thread, lost: boolean): string {
+  const a = t.anchor;
+  if (a.kind === 'page') return `<p class="spot">${icon('page')}<span>Whole page</span></p>`;
+  if (lost)
+    return `<p class="spot">${icon('target')}<span>Element is no longer on the page</span></p>`;
+  const words = t.textSnippet.trim();
+  const name = words ? ellipsis(words, 30) : t.label || a.selector;
+  const where = a.point ? ` · ${spotWords(a.point)}` : '';
+  return `<p class="spot">${icon('target')}<span>${escapeHtml(name)}${where}</span></p>`;
+}
+
+const anchorHtml = (t: Thread, lost: boolean, open: boolean) =>
+  t.anchor.kind === 'text' ? quoteHtml(t.anchor.quote, lost, open ? 280 : 90) : spotLine(t, lost);
+
+const btn = (act: string, label: string, opts: { icon?: IconName; cls?: string } = {}) =>
+  `<button class="btn sm ${opts.cls ?? ''}" data-act="${act}">${opts.icon ? icon(opts.icon) : ''}${label}</button>`;
+const ib = (act: string, label: string, name: IconName) =>
+  `<button class="ib" data-act="${act}" aria-label="${label}" data-tip="${label}">${icon(name)}</button>`;
+
+export interface ThreadOpts {
+  open: boolean;
+  /** Its Delete (or a draft's Discard) waits for a second click. */
+  armed: boolean;
+  since: string | undefined;
+  lost: boolean;
+  me: string;
+  surface: 'panel' | 'pop';
+}
+
+function quickTools(t: Thread): string {
+  if (t.kind === 'draft') return `<div class="tools">${ib('publish', 'Publish', 'publish')}</div>`;
+  if (t.status === 'deleted') return '';
+  const status =
+    t.status === 'resolved' ? ib('reopen', 'Reopen', 'reopen') : ib('resolve', 'Resolve', 'check');
+  const read = t.unread ? ib('read', 'Mark read', 'read') : ib('unread', 'Mark unread', 'unread');
+  return `<div class="tools">${status}${read}</div>`;
+}
+
+function statusTag(t: Thread): string {
+  if (t.kind === 'draft') return '<span class="tag">Draft</span>';
+  if (t.status === 'resolved') return '<span class="tag st">Resolved</span>';
+  if (t.status === 'deleted') return '<span class="tag st">Deleted</span>';
+  return '';
+}
+
+function collapsedMeta(t: Thread): string {
+  if (t.kind === 'draft')
+    return `<div class="meta"><span>Only in your browser, not published</span>${btn('publish', 'Publish', { cls: 'pri' })}</div>`;
+  const parts: string[] = [];
+  const n = t.replies.length;
+  if (n) parts.push(`${icon('reply')}<span>${n} ${n === 1 ? 'reply' : 'replies'}</span>`);
+  if (t.statusBy)
+    parts.push(
+      `<span>${t.status === 'deleted' ? 'Deleted' : 'Resolved'} by ${escapeHtml(t.statusBy)}</span>`,
+    );
+  return parts.length
+    ? `<p class="meta">${parts.join('<span aria-hidden="true">·</span>')}</p>`
+    : '';
+}
+
+function repliesHtml(t: Thread, o: ThreadOpts): string {
+  return t.replies
+    .map(
+      (r) =>
+        `<div class="rp"><div class="row">${avatar(r.author || r.email, r.email)}<span class="nm" title="${escapeHtml(r.email)}">${escapeHtml(r.author || r.email)}</span><span class="tm">${timeAgo(r.createdAt)}</span>${isNewReply(r, o.since, o.me) ? '<span class="new">New</span>' : ''}</div><p class="tx">${escapeHtml(r.text)}</p></div>`,
+    )
+    .join('');
+}
+
+function openFooter(t: Thread, o: ThreadOpts): string {
+  if (o.armed) {
+    const ask =
+      t.kind === 'draft'
+        ? 'Discard this draft? It was never published.'
+        : 'Delete this thread for everyone?';
+    return `<div class="confirm" role="alert"><span>${ask}</span>${btn('disarm', 'Cancel', { cls: 'ghost' })}${btn('confirm-delete', t.kind === 'draft' ? 'Discard' : 'Delete', { cls: 'danger' })}</div>`;
+  }
+  if (t.kind === 'draft')
+    return `<div class="acts">${btn('publish', 'Publish', { cls: 'pri', icon: 'publish' })}${btn('save-draft', 'Save')}${btn('delete', 'Discard', { cls: 'ghost push', icon: 'trash' })}</div>`;
+  if (t.status === 'deleted') return '';
+  const reply = `<div class="inp"><textarea rows="1" placeholder="Reply…" aria-label="Reply" data-reply="${escapeHtml(t.id)}" data-keep="reply:${escapeHtml(t.id)}"></textarea><button class="send" data-act="reply" aria-label="Send reply" title="Send (⌘↵)" disabled>${icon('send')}</button></div>`;
+  const status =
+    t.status === 'resolved'
+      ? btn('reopen', 'Reopen', { icon: 'reopen' })
+      : btn('resolve', 'Resolve', { icon: 'check' });
+  return `${reply}<div class="acts">${status}${btn('unread', 'Mark unread', { cls: 'ghost', icon: 'unread' })}${btn('delete', 'Delete', { cls: 'ghost push', icon: 'trash' })}</div>`;
+}
+
+export function threadHtml(t: Thread, o: ThreadOpts): string {
+  const id = escapeHtml(t.id);
+  const cls = [
+    'th',
+    t.unread ? '' : 'read',
+    o.open ? 'open' : '',
+    t.kind === 'draft' ? 'draft' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const toggle = o.surface === 'pop' ? '' : o.open ? ' data-act="collapse" title="Collapse"' : '';
+  const rowAttrs =
+    o.surface === 'panel' && !o.open
+      ? ` data-act="expand" tabindex="0" role="button" aria-expanded="false" aria-label="${escapeHtml(`${t.unread ? 'Unread. ' : ''}${t.author}: ${ellipsis(t.text, 80)}`)}"`
+      : '';
+  const head = `<div class="row"${toggle}>${avatar(t.author || t.email, t.email, t.kind === 'draft')}<span class="nm" title="${escapeHtml(t.email)}">${escapeHtml(t.author || t.email)}</span>${statusTag(t)}<span class="tm">${timeAgo(t.createdAt)}</span><span class="num">#${t.num}</span>${t.unread ? '<span class="dot" role="img" aria-label="Unread"></span>' : ''}</div>`;
+  const text =
+    t.kind === 'draft' && o.open
+      ? `<div class="field"><textarea data-draft="${id}" data-keep="draft:${id}" aria-label="Edit draft"></textarea></div>`
+      : `<p class="tx">${escapeHtml(t.text)}</p>`;
+  const body = `<div class="bd">${anchorHtml(t, o.lost, o.open)}${text}${o.open ? '' : collapsedMeta(t)}</div>`;
+  const tools = o.surface === 'panel' && !o.open ? quickTools(t) : '';
+  const open = o.open ? `${repliesHtml(t, o)}${openFooter(t, o)}` : '';
+  return `<article class="${cls}" data-id="${id}"${rowAttrs}>${tools}${head}${body}${open}</article>`;
+}
+
+const FILTER_LABEL: Record<Filter, string> = {
+  unread: 'Unread',
+  open: 'Open',
+  resolved: 'Resolved',
+  deleted: 'Deleted',
+};
+
+function emptyHtml(filter: Filter, scope: Scope): string {
+  const where = scope === 'page' ? 'on this page' : 'on this site';
+  const [title, body, name]: [string, string, IconName] =
+    filter === 'unread'
+      ? ["You're all caught up", `No unread threads ${where}.`, 'check']
+      : filter === 'open'
+        ? ['No open comments', 'Select text or click anything on the page to leave one.', 'comment']
+        : [`No ${filter} comments`, `Nothing ${filter} ${where} yet.`, 'comment'];
+  return `<div class="empty"><div class="ring">${icon(name)}</div><strong>${title}</strong>${body}</div>`;
+}
+
+export function panelHtml(
+  view: PanelView,
+  state: PanelState,
+  ctx: { site: string; picking: boolean; thread: (t: Thread) => ThreadOpts },
+): string {
+  const tab = (s: Scope, label: string) =>
+    `<button class="tab${state.scope === s ? ' on' : ''}" role="tab" aria-selected="${state.scope === s}" data-act="scope" data-v="${s}">${label} <span class="n">${view.scopeCounts[s]}</span></button>`;
+  const chip = (f: Filter) =>
+    `<button class="chip${state.filter === f ? ' on' : ''}" aria-pressed="${state.filter === f}" data-act="filter" data-v="${f}">${FILTER_LABEL[f]} <span class="n">${view.filterCounts[f]}</span></button>`;
+  const archived: Filter = state.filter === 'deleted' ? 'deleted' : 'resolved';
+  const statOn = state.filter === 'resolved' || state.filter === 'deleted';
+  const list = view.groups.length
+    ? view.groups
+        .map((g) => {
+          const head =
+            state.scope === 'page'
+              ? ''
+              : g.here
+                ? `<div class="grp">${icon('page')}<span>This page</span></div>`
+                : g.page
+                  ? `<button class="grp" data-act="goto-page" data-v="${escapeHtml(g.page)}" title="Go to ${escapeHtml(g.page)}">${icon('page')}<span>${escapeHtml(g.page)}</span>${icon('arrow')}</button>`
+                  : `<div class="grp">${icon('page')}<span>No page</span></div>`;
+          return head + g.threads.map((t) => threadHtml(t, ctx.thread(t))).join('');
+        })
+        .join('')
+    : emptyHtml(state.filter, state.scope);
+  return `<header class="hd"><h2>Comments</h2><span class="site" title="${escapeHtml(ctx.site)}">${escapeHtml(ctx.site)}</span>${ib('more-menu', 'More', 'more')}${ib('close', 'Close', 'x')}</header>
+<div class="act">${
+    ctx.picking
+      ? `<button class="btn" data-act="pick">Cancel</button><span class="hint">Click the page to place it · Esc</span>`
+      : `<button class="btn pri" data-act="pick">${icon('plus')}Comment</button><span class="hint">Select text, then click</span>`
+  }</div>
+<div class="tabs" role="tablist">${tab('page', 'This page')}${tab('site', 'All pages')}</div>
+<div class="flt">${chip('unread')}${chip('open')}<button class="stat${statOn ? ' on' : ''}" data-act="status-menu" aria-haspopup="menu">${FILTER_LABEL[archived]} ${view.filterCounts[archived]}${icon('chev')}</button></div>
+<div class="list">${list}</div>`;
+}
+
+export type MenuItem =
+  | 'sep'
+  | {
+      act: string;
+      label: string;
+      icon?: IconName;
+      k?: string;
+      v?: string;
+      on?: boolean;
+      armed?: boolean;
+    };
+
+export const menuHtml = (items: readonly MenuItem[], head?: string) =>
+  (head ? `<div class="mhead">${escapeHtml(head)}</div>` : '') +
+  items
+    .map((m) =>
+      m === 'sep'
+        ? '<div class="msep"></div>'
+        : `<button class="mi${m.on ? ' on' : ''}${m.armed ? ' armed' : ''}" role="menuitem" data-act="${m.act}"${m.v ? ` data-v="${escapeHtml(m.v)}"` : ''}>${m.icon ? icon(m.icon) : ''}<span>${escapeHtml(m.label)}</span>${m.k ? `<span class="k">${escapeHtml(m.k)}</span>` : ''}</button>`,
+    )
+    .join('');
