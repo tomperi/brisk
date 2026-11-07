@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildThreads,
   isNewReply,
+  newReplyCount,
   panelView,
   parseFilter,
   pinShown,
@@ -156,6 +157,22 @@ describe('panelView', () => {
     );
     expect(ids(view)).toEqual(['mine']);
   });
+
+  it('names the unread threads the active filter hides, by status', () => {
+    const withUnreadResolved = [
+      ...docs,
+      doc('reopened-talk', 'ana@example.com', 8, { resolved: true }),
+    ];
+    const threads = threadsOf(withUnreadResolved, seen);
+    expect(panelView(threads, state, here).hiddenUnread).toEqual([
+      { status: 'resolved', count: 1 },
+    ]);
+    expect(panelView(threads, { ...state, filter: 'resolved' }, here).hiddenUnread).toEqual([
+      { status: 'open', count: 2 },
+    ]);
+    expect(panelView(threads, { ...state, filter: 'unread' }, here).hiddenUnread).toEqual([]);
+    expect(panelView(threadsOf(docs, seen), state, here).hiddenUnread).toEqual([]);
+  });
 });
 
 describe('filters and pins', () => {
@@ -187,5 +204,21 @@ describe('isNewReply', () => {
     expect(isNewReply(reply('ana@example.com', 2), at(3), ME)).toBe(false);
     expect(isNewReply(reply(ME, 5), at(3), ME)).toBe(false);
     expect(isNewReply(reply('ana@example.com', 5), undefined, ME)).toBe(false);
+  });
+});
+
+describe('newReplyCount', () => {
+  it('counts replies by others since my last visit, only while the thread is unread', () => {
+    const docs = [
+      doc('t', ME, 0),
+      doc('r1', 'ana@example.com', 2, { parentId: 't' }),
+      doc('r2', ME, 6, { parentId: 't' }),
+      doc('r3', 'ana@example.com', 7, { parentId: 't' }),
+      doc('r4', 'bo@example.com', 8, { parentId: 't' }),
+    ];
+    expect(newReplyCount(threadsOf(docs, { t: at(5) })[0]!, ME)).toBe(2);
+    expect(newReplyCount(threadsOf(docs, { t: at(9) })[0]!, ME)).toBe(0);
+    expect(newReplyCount(threadsOf(docs, { t: '' })[0]!, ME)).toBe(0);
+    expect(newReplyCount(threadsOf(docs)[0]!, ME)).toBe(0);
   });
 });

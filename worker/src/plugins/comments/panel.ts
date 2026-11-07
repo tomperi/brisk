@@ -5,6 +5,7 @@ import type { Point, Quote } from './anchor';
 import { icon, type IconName } from './icons';
 import {
   isNewReply,
+  newReplyCount,
   type Filter,
   type PanelState,
   type PanelView,
@@ -37,6 +38,15 @@ export function timeAgo(iso: string, now = Date.now()): string {
   return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
 }
 
+const fullDate = (t: number) =>
+  new Date(t).toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'short' });
+
+export function timeHtml(iso: string): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '';
+  return `<time class="tm" datetime="${escapeHtml(iso)}" title="${escapeHtml(fullDate(t))}">${timeAgo(iso)}</time>`;
+}
+
 function initials(name: string): string {
   const words = name
     .replace(/@.*/, '')
@@ -65,14 +75,24 @@ function spotWords(p: Point): string {
   return [y, x].filter(Boolean).join(' ') || 'center';
 }
 
-/** "Enterprise Custom pricing… · top right": the element's own words, else its tag. */
+/** The first non-blank candidate, cut at its first line break and kept short.
+ *  Candidates run best name first: aria-label, heading, tag label, text. */
+export function spotName(candidates: readonly (string | null | undefined)[]): string {
+  for (const c of candidates) {
+    const line = (c ?? '').split(/\r?\n/).find((l) => l.trim()) ?? '';
+    const name = line.replace(/\s+/g, ' ').trim();
+    if (name) return ellipsis(name, 40);
+  }
+  return '';
+}
+
+/** "Enterprise · top right": the element's name, never its live text. */
 function spotLine(t: Thread, lost: boolean): string {
   const a = t.anchor;
   if (a.kind === 'page') return `<p class="spot">${icon('page')}<span>Whole page</span></p>`;
   if (lost)
     return `<p class="spot">${icon('target')}<span>Element is no longer on the page</span></p>`;
-  const words = t.textSnippet.trim();
-  const name = words ? ellipsis(words, 30) : t.label || a.selector;
+  const name = spotName([t.label, t.textSnippet, a.selector]);
   const where = a.point ? ` · ${spotWords(a.point)}` : '';
   return `<p class="spot">${icon('target')}<span>${escapeHtml(name)}${where}</span></p>`;
 }
@@ -111,12 +131,14 @@ function statusTag(t: Thread): string {
   return '';
 }
 
-function collapsedMeta(t: Thread): string {
+function collapsedMeta(t: Thread, me: string): string {
   if (t.kind === 'draft')
     return `<div class="meta"><span>Only in your browser, not published</span>${btn('publish', 'Publish', { cls: 'pri' })}</div>`;
   const parts: string[] = [];
   const n = t.replies.length;
   if (n) parts.push(`${icon('reply')}<span>${n} ${n === 1 ? 'reply' : 'replies'}</span>`);
+  const fresh = newReplyCount(t, me);
+  if (fresh) parts.push(`<span class="fresh">${fresh} new</span>`);
   if (t.statusBy)
     parts.push(
       `<span>${t.status === 'deleted' ? 'Deleted' : 'Resolved'} by ${escapeHtml(t.statusBy)}</span>`,
@@ -130,7 +152,7 @@ function repliesHtml(t: Thread, o: ThreadOpts): string {
   return t.replies
     .map(
       (r) =>
-        `<div class="rp"><div class="row">${avatar(r.author || r.email, r.email)}<span class="nm" title="${escapeHtml(r.email)}">${escapeHtml(r.author || r.email)}</span><span class="tm">${timeAgo(r.createdAt)}</span>${isNewReply(r, o.since, o.me) ? '<span class="new">New</span>' : ''}</div><p class="tx">${escapeHtml(r.text)}</p></div>`,
+        `<div class="rp"><div class="row">${avatar(r.author || r.email, r.email)}<span class="nm" title="${escapeHtml(r.email)}">${escapeHtml(r.author || r.email)}</span>${timeHtml(r.createdAt)}${isNewReply(r, o.since, o.me) ? '<span class="new">New</span>' : ''}</div><p class="tx">${escapeHtml(r.text)}</p></div>`,
     )
     .join('');
 }
@@ -169,12 +191,12 @@ export function threadHtml(t: Thread, o: ThreadOpts): string {
     o.surface === 'panel' && !o.open
       ? ` data-act="expand" tabindex="0" role="button" aria-expanded="false" aria-label="${escapeHtml(`${t.unread ? 'Unread. ' : ''}${t.author}: ${ellipsis(t.text, 80)}`)}"`
       : '';
-  const head = `<div class="row"${toggle}>${avatar(t.author || t.email, t.email, t.kind === 'draft')}<span class="nm" title="${escapeHtml(t.email)}">${escapeHtml(t.author || t.email)}</span>${statusTag(t)}<span class="tm">${timeAgo(t.createdAt)}</span><span class="num">#${t.num}</span>${t.unread ? '<span class="dot" role="img" aria-label="Unread"></span>' : ''}</div>`;
+  const head = `<div class="row"${toggle}>${avatar(t.author || t.email, t.email, t.kind === 'draft')}<span class="nm" title="${escapeHtml(t.email)}">${escapeHtml(t.author || t.email)}</span>${statusTag(t)}${timeHtml(t.createdAt)}<span class="num">#${t.num}</span>${t.unread ? '<span class="dot" role="img" aria-label="Unread"></span>' : ''}</div>`;
   const text =
     t.kind === 'draft' && o.open
       ? `<div class="field"><textarea data-draft="${id}" data-keep="draft:${id}" aria-label="Edit draft"></textarea></div>`
       : `<p class="tx">${escapeHtml(t.text)}</p>`;
-  const body = `<div class="bd">${anchorHtml(t, o.lost, o.open)}${text}${o.open ? '' : collapsedMeta(t)}</div>`;
+  const body = `<div class="bd">${anchorHtml(t, o.lost, o.open)}${text}${o.open ? '' : collapsedMeta(t, o.me)}</div>`;
   const tools = o.surface === 'panel' && !o.open ? quickTools(t) : '';
   const open = o.open ? `${repliesHtml(t, o)}${openFooter(t, o)}` : '';
   return `<article class="${cls}" data-id="${id}"${rowAttrs}>${tools}${head}${body}${open}</article>`;
@@ -197,6 +219,14 @@ function emptyHtml(filter: Filter, scope: Scope): string {
         : [`No ${filter} comments`, `Nothing ${filter} ${where} yet.`, 'comment'];
   return `<div class="empty"><div class="ring">${icon(name)}</div><strong>${title}</strong>${body}</div>`;
 }
+
+const hiddenUnreadHtml = (hidden: PanelView['hiddenUnread']) =>
+  hidden
+    .map(
+      (h) =>
+        `<button class="hidden-unread" data-act="filter" data-v="${h.status}"><span class="dot" aria-hidden="true"></span><span>${h.count} unread in ${FILTER_LABEL[h.status]}</span>${icon('arrow')}</button>`,
+    )
+    .join('');
 
 export function panelHtml(
   view: PanelView,
@@ -224,6 +254,7 @@ export function panelHtml(
         })
         .join('')
     : emptyHtml(state.filter, state.scope);
+  const hidden = hiddenUnreadHtml(view.hiddenUnread);
   return `<header class="hd"><h2>Comments</h2><span class="site" title="${escapeHtml(ctx.site)}">${escapeHtml(ctx.site)}</span>${ib('more-menu', 'More', 'more')}${ib('close', 'Close', 'x')}</header>
 <div class="act">${
     ctx.picking
@@ -232,7 +263,7 @@ export function panelHtml(
   }</div>
 <div class="tabs" role="tablist">${tab('page', 'This page')}${tab('site', 'All pages')}</div>
 <div class="flt">${chip('unread')}${chip('open')}<button class="stat${statOn ? ' on' : ''}" data-act="status-menu" aria-haspopup="menu">${FILTER_LABEL[archived]} ${view.filterCounts[archived]}${icon('chev')}</button></div>
-<div class="list">${list}</div>`;
+<div class="list">${list}${hidden}</div>`;
 }
 
 export type MenuItem =

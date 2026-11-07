@@ -23,7 +23,15 @@ import {
 } from './anchor';
 import { icon } from './icons';
 import { seenDocId } from './inbox';
-import { escapeHtml, menuHtml, panelHtml, quoteHtml, threadHtml, type MenuItem } from './panel';
+import {
+  escapeHtml,
+  menuHtml,
+  panelHtml,
+  quoteHtml,
+  spotName,
+  threadHtml,
+  type MenuItem,
+} from './panel';
 import { DOCK_MIN, HIGHLIGHT_CSS, PANEL_W, WIDGET_CSS } from './styles';
 import {
   buildThreads,
@@ -228,6 +236,18 @@ type Brisk = {
       .slice(0, 2)
       .map((c) => `.${c}`)
       .join('')}`;
+  const HEADING = 'h1, h2, h3, h4, h5, h6, [role="heading"]';
+  /** Its accessible name where it has one, else its first heading, else its tag. */
+  const nameOf = (el: Element) => {
+    const text = (e: Element | null) => (e as HTMLElement | null)?.innerText ?? e?.textContent;
+    const ownText = el.matches(`${HEADING}, button, a[href], label, summary, legend`);
+    return spotName([
+      el.getAttribute('aria-label'),
+      ownText ? text(el) : null,
+      text(el.querySelector(HEADING)),
+      labelOf(el),
+    ]);
+  };
 
   // ---- shadow host ----------------------------------------------------------
   const host = document.createElement('div');
@@ -529,7 +549,7 @@ type Brisk = {
   function openCompose({ el, anchor, range }: Capture, x: number, y: number): boolean {
     const q = anchor.kind === 'text' ? anchor.quote : null;
     const opened = showPop(
-      `<div class="compose"><p class="ctx">New comment · ${q ? 'on the selected words' : escapeHtml(labelOf(el))}</p>${q ? quoteHtml(q, false, 200) : ''}
+      `<div class="compose"><p class="ctx">New comment · ${q ? 'on the selected words' : escapeHtml(nameOf(el))}</p>${q ? quoteHtml(q, false, 200) : ''}
       <div class="field"><textarea placeholder="Add a comment…" aria-label="Comment"></textarea></div>
       <div class="bar"><span class="note">Saved in your browser</span><button class="btn sm ghost" data-cancel>Cancel</button><button class="btn sm pri" data-save>Save draft</button></div></div>`,
       x,
@@ -555,7 +575,7 @@ type Brisk = {
         text,
         page: pageId(),
         ...anchorFields(anchor),
-        label: labelOf(el),
+        label: nameOf(el),
         textSnippet: clean(el.textContent ?? '', 140),
         html: clean(el.outerHTML, 300),
         dataAttrs: clean(

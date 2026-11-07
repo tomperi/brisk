@@ -186,6 +186,8 @@ export interface PanelView {
   groups: PageGroup[];
   scopeCounts: Record<Scope, number>;
   filterCounts: Record<Filter, number>;
+  /** Unread threads in scope that the active filter does not list, by status. */
+  hiddenUnread: { status: Status; count: number }[];
 }
 
 /** Unread first, then the newest activity; on All pages this page's group
@@ -223,6 +225,18 @@ export function panelView(
     filterCounts: Object.fromEntries(
       FILTERS.map((f) => [f, count((t) => inScope(t, scope) && matches(t, f, expanded))]),
     ) as Record<Filter, number>,
+    hiddenUnread:
+      filter === 'unread'
+        ? []
+        : (['open', 'resolved'] as const)
+            .filter((s) => s !== filter)
+            .map((status) => ({
+              status,
+              count: count(
+                (t) => inScope(t, scope) && t.status === status && unreadInList(t, expanded),
+              ),
+            }))
+            .filter((h) => h.count > 0),
   };
 }
 
@@ -231,3 +245,6 @@ export const isNewReply = (r: Reply, since: string | undefined, me: string): boo
   !!since &&
   r.email.trim().toLowerCase() !== me.trim().toLowerCase() &&
   Date.parse(r.createdAt) > Date.parse(since);
+
+export const newReplyCount = (t: Thread, me: string): number =>
+  t.unread ? t.replies.filter((r) => isNewReply(r, t.seenAt, me)).length : 0;

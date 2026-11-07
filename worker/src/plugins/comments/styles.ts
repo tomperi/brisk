@@ -2,8 +2,10 @@ export const PANEL_W = 400;
 /** Below this the panel overlays the page instead of pushing it aside. */
 export const DOCK_MIN = 900;
 
+/* Pins and the pick box sit on the teammate's page, not on the panel, so they
+ * keep the light tokens whatever the OS scheme: the dark block only redeclares :host. */
 export const WIDGET_CSS = `
-:host {
+:host, #pins, .hi {
   --panel-w: ${PANEL_W}px;
   --font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --bg: oklch(100% 0 0);
@@ -138,10 +140,11 @@ textarea::placeholder { color: var(--fg-muted); }
 
 /* pins: the tip (bottom-left corner) sits on the spot */
 .pin {
+  --ring: 0 0 0 2px var(--bg);
   position: fixed; width: 22px; height: 22px; margin-top: -22px; pointer-events: auto;
   border-radius: 11px 11px 11px 3px; font: 600 11px/22px var(--font); text-align: center;
   font-variant-numeric: tabular-nums; color: var(--on-accent); background: var(--accent);
-  box-shadow: var(--shadow-pin); cursor: pointer; user-select: none; transform-origin: 0 100%;
+  box-shadow: var(--ring), var(--shadow-pin); cursor: pointer; user-select: none; transform-origin: 0 100%;
   animation: pin-in 220ms var(--ease) both; transition: box-shadow 160ms ease, transform 160ms var(--ease);
 }
 @keyframes pin-in { from { opacity: 0; transform: scale(0.8); } }
@@ -151,11 +154,11 @@ textarea::placeholder { color: var(--fg-muted); }
 .pin.resolved { background: var(--bg-muted); color: var(--fg-muted); border: 1px solid var(--line); line-height: 20px; }
 .pin.deleted { background: var(--bg-muted); color: var(--fg-faint); border: 1px solid var(--line); line-height: 20px; text-decoration: line-through; }
 .pin.detached { opacity: 0.7; }
-.pin.on { box-shadow: 0 0 0 3px var(--accent-tint), var(--shadow-pin); }
+.pin.on { box-shadow: var(--ring), 0 0 0 4px var(--accent), var(--shadow-pin); }
 .pin.flash { animation: pin-flash 900ms var(--ease) 2; }
 @keyframes pin-flash {
-  0% { box-shadow: 0 0 0 0 var(--accent-line), var(--shadow-pin); }
-  100% { box-shadow: 0 0 0 10px transparent, var(--shadow-pin); }
+  0% { box-shadow: var(--ring), 0 0 0 2px var(--accent-line), var(--shadow-pin); }
+  100% { box-shadow: var(--ring), 0 0 0 12px transparent, var(--shadow-pin); }
 }
 .layer.collapsed #pins { display: none; }
 
@@ -174,7 +177,7 @@ textarea::placeholder { color: var(--fg-muted); }
 .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .th.read .nm { font-weight: 500; }
 .tm { color: var(--fg-muted); font-size: 12px; white-space: nowrap; }
-.num { margin-left: auto; font-size: 12px; color: var(--fg-faint); font-weight: 500; }
+.num { margin-left: auto; font-size: 12px; color: var(--fg-muted); font-weight: 500; }
 .dot { width: 8px; height: 8px; border-radius: 4px; background: var(--accent); flex: none; }
 .bd { padding-left: 32px; }
 .q { margin: 6px 0 4px; color: var(--fg-1); overflow-wrap: anywhere; }
@@ -191,6 +194,7 @@ textarea::placeholder { color: var(--fg-muted); }
 .th:not(.open) .bd .tx { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .meta { margin-top: 6px; font-size: 12px; color: var(--fg-muted); display: flex; align-items: center; gap: 6px; }
 .meta .btn { margin-left: auto; }
+.meta .fresh { color: var(--accent-ink); font-weight: 600; }
 .rp { margin-top: 12px; }
 .rp .tx { margin-top: 2px; padding-left: 32px; }
 .new { font-size: 11px; font-weight: 600; color: var(--accent-ink); background: var(--accent-tint); border-radius: 4px; padding: 0 6px; line-height: 18px; }
@@ -265,6 +269,13 @@ textarea::placeholder { color: var(--fg-muted); }
   border-bottom: 1px solid var(--line);
 }
 .grp span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hidden-unread {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 10px 20px;
+  font-size: 12px; color: var(--fg-muted); text-align: left; pointer-events: auto;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+.hidden-unread:hover { background: var(--bg-subtle); color: var(--fg); }
+.hidden-unread .i { margin-left: auto; }
 .empty { padding: 56px 32px; text-align: center; color: var(--fg-muted); font-size: 12px; }
 .empty .i { width: 20px; height: 20px; }
 .empty .ring { width: 40px; height: 40px; border-radius: 20px; background: var(--bg-muted); display: grid; place-items: center; margin: 0 auto 12px; color: var(--fg-muted); }
@@ -351,6 +362,12 @@ textarea::placeholder { color: var(--fg-muted); }
 .toast.show { opacity: 1; transform: none; }
 .layer.docked .toast { right: var(--panel-w); }
 
+@media (pointer: coarse) {
+  .btn, .btn.sm, .chip, .stat, .mi { height: 40px; }
+  .chip { border-radius: 20px; }
+  .ib, .tools .ib, .send { width: 40px; height: 40px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::after { transition: none !important; animation: none !important; }
   .pop.shake { border-color: var(--danger); }
@@ -358,19 +375,12 @@ textarea::placeholder { color: var(--fg-muted); }
 `;
 
 /** ::highlight() only styles ranges in the tree that owns their nodes, so this
- *  sheet is adopted by the document, not the shadow root. */
+ *  sheet is adopted by the document, not the shadow root. A mid-lightness blue
+ *  reads on light and dark host pages alike, so it ignores the OS scheme. */
 export const HIGHLIGHT_CSS = `
 ::highlight(brisk-comment) {
-  background-color: oklch(46% 0.19 262 / 0.09); text-decoration: underline 2px oklch(46% 0.19 262 / 0.45);
+  background-color: oklch(60% 0.17 262 / 0.14); text-decoration: underline 2px oklch(60% 0.17 262 / 0.6);
 }
 ::highlight(brisk-comment-focus) {
-  background-color: oklch(46% 0.19 262 / 0.2); text-decoration: underline 2px oklch(46% 0.19 262);
-}
-@media (prefers-color-scheme: dark) {
-  ::highlight(brisk-comment) {
-    background-color: oklch(72% 0.13 262 / 0.15); text-decoration: underline 2px oklch(72% 0.13 262 / 0.55);
-  }
-  ::highlight(brisk-comment-focus) {
-    background-color: oklch(72% 0.13 262 / 0.3); text-decoration: underline 2px oklch(72% 0.13 262);
-  }
+  background-color: oklch(60% 0.17 262 / 0.28); text-decoration: underline 2px oklch(60% 0.17 262);
 }`;
