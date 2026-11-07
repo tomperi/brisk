@@ -29,9 +29,19 @@ const text = (html: string) => html.replace(/<[^>]+>/g, '');
 describe('spotName', () => {
   it('takes the first non-blank candidate, cut at its first line break', () => {
     expect(spotName([null, '  ', 'Enterprise\n  Custom pricing', 'div.card'])).toBe('Enterprise');
-    expect(spotName(['', undefined, 'div#big.card'])).toBe('div#big.card');
     expect(spotName(['A'.repeat(60)])).toBe(`${'A'.repeat(40)}…`);
     expect(spotName([])).toBe('');
+  });
+
+  it('says a stored tag label or selector in words, never as code', () => {
+    expect(spotName(['', undefined, 'div#big.card'])).toBe('Section “big”');
+    expect(spotName(['p'])).toBe('Paragraph');
+    expect(spotName(['button.cta-primary'])).toBe('Button “cta primary”');
+    expect(spotName(['body > main > p:nth-of-type(3)'])).toBe('Paragraph');
+    expect(spotName(['#pricing-card'])).toBe('Section “pricing card”');
+    expect(spotName(['faq'])).toBe('faq');
+    expect(spotName(['Watch the video'])).toBe('Watch the video');
+    expect(spotName(['Skip to main'])).toBe('Skip to main');
   });
 });
 

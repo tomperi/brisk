@@ -75,13 +75,69 @@ function spotWords(p: Point): string {
   return [y, x].filter(Boolean).join(' ') || 'center';
 }
 
+const TAG_WORDS: Record<string, string> = {
+  div: 'Section',
+  section: 'Section',
+  p: 'Paragraph',
+  a: 'Link',
+  button: 'Button',
+  img: 'Image',
+  svg: 'Image',
+  figure: 'Figure',
+  input: 'Field',
+  textarea: 'Field',
+  select: 'Menu',
+  ul: 'List',
+  ol: 'List',
+  li: 'List item',
+  table: 'Table',
+  tr: 'Table row',
+  td: 'Table cell',
+  th: 'Table cell',
+  nav: 'Navigation',
+  header: 'Header',
+  footer: 'Footer',
+  form: 'Form',
+  article: 'Article',
+  aside: 'Sidebar',
+  main: 'Main content',
+  span: 'Text',
+  pre: 'Code block',
+  blockquote: 'Quote',
+  video: 'Video',
+  details: 'Details',
+  h1: 'Heading',
+  h2: 'Heading',
+  h3: 'Heading',
+  h4: 'Heading',
+  h5: 'Heading',
+  h6: 'Heading',
+};
+const TAG_TOKEN = /^([a-z][a-z0-9]*)(?:#([\w-]+))?((?:\.[\w-]+)*)$/;
+
+/** A stored `tag#id.class` label or a CSS selector, said in words ("Section “pricing card”");
+ *  null for anything that is already a human name. */
+function tagInWords(token: string): string | null {
+  const compact = token.replace(/\s*>\s*/g, '>');
+  if (/\s/.test(compact)) return null;
+  const last = compact
+    .split('>')
+    .pop()!
+    .replace(/:nth-of-type\(\d+\)/g, '');
+  const m = TAG_TOKEN.exec(last.startsWith('#') ? `div${last}` : last);
+  const word = m && TAG_WORDS[m[1]!];
+  if (!m || !word) return null;
+  const ident = (m[2] || m[3]?.split('.').find(Boolean) || '').replace(/[-_]+/g, ' ');
+  return ident ? `${word} “${ident}”` : word;
+}
+
 /** The first non-blank candidate, cut at its first line break and kept short.
  *  Candidates run best name first: aria-label, heading, tag label, text. */
 export function spotName(candidates: readonly (string | null | undefined)[]): string {
   for (const c of candidates) {
     const line = (c ?? '').split(/\r?\n/).find((l) => l.trim()) ?? '';
     const name = line.replace(/\s+/g, ' ').trim();
-    if (name) return ellipsis(name, 40);
+    if (name) return ellipsis(tagInWords(name) ?? name, 40);
   }
   return '';
 }
