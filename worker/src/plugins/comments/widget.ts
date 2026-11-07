@@ -40,6 +40,7 @@ import {
   parseFilter,
   parseScope,
   pinShown,
+  threadMarkdown,
   type Draft,
   type Filter,
   type PanelState,
@@ -756,18 +757,10 @@ type Brisk = {
     return out;
   }
 
-  /** The whole log — drafts and published, with status and replies. The widget
-   *  twin of `brisk plugin comments export`. */
-  function commentsMarkdown(): string {
-    let out = `# comments on ${SITE}\n`;
-    for (const t of threads) {
-      out += `\n## [${t.kind === 'draft' ? 'draft' : t.status}] ${t.text}\n`;
-      out += `- by: ${t.author}\n- page: \`${t.page}\`\n`;
-      for (const line of anchorLines(t.anchor)) out += `${line}\n`;
-      for (const r of t.replies) out += `- reply (${r.author}): ${r.text}\n`;
-    }
-    return out;
-  }
+  /** The whole log, drafts and published, with replies and reactions. The
+   *  widget twin of `brisk plugin comments export`. */
+  const commentsMarkdown = () =>
+    `# comments on ${SITE}\n${threads.map((t) => `\n${threadMarkdown(t)}\n`).join('')}`;
 
   // Clipboard writes reject on denied permission or an insecure context — fall
   // back to downloading the file so the export is never silently lost.

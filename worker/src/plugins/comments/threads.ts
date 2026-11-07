@@ -1,10 +1,28 @@
-import { anchorOfRecord, type Anchor, type AnchorFields } from './anchor';
+import { anchorLines, anchorOfRecord, type Anchor, type AnchorFields } from './anchor';
 import { isUnread } from './inbox';
 
 export type Status = 'open' | 'resolved' | 'deleted';
 export type Filter = 'unread' | Status;
 export type Scope = 'page' | 'site';
 export const FILTERS: readonly Filter[] = ['unread', 'open', 'resolved', 'deleted'];
+
+export const REACTIONS = ['👍', '❤️', '😂', '🎉', '👀', '✅', '❓', '🔥'] as const;
+export type Emoji = (typeof REACTIONS)[number];
+export const parseEmoji = (raw: unknown): Emoji | null =>
+  (REACTIONS as readonly unknown[]).includes(raw) ? (raw as Emoji) : null;
+
+export interface Person {
+  name: string;
+  email: string;
+}
+
+/** Everyone who left one emoji on one comment or reply. */
+export interface Reaction {
+  emoji: Emoji;
+  by: Person[];
+  /** My reaction doc's id, to remove it; null when I have not reacted. */
+  mine: string | null;
+}
 
 /** A comment that lives only in this browser until it is published. */
 export type Draft = AnchorFields & {
@@ -31,6 +49,7 @@ export interface Reply {
   email: string;
   text: string;
   createdAt: string;
+  reactions: Reaction[];
 }
 
 export interface Thread {
@@ -46,10 +65,13 @@ export interface Thread {
   author: string;
   email: string;
   text: string;
+  /** An emoji left on the page itself; such a thread has no text. */
+  reaction: Emoji | null;
   createdAt: string;
   /** The newest of the comment and its replies. */
   activityAt: string;
   replies: Reply[];
+  reactions: Reaction[];
   unread: boolean;
   seenAt: string | undefined;
   /** One sequence per site: published threads count 1..n by creation, so a
@@ -80,6 +102,23 @@ const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 const later = (a: string, b: string) => (Date.parse(b) > Date.parse(a) ? b : a);
 const statusOf = (d: StoredDoc): Status =>
   d.deleted ? 'deleted' : d.resolved ? 'resolved' : 'open';
+const lower = (s: string) => s.trim().toLowerCase();
+
+/** Chips in the order each emoji was first left, one entry per person. */
+function groupReactions(docs: readonly StoredDoc[], me: string): Reaction[] {
+  const out: Reaction[] = [];
+  for (const d of docs) {
+    const emoji = parseEmoji(d.reaction);
+    if (!emoji) continue;
+    const person = { name: str(d.createdBy), email: str(d.createdByEmail) };
+    const who = lower(person.email || person.name);
+    let r = out.find((x) => x.emoji === emoji);
+    if (!r) out.push((r = { emoji, by: [], mine: null }));
+    if (!r.by.some((p) => lower(p.email || p.name) === who)) r.by.push(person);
+    if (me && lower(person.email) === lower(me)) r.mine ??= d.id;
+  }
+  return out;
+}
 
 export function buildThreads(input: {
   drafts: readonly Draft[];
@@ -88,10 +127,10 @@ export function buildThreads(input: {
   me: string;
 }): Thread[] {
   const { drafts, docs, seen, me } = input;
-  const replies = new Map<string, StoredDoc[]>();
+  const children = new Map<string, StoredDoc[]>();
   for (const d of docs) {
     const parent = str(d.parentId);
-    if (parent) replies.set(parent, [...(replies.get(parent) ?? []), d]);
+    if (parent) children.set(parent, [...(children.get(parent) ?? []), d]);
   }
   const threads: Thread[] = [
     ...drafts.map((d) => ({
@@ -106,9 +145,11 @@ export function buildThreads(input: {
       author: 'You',
       email: me,
       text: d.text,
+      reaction: null,
       createdAt: d.createdAt,
       activityAt: d.createdAt,
       replies: [],
+      reactions: [],
       unread: false,
       seenAt: undefined,
       num: 0,
@@ -116,7 +157,16 @@ export function buildThreads(input: {
     ...docs
       .filter((d) => !str(d.parentId))
       .map((d) => {
-        const own = (replies.get(d.id) ?? []).sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1));
+        const kids = (children.get(d.id) ?? []).sort((a, b) =>
+          a.createdAt < b.createdAt ? -1 : 1,
+        );
+        const own = kids.filter((k) => !k.reaction);
+        const reactionDocs = kids.filter((k) => k.reaction && !k.deleted);
+        const reactionsOn = (target: string) =>
+          groupReactions(
+            reactionDocs.filter((k) => (str(k.reactTo) || d.id) === target),
+            me,
+          );
         const status = statusOf(d);
         return {
           id: d.id,
@@ -135,6 +185,7 @@ export function buildThreads(input: {
           author: str(d.createdBy),
           email: str(d.createdByEmail),
           text: str(d.text),
+          reaction: parseEmoji(d.reaction),
           createdAt: d.createdAt,
           activityAt: own
             .filter((r) => !r.deleted)
@@ -147,7 +198,9 @@ export function buildThreads(input: {
               email: str(r.createdByEmail),
               text: str(r.text),
               createdAt: r.createdAt,
+              reactions: reactionsOn(r.id),
             })),
+          reactions: reactionsOn(d.id),
           unread: status !== 'deleted' && isUnread(d, own, me, seen[d.id]),
           seenAt: seen[d.id],
           num: 0,
@@ -256,3 +309,28 @@ export const isNewReply = (r: Reply, since: string | undefined, me: string): boo
 
 export const newReplyCount = (t: Thread, me: string): number =>
   t.unread ? t.replies.filter((r) => isNewReply(r, t.seenAt, me)).length : 0;
+
+const names = (by: readonly Person[]) => by.map((p) => p.name || p.email).join(', ');
+
+/** "👍 ×2 (Ana, Dev), 🎉 ×1 (Bo)" */
+export const reactionsText = (rs: readonly Reaction[]): string =>
+  rs.map((r) => `${r.emoji} ×${r.by.length} (${names(r.by)})`).join(', ');
+
+/** One thread as Markdown for an agent: the export action and the widget's Copy all. */
+export function threadMarkdown(t: Thread): string {
+  const status = t.kind === 'draft' ? 'draft' : t.status;
+  const id = t.kind === 'draft' ? '' : `[${t.id}] `;
+  const lines = [
+    `## #${t.num} ${id}(${status}) ${t.reaction ? `${t.reaction} reaction` : t.text}`,
+    `- page: \`${t.page}\``,
+    ...anchorLines(t.anchor),
+  ];
+  if (t.textSnippet) lines.push(`- text: "${t.textSnippet}"`);
+  lines.push(`- by: ${t.author}`);
+  if (t.reactions.length) lines.push(`- reactions: ${reactionsText(t.reactions)}`);
+  for (const r of t.replies) {
+    lines.push(`- reply (${r.author}): ${r.text}`);
+    if (r.reactions.length) lines.push(`  - reactions: ${reactionsText(r.reactions)}`);
+  }
+  return lines.join('\n');
+}

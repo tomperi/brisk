@@ -97,6 +97,49 @@ describe('buildThreads', () => {
     expect(after.find((t) => t.id === 'p')!.num).toBe(3);
   });
 
+  it('keeps reactions out of replies, activity and unread, and groups them per target', () => {
+    const rx = (id: string, email: string, minute: number, emoji: string, to: string, extra = {}) =>
+      doc(id, email, minute, { parentId: 't', reaction: emoji, reactTo: to, text: '', ...extra });
+    const [t] = threadsOf(
+      [
+        doc('t', ME, 0),
+        doc('r', ME, 1, { parentId: 't' }),
+        rx('x1', 'ana@example.com', 5, '👍', 't'),
+        rx('x2', ME, 6, '👍', 't'),
+        rx('x3', 'bo@example.com', 7, '🎉', 't'),
+        rx('x4', 'bo@example.com', 8, '🎉', 't', { deleted: true }),
+        rx('x5', 'ana@example.com', 9, '❤️', 'r'),
+      ],
+      { t: at(2) },
+    );
+    expect(t!.replies.map((r) => r.id)).toEqual(['r']);
+    expect(t!.activityAt).toBe(at(1));
+    expect(t!.unread).toBe(false);
+    expect(t!.reactions).toEqual([
+      {
+        emoji: '👍',
+        by: [
+          { name: 'ana', email: 'ana@example.com' },
+          { name: 'tom', email: ME },
+        ],
+        mine: 'x2',
+      },
+      { emoji: '🎉', by: [{ name: 'bo', email: 'bo@example.com' }], mine: null },
+    ]);
+    expect(t!.replies[0]!.reactions.map((r) => [r.emoji, r.by.length, r.mine])).toEqual([
+      ['❤️', 1, null],
+    ]);
+  });
+
+  it('makes a reaction on the page its own numbered thread, unread like a comment', () => {
+    const [c, r] = threadsOf([
+      doc('c', ME, 0),
+      doc('r', 'ana@example.com', 1, { reaction: '🔥', text: '', selector: 'p', quote: 'ships' }),
+    ]);
+    expect([c!.reaction, r!.reaction, r!.num, r!.unread]).toEqual([null, '🔥', 2, true]);
+    expect(r!.anchor.kind).toBe('text');
+  });
+
   it('reads status and who set it', () => {
     const [r, d] = threadsOf([
       doc('r', ME, 0, { resolved: true, resolvedBy: 'Ana' }),

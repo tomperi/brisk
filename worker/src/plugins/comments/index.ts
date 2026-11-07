@@ -1,8 +1,17 @@
 import { DocStore, type Doc } from '../../docs';
 import type { User } from '../../env';
 import { PLUGIN_COLLECTION_PREFIX, type Plugin, type PluginActionCtx } from '../types';
-import { ANCHOR_ARGS, anchorFields, anchorLines, anchorOfRecord, parseAnchor } from './anchor';
+import { ANCHOR_ARGS, anchorFields, anchorLines, parseAnchor } from './anchor';
 import { seenDocId } from './inbox';
+import {
+  buildThreads,
+  parseEmoji,
+  reactionsText,
+  REACTIONS,
+  threadMarkdown,
+  type Emoji,
+  type Thread,
+} from './threads';
 
 export const COMMENTS = `${PLUGIN_COLLECTION_PREFIX}comments`;
 export const EVENTS = `${PLUGIN_COLLECTION_PREFIX}comments:events`;
@@ -35,13 +44,57 @@ async function requireComment(store: DocStore, site: string, id: string): Promis
   return doc;
 }
 
+function reactionArg(raw: string | undefined): Emoji | null {
+  if (!raw) return null;
+  const emoji = parseEmoji(raw);
+  if (!emoji) throw new Error(`unknown reaction: ${raw} (${REACTIONS.join(' ')})`);
+  return emoji;
+}
+
+/** The comment or reply a reaction under `parentId` lands on: the thread head
+ *  by default, else one of its live replies. */
+async function reactionTarget(
+  store: DocStore,
+  site: string,
+  parentId: string,
+  reactTo: string | undefined,
+): Promise<string> {
+  const thread = await requireComment(store, site, parentId);
+  if (thread.parentId)
+    throw new Error(`${parentId} is a reply — use its thread ${String(thread.parentId)}`);
+  if (thread.deleted) throw new Error(`comment ${parentId} is deleted`);
+  const to = reactTo || parentId;
+  if (to === parentId) return to;
+  const target = await requireComment(store, site, to);
+  if (target.parentId !== parentId || target.reaction)
+    throw new Error(`${to} is not a comment in thread ${parentId}`);
+  if (target.deleted) throw new Error(`comment ${to} is deleted`);
+  return to;
+}
+
+/** One record per person, emoji and target: its id is derived from them, so a
+ *  repeat collides on the key and a removed reaction comes back instead. */
+async function reactionId(reactTo: string, emoji: Emoji, email: string): Promise<string> {
+  const key = new TextEncoder().encode(`${reactTo}\n${emoji}\n${email.trim().toLowerCase()}`);
+  const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', key));
+  return `rx-${[...hash.slice(0, 8)].map((b) => b.toString(16).padStart(2, '0')).join('')}`;
+}
+
 async function create(ctx: PluginActionCtx, args: Record<string, string>): Promise<Doc> {
   const site = args.site;
-  const text = args.text;
-  if (!site || !text) throw new Error('site and text are required');
+  const text = args.text ?? '';
+  const reaction = reactionArg(args.reaction);
+  if (!site) throw new Error('site is required');
+  if (reaction && text) throw new Error('a reaction has no text');
+  if (!reaction && !text) throw new Error('site and text are required');
+  if (args.reactTo && !(reaction && args.parentId))
+    throw new Error('reactTo needs a reaction and a parentId');
   const anchor = parseAnchor(args);
+  const store = new DocStore(ctx.platform.db);
+  const reactTo =
+    reaction && args.parentId ? await reactionTarget(store, site, args.parentId, args.reactTo) : '';
   const by = authorOf(ctx.user);
-  const doc = await new DocStore(ctx.platform.db).create(site, COMMENTS, {
+  const fields = {
     text,
     page: args.page ?? '',
     ...anchorFields(anchor),
@@ -49,14 +102,77 @@ async function create(ctx: PluginActionCtx, args: Record<string, string>): Promi
     textSnippet: args.textSnippet ?? '',
     html: args.html ?? '',
     parentId: args.parentId ?? '',
+    ...(reaction ? { reaction } : {}),
+    ...(reactTo ? { reactTo } : {}),
     createdBy: by,
     createdByEmail: ctx.user.email,
     resolved: false,
     deleted: false,
-  });
-  await record(ctx, site, doc.id, args.parentId ? 'reply' : 'create', by);
+  };
+  if (reaction && reactTo) {
+    return addReaction(
+      ctx,
+      store,
+      site,
+      await reactionId(reactTo, reaction, ctx.user.email),
+      fields,
+    );
+  }
+  const doc = await store.create(site, COMMENTS, fields);
+  await record(ctx, site, doc.id, reaction ? 'react' : args.parentId ? 'reply' : 'create', by);
   ctx.publish(site, { collection: COMMENTS, event: 'create', doc });
   return doc;
+}
+
+/** Adding a reaction I already left is a no-op; adding one I removed revives it. */
+async function addReaction(
+  ctx: PluginActionCtx,
+  store: DocStore,
+  site: string,
+  id: string,
+  fields: Record<string, unknown>,
+): Promise<Doc> {
+  const by = String(fields.createdBy);
+  const made = await store.create(site, COMMENTS, fields, { id }).catch(async (err: unknown) => {
+    if (await store.get(site, COMMENTS, id)) return null;
+    throw err;
+  });
+  if (made) {
+    await record(ctx, site, id, 'react', by);
+    ctx.publish(site, { collection: COMMENTS, event: 'create', doc: made });
+    return made;
+  }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const existing = await requireComment(store, site, id);
+    if (!existing.deleted) return existing;
+    const doc = await store.update(
+      site,
+      COMMENTS,
+      id,
+      { deleted: false, deletedBy: '', deletedAt: '' },
+      { ifUpdatedAt: existing.updatedAt },
+    );
+    if (doc) {
+      await record(ctx, site, id, 'react', by);
+      ctx.publish(site, { collection: COMMENTS, event: 'update', doc });
+      return doc;
+    }
+  }
+  throw new Error(`reaction ${id} is changing concurrently — retry`);
+}
+
+async function react(ctx: PluginActionCtx, args: Record<string, string>): Promise<Doc> {
+  const { site, id, emoji } = args;
+  if (!site || !id || !emoji) throw new Error('site, id, and emoji are required');
+  const target = await requireComment(new DocStore(ctx.platform.db), site, id);
+  return create(ctx, {
+    site,
+    text: '',
+    reaction: emoji,
+    page: String(target.page ?? ''),
+    parentId: String(target.parentId || target.id),
+    reactTo: id,
+  });
 }
 
 async function reply(ctx: PluginActionCtx, args: Record<string, string>): Promise<Doc> {
@@ -202,10 +318,18 @@ async function list(ctx: PluginActionCtx, args: Record<string, string>): Promise
     status: statusOf(c),
     author: String(c.createdBy ?? ''),
     page: String(c.page ?? ''),
-    text: String(c.text ?? '')
-      .replace(/\s+/g, ' ')
-      .slice(0, 60),
+    text: c.reaction
+      ? `${String(c.reaction)} reaction`
+      : String(c.text ?? '')
+          .replace(/\s+/g, ' ')
+          .slice(0, 60),
   }));
+}
+
+/** Every thread on the site, numbered as the widget numbers them. */
+async function siteThreads(store: DocStore, site: string): Promise<Thread[]> {
+  const docs = await store.list(site, COMMENTS, { limit: 500, sort: 'created' });
+  return buildThreads({ drafts: [], docs, seen: {}, me: '' });
 }
 
 async function show(ctx: PluginActionCtx, args: Record<string, string>): Promise<string> {
@@ -213,12 +337,22 @@ async function show(ctx: PluginActionCtx, args: Record<string, string>): Promise
   if (!site || !id) throw new Error('site and id are required');
   const store = new DocStore(ctx.platform.db);
   const c = await requireComment(store, site, id);
-  const all = await store.list(site, COMMENTS, { limit: 500, sort: 'created' });
-  const replies = all.filter((r) => r.parentId === id);
-  const anchor = anchorLines(anchorOfRecord(c)).map((l) => `\n  ${l}`);
-  const head = `[${statusOf(c)}] ${String(c.createdBy)} — ${String(c.text)}\n  page: ${String(c.page)}${anchor.join('')}`;
-  const body = replies.map((r) => `  ↳ ${String(r.createdBy)}: ${String(r.text)}`).join('\n');
-  return replies.length ? `${head}\n${body}` : head;
+  const threadId = String(c.parentId || c.id);
+  const t = (await siteThreads(store, site)).find((x) => x.id === threadId);
+  if (!t)
+    throw new Error(`thread ${threadId} is past the newest 500 records — open it in the widget`);
+  const said = t.reaction ? `reacted ${t.reaction}` : `— ${t.text}`;
+  const lines = [
+    `[${t.status}] #${t.num} ${t.author} ${said}`,
+    `  page: ${t.page}`,
+    ...anchorLines(t.anchor).map((l) => `  ${l}`),
+  ];
+  if (t.reactions.length) lines.push(`  reactions: ${reactionsText(t.reactions)}`);
+  for (const r of t.replies) {
+    lines.push(`  ↳ ${r.author}: ${r.text}`);
+    if (r.reactions.length) lines.push(`    reactions: ${reactionsText(r.reactions)}`);
+  }
+  return lines.join('\n');
 }
 
 async function history(ctx: PluginActionCtx, args: Record<string, string>): Promise<unknown> {
@@ -236,15 +370,10 @@ async function history(ctx: PluginActionCtx, args: Record<string, string>): Prom
 async function exportMd(ctx: PluginActionCtx, args: Record<string, string>): Promise<string> {
   if (!args.site) throw new Error('site is required');
   const status = statusArg(args.status);
-  const rows = await topLevel(ctx, args.site, status);
+  const threads = await siteThreads(new DocStore(ctx.platform.db), args.site);
   let out = `# comments on ${args.site}\n`;
-  for (const c of rows) {
-    out += `\n## [${String(c.id)}] (${statusOf(c)}) ${String(c.text)}\n`;
-    out += `- page: \`${String(c.page)}\`\n`;
-    for (const line of anchorLines(anchorOfRecord(c))) out += `${line}\n`;
-    if (c.textSnippet) out += `- text: "${String(c.textSnippet)}"\n`;
-    out += `- by: ${String(c.createdBy)}\n`;
-  }
+  for (const t of threads.reverse())
+    if (status === 'all' || t.status === status) out += `\n${threadMarkdown(t)}\n`;
   return out;
 }
 
@@ -262,16 +391,26 @@ export const comments: Plugin = {
       summary: 'create a comment',
       args: [
         siteArg,
-        { name: 'text', required: true },
+        { name: 'text', help: 'required unless reaction is set' },
         { name: 'page' },
         { name: 'selector' },
         { name: 'label' },
         { name: 'textSnippet' },
         { name: 'html' },
         ...ANCHOR_ARGS.map((name) => ({ name })),
+        {
+          name: 'reaction',
+          help: `an emoji left on the page instead of text: ${REACTIONS.join(' ')}`,
+        },
       ],
       render: 'json',
       handler: create,
+    },
+    react: {
+      summary: 'react to a comment or reply with an emoji (delete the reaction to remove it)',
+      args: [siteArg, idArg, { name: 'emoji', required: true, help: REACTIONS.join(' ') }],
+      render: 'json',
+      handler: react,
     },
     reply: {
       summary: 'reply to a comment',

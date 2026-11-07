@@ -453,6 +453,7 @@ beforeAll(async () => {
     'hsite',
     'qsite',
     'seensite',
+    'rxsite',
   ]) {
     const form = new FormData();
     form.append('files', new File(['<h1>x</h1>'], 'index.html', { type: 'text/html' }));
@@ -728,6 +729,93 @@ describe('comments seen state', () => {
   });
 });
 
+describe('comment reactions', () => {
+  const SITE = 'rxsite';
+  const post = (name: string, args: Record<string, unknown>) =>
+    cc(`/api/plugins/comments/actions/${name}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ args: { site: SITE, ...args } }),
+    });
+  const thread = async () => {
+    const { result: head } = await act('create', { site: SITE, text: 'head' });
+    const { result: reply } = await act('reply', { site: SITE, id: String(head.id), text: 'r' });
+    return { head: String(head.id), reply: String(reply.id) };
+  };
+
+  it('stores a reaction on a comment and on a reply under the thread', async () => {
+    const { head, reply } = await thread();
+    const { result: onHead } = await act('react', { site: SITE, id: head, emoji: '👍' });
+    const { result: onReply } = await act('react', { site: SITE, id: reply, emoji: '🎉' });
+    expect(onHead).toMatchObject({ reaction: '👍', parentId: head, reactTo: head, text: '' });
+    expect(onReply).toMatchObject({ reaction: '🎉', parentId: head, reactTo: reply });
+  });
+
+  it('keeps one record per person, emoji and target, and revives a removed one', async () => {
+    const { head } = await thread();
+    const { result: first } = await act('react', { site: SITE, id: head, emoji: '👀' });
+    const { result: again } = await act('react', { site: SITE, id: head, emoji: '👀' });
+    expect(again.id).toBe(first.id);
+    await act('delete', { site: SITE, id: String(first.id) });
+    const { result: back } = await act('react', { site: SITE, id: head, emoji: '👀' });
+    expect(back).toMatchObject({ id: first.id, deleted: false });
+    const { result: other } = await act('react', { site: SITE, id: head, emoji: '🔥' });
+    expect(other.id).not.toBe(first.id);
+  });
+
+  it.each([
+    [{ reaction: '🙃', text: '' }, 'unknown reaction'],
+    [{ reaction: '👍', text: 'hi' }, 'no text'],
+    [{ text: '' }, 'text are required'],
+    [{ text: 'x', reactTo: 'abc' }, 'reactTo needs'],
+  ])('400s a bad reaction create %#', async (args, error) => {
+    const res = await post('create', args);
+    expect(res.status).toBe(400);
+    expect((await res.json<{ error: string }>()).error).toContain(error);
+  });
+
+  it('refuses a reactTo outside the thread and a reaction to a reaction', async () => {
+    const a = await thread();
+    const b = await thread();
+    const res = await post('create', {
+      text: '',
+      reaction: '👍',
+      parentId: a.head,
+      reactTo: b.reply,
+    });
+    expect((await res.json<{ error: string }>()).error).toContain('not a comment in thread');
+    const { result: r } = await act('react', { site: SITE, id: a.head, emoji: '❤️' });
+    const res2 = await post('react', { id: String(r.id), emoji: '👍' });
+    expect(res2.status).toBe(400);
+  });
+
+  it('exports and shows reactions under the comment and the reply, and page reactions with their quote', async () => {
+    const { head, reply } = await thread();
+    await act('react', { site: SITE, id: head, emoji: '✅' });
+    await act('react', { site: SITE, id: reply, emoji: '😂' });
+    const { result: onPage } = await act('create', {
+      site: SITE,
+      text: '',
+      reaction: '🔥',
+      selector: 'main > p',
+      quote: 'ships today',
+    });
+    const md = (await act('export', { site: SITE })).result as unknown as string;
+    const block = (id: string) => md.slice(md.indexOf(`[${id}]`)).split('\n## ')[0]!;
+    expect(block(head)).toContain('- reactions: ✅ ×1 (Dev)');
+    expect(block(head)).toContain('- reply (Dev): r\n  - reactions: 😂 ×1 (Dev)');
+    expect(block(String(onPage.id))).toContain('(open) 🔥 reaction');
+    expect(block(String(onPage.id))).toContain('- quote: "ships today"');
+    expect(md).not.toContain(
+      `[${String((await act('react', { site: SITE, id: head, emoji: '✅' })).result.id)}]`,
+    );
+
+    const shown = (await act('show', { site: SITE, id: head })).result as unknown as string;
+    expect(shown).toContain('reactions: ✅ ×1 (Dev)');
+    expect(shown).toContain('↳ Dev: r\n    reactions: 😂 ×1 (Dev)');
+  });
+});
+
 describe('comment anchors', () => {
   const post = (args: Record<string, unknown>) =>
     cc('/api/plugins/comments/actions/create', {
@@ -803,7 +891,7 @@ describe('comment anchors', () => {
     expect(block('spot one')).toContain('- spot: 82% from left, 12% from top of the element\n');
   });
 
-  it('keeps the first seven create args in place and appends the anchor fields', async () => {
+  it('keeps the first seven create args in place and appends the anchor fields, then reaction', async () => {
     const manifest = await (
       await cc('/api/plugins/comments')
     ).json<{
@@ -821,6 +909,7 @@ describe('comment anchors', () => {
       'quotePrefix',
       'quoteSuffix',
       'point',
+      'reaction',
     ]);
   });
 });
