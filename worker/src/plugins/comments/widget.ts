@@ -609,6 +609,7 @@ type Brisk = {
     lost: anchorLost(t.id),
     me: me.email,
     surface,
+    elsewhere: here(t.page) ? '' : t.page,
   });
 
   function openThreadPop(t: Thread, at: DOMRect) {
@@ -1086,7 +1087,12 @@ type Brisk = {
     const view = panelView(threads, panel, here);
     redraw(
       panelEl,
-      panelHtml(view, panel, { site: SITE, picking, thread: (t) => threadOpts(t, 'panel') }),
+      panelHtml(view, panel, {
+        site: SITE,
+        picking,
+        drafts: drafts.length,
+        thread: (t) => threadOpts(t, 'panel'),
+      }),
     );
   }
   const rowOf = (id: string) =>
@@ -1123,7 +1129,7 @@ type Brisk = {
   function expand(id: string) {
     const t = threadById(id);
     if (!t) return;
-    if (!matches(t, panel.filter, null)) setFilter(t.status);
+    if (t.kind === 'published' && !matches(t, panel.filter, null)) setFilter(t.status);
     if (panel.scope === 'page' && !here(t.page)) {
       panel.scope = 'site';
       remember('scope', 'site');

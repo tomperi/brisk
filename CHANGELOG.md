@@ -36,6 +36,9 @@ releases are published to
   a dot and list first; opening one marks it read, and "Mark unread" keeps it
   on your list, even on a thread only you have posted in. Switch between this
   page and every page of the site; a thread on another page takes you there.
+  Your unpublished drafts list first under "Your drafts" whatever the filter,
+  and the panel's footer copies every comment as Markdown or, when you have
+  drafts, copies or publishes them all.
 
 ### Changed
 

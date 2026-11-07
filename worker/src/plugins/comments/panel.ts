@@ -169,6 +169,8 @@ export interface ThreadOpts {
   lost: boolean;
   me: string;
   surface: 'panel' | 'pop';
+  /** The thread's page when it is not this one, else ''. */
+  elsewhere: string;
 }
 
 function quickTools(t: Thread): string {
@@ -187,9 +189,14 @@ function statusTag(t: Thread): string {
   return '';
 }
 
-function collapsedMeta(t: Thread, me: string): string {
-  if (t.kind === 'draft')
-    return `<div class="meta"><span>Only in your browser, not published</span>${btn('publish', 'Publish', { cls: 'pri' })}</div>`;
+function collapsedMeta(t: Thread, o: ThreadOpts): string {
+  if (t.kind === 'draft') {
+    const where = o.elsewhere
+      ? `On ${escapeHtml(o.elsewhere)}, not published`
+      : 'Only in your browser, not published';
+    return `<div class="meta"><span>${where}</span>${btn('publish', 'Publish', { cls: 'pri' })}</div>`;
+  }
+  const me = o.me;
   const parts: string[] = [];
   const n = t.replies.length;
   if (n) parts.push(`${icon('reply')}<span>${n} ${n === 1 ? 'reply' : 'replies'}</span>`);
@@ -252,7 +259,7 @@ export function threadHtml(t: Thread, o: ThreadOpts): string {
     t.kind === 'draft' && o.open
       ? `<div class="field"><textarea data-draft="${id}" data-keep="draft:${id}" aria-label="Edit draft"></textarea></div>`
       : `<p class="tx">${escapeHtml(t.text)}</p>`;
-  const body = `<div class="bd">${anchorHtml(t, o.lost, o.open)}${text}${o.open ? '' : collapsedMeta(t, o.me)}</div>`;
+  const body = `<div class="bd">${anchorHtml(t, o.lost, o.open)}${text}${o.open ? '' : collapsedMeta(t, o)}</div>`;
   const tools = o.surface === 'panel' && !o.open ? quickTools(t) : '';
   const open = o.open ? `${repliesHtml(t, o)}${openFooter(t, o)}` : '';
   return `<article class="${cls}" data-id="${id}"${rowAttrs}>${tools}${head}${body}${open}</article>`;
@@ -284,10 +291,19 @@ const hiddenUnreadHtml = (hidden: PanelView['hiddenUnread']) =>
     )
     .join('');
 
+const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
+
+/** Copy all always; with drafts, their count, Copy, and Publish all. */
+function footerHtml(drafts: number): string {
+  const copyAll = `<button class="btn sm ghost" data-act="copy-all" title="Copy every comment as Markdown for an agent">${icon('copy')}Copy all</button>`;
+  if (!drafts) return `<div class="ft">${copyAll}</div>`;
+  return `<div class="ft">${copyAll}<span class="ft-n">${plural(drafts, 'draft')}</span>${btn('copy-drafts', 'Copy', { cls: 'ghost' })}${btn('publish-all', 'Publish all', { cls: 'pri', icon: 'publish' })}</div>`;
+}
+
 export function panelHtml(
   view: PanelView,
   state: PanelState,
-  ctx: { site: string; picking: boolean; thread: (t: Thread) => ThreadOpts },
+  ctx: { site: string; picking: boolean; drafts: number; thread: (t: Thread) => ThreadOpts },
 ): string {
   const tab = (s: Scope, label: string) =>
     `<button class="tab${state.scope === s ? ' on' : ''}" role="tab" aria-selected="${state.scope === s}" data-act="scope" data-v="${s}">${label} <span class="n">${view.scopeCounts[s]}</span></button>`;
@@ -295,12 +311,17 @@ export function panelHtml(
     `<button class="chip${state.filter === f ? ' on' : ''}" aria-pressed="${state.filter === f}" data-act="filter" data-v="${f}">${FILTER_LABEL[f]} <span class="n">${view.filterCounts[f]}</span></button>`;
   const archived: Filter = state.filter === 'deleted' ? 'deleted' : 'resolved';
   const statOn = state.filter === 'resolved' || state.filter === 'deleted';
+  const drafts = view.drafts.length
+    ? `<div class="grp">${icon('comment')}<span>Your drafts</span><span class="n">${view.drafts.length}</span></div>${view.drafts.map((t) => threadHtml(t, ctx.thread(t))).join('')}`
+    : '';
   const list = view.groups.length
     ? view.groups
         .map((g) => {
           const head =
             state.scope === 'page'
-              ? ''
+              ? drafts
+                ? `<div class="grp">${icon('page')}<span>${FILTER_LABEL[state.filter]}</span></div>`
+                : ''
               : g.here
                 ? `<div class="grp">${icon('page')}<span>This page</span></div>`
                 : g.page
@@ -319,7 +340,8 @@ export function panelHtml(
   }</div>
 <div class="tabs" role="tablist">${tab('page', 'This page')}${tab('site', 'All pages')}</div>
 <div class="flt">${chip('unread')}${chip('open')}<button class="stat${statOn ? ' on' : ''}" data-act="status-menu" aria-haspopup="menu">${FILTER_LABEL[archived]} ${view.filterCounts[archived]}${icon('chev')}</button></div>
-<div class="list">${list}${hidden}</div>`;
+<div class="list">${drafts}${list}${hidden}</div>
+${footerHtml(ctx.drafts)}`;
 }
 
 export type MenuItem =

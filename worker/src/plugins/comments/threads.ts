@@ -171,9 +171,10 @@ const unreadInList = (t: Thread, expanded: Expanded | null) =>
 export const matches = (t: Thread, filter: Filter, expanded: Expanded | null): boolean =>
   filter === 'unread' ? t.status !== 'deleted' && unreadInList(t, expanded) : t.status === filter;
 
-/** Unread and Open both show the open pins; Resolved and Deleted show theirs. */
+/** Drafts always pin; Unread and Open show the open pins, Resolved and Deleted theirs. */
 export const pinShown = (t: Thread, filter: Filter): boolean =>
-  filter === 'unread' || filter === 'open' ? t.status === 'open' : t.status === filter;
+  t.kind === 'draft' ||
+  (filter === 'unread' || filter === 'open' ? t.status === 'open' : t.status === filter);
 
 export interface PageGroup {
   page: string;
@@ -182,6 +183,9 @@ export interface PageGroup {
 }
 
 export interface PanelView {
+  /** My drafts in scope, in every filter, oldest first. */
+  drafts: Thread[];
+  /** Published threads the filter lists. */
   groups: PageGroup[];
   scopeCounts: Record<Scope, number>;
   filterCounts: Record<Filter, number>;
@@ -189,8 +193,9 @@ export interface PanelView {
   hiddenUnread: { status: Status; count: number }[];
 }
 
-/** Unread first, then the newest activity; on All pages this page's group
- *  leads and the others follow in the order of their first thread. */
+/** Drafts lead, outside the filter. Then unread first and the newest activity;
+ *  on All pages this page's group leads and the others follow in the order of
+ *  their first thread. */
 export function panelView(
   threads: readonly Thread[],
   state: Pick<PanelState, 'scope' | 'filter' | 'expanded'>,
@@ -198,8 +203,9 @@ export function panelView(
 ): PanelView {
   const { scope, filter, expanded } = state;
   const inScope = (t: Thread, s: Scope) => s === 'site' || isHere(t.page);
-  const count = (pred: (t: Thread) => boolean) => threads.filter(pred).length;
-  const shown = threads
+  const posted = threads.filter((t) => t.kind === 'published');
+  const count = (pred: (t: Thread) => boolean) => posted.filter(pred).length;
+  const shown = posted
     .filter((t) => inScope(t, scope) && matches(t, filter, expanded))
     .sort(
       (a, b) =>
@@ -216,6 +222,9 @@ export function panelView(
   }
   const groups = [...byPage.values()].sort((a, b) => Number(b.here) - Number(a.here));
   return {
+    drafts: threads
+      .filter((t) => t.kind === 'draft' && inScope(t, scope))
+      .sort((a, b) => a.num - b.num),
     groups,
     scopeCounts: {
       page: count((t) => inScope(t, 'page') && matches(t, filter, expanded)),

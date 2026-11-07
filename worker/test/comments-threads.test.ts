@@ -144,6 +144,19 @@ describe('panelView', () => {
     ]);
   });
 
+  it('lists drafts in scope under every filter and counts only published threads', () => {
+    const threads = threadsOf(docs, seen, [draft('mine', 12), draft('there', 13, '/pricing')]);
+    for (const filter of ['unread', 'open', 'resolved', 'deleted'] as const) {
+      expect(panelView(threads, { ...state, filter }, here).drafts.map((t) => t.id)).toEqual([
+        'mine',
+      ]);
+    }
+    const site = panelView(threads, { ...state, scope: 'site' }, here);
+    expect(site.drafts.map((t) => t.id)).toEqual(['mine', 'there']);
+    expect(ids(site)).not.toContain('mine');
+    expect(site.filterCounts.open).toBe(4);
+  });
+
   it('keeps a thread with no page out of this page group', () => {
     const view = panelView(
       threadsOf([doc('a', ME, 0), doc('b', ME, 1, { page: '' })]),

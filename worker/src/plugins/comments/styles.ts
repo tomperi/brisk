@@ -276,6 +276,11 @@ textarea::placeholder { color: var(--fg-muted); }
 }
 .hidden-unread:hover { background: var(--bg-subtle); color: var(--fg); }
 .hidden-unread .i { margin-left: auto; }
+.ft {
+  display: flex; align-items: center; gap: 6px; padding: 10px 20px 10px 10px; flex: none;
+  border-top: 1px solid var(--line); background: var(--bg);
+}
+.ft-n { margin-left: auto; padding-right: 2px; font-size: 12px; color: var(--fg-muted); white-space: nowrap; }
 .empty { padding: 56px 32px; text-align: center; color: var(--fg-muted); font-size: 12px; }
 .empty .i { width: 20px; height: 20px; }
 .empty .ring { width: 40px; height: 40px; border-radius: 20px; background: var(--bg-muted); display: grid; place-items: center; margin: 0 auto 12px; color: var(--fg-muted); }
