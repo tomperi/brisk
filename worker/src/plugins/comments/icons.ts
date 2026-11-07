@@ -27,6 +27,8 @@ const PATHS = {
     '<path d="M8 10V2.5M5 5.5l3-3 3 3"/><path d="M3 9.5v2A1.5 1.5 0 0 0 4.5 13h7a1.5 1.5 0 0 0 1.5-1.5v-2"/>',
   hide: '<path d="M2.5 8a5.5 5.5 0 1 0 11 0 5.5 5.5 0 1 0-11 0M4.2 11.8l7.6-7.6"/>',
   arrow: '<path d="M3.5 8h9M8.5 4l4 4-4 4"/>',
+  smile:
+    '<circle cx="8" cy="8" r="5.75"/><path d="M5.75 9.5a2.75 2.75 0 0 0 4.5 0"/><path d="M6.25 6.5v.25M9.75 6.5v.25"/>',
 } as const;
 
 export type IconName = keyof typeof PATHS;

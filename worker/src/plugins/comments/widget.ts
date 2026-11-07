@@ -27,6 +27,7 @@ import {
   escapeHtml,
   menuHtml,
   panelHtml,
+  quickBarHtml,
   quoteHtml,
   spotName,
   threadHtml,
@@ -37,11 +38,13 @@ import {
   buildThreads,
   matches,
   panelView,
+  parseEmoji,
   parseFilter,
   parseScope,
   pinShown,
   threadMarkdown,
   type Draft,
+  type Emoji,
   type Filter,
   type PanelState,
   type StoredDoc,
@@ -237,6 +240,12 @@ type Brisk = {
       .slice(0, 2)
       .map((c) => `.${c}`)
       .join('')}`;
+  /** What a comment or reaction stores about the element it lands on. */
+  const elementFields = (el: Element) => ({
+    label: nameOf(el),
+    textSnippet: clean(el.textContent ?? '', 140),
+    html: clean(el.outerHTML, 300),
+  });
   const HEADING = 'h1, h2, h3, h4, h5, h6, [role="heading"]';
   /** Its accessible name where it has one, else its first heading, else its tag. */
   const nameOf = (el: Element) => {
@@ -278,6 +287,7 @@ type Brisk = {
         <button class="ib" data-act="min" aria-label="Minimize" data-tip="Minimize">${icon('minimize')}</button>
       </div>
       <button class="nub" id="nub" data-act="restore" aria-label="Show comments" data-tip="Comments"></button>
+      <div class="qbar" id="qbar" role="toolbar" aria-label="Comment or react"></div>
       <div class="menu" id="menu" role="menu"></div>
       <div class="toast" id="toast" role="status"></div>
     </div>`;
@@ -291,6 +301,7 @@ type Brisk = {
     badge = $('badge'),
     nub = $('nub'),
     menu = $('menu'),
+    qbar = $('qbar'),
     toastEl = $('toast');
   const layer = root.querySelector('.layer')!;
 
@@ -315,6 +326,7 @@ type Brisk = {
   const setPick = (on: boolean) => {
     picking = on;
     snapshot = null;
+    if (on) closeBar();
     hi.style.display = 'none';
     const b = fab.querySelector<HTMLElement>('[data-act="pick"]')!;
     b.classList.toggle('on', on);
@@ -443,16 +455,19 @@ type Brisk = {
   let snapshot: Range | null = null;
   let swallowClick = false;
   const startCompose = (hit: Capture, x: number, y: number) => {
-    if (!openCompose(hit, x, y)) return false;
+    if (!openCompose(hit, x, y, 'keep-picking')) return false;
     setPick(false);
     return true;
   };
   const onDown = (e: MouseEvent) => {
+    pressing = true;
     swallowClick = false;
     snapshot =
       picking && !e.composedPath().includes(host) ? (liveRange()?.cloneRange() ?? null) : null;
   };
   const onUp = (e: MouseEvent) => {
+    pressing = false;
+    checkSelection();
     if (!picking) return;
     const el = elAt(e.clientX, e.clientY);
     const range = liveRange();
@@ -486,6 +501,115 @@ type Brisk = {
     if (hit && end) startCompose(hit, end.x, end.y);
     else setPick(!picking);
   };
+
+  // ---- quick bar: Comment / React by a page selection, and the emoji row ----
+  type Bar =
+    | { kind: 'closed' }
+    | { kind: 'selection'; range: Range; step: 'actions' | 'emoji' }
+    | { kind: 'target'; thread: string; to: string; from: DOMRect };
+  let bar: Bar = { kind: 'closed' };
+  const coarse = matchMedia('(pointer: coarse)');
+  const lastLine = (r: Range) =>
+    [...r.getClientRects()].filter((b) => b.width || b.height).pop() ?? null;
+
+  function closeBar() {
+    if (bar.kind === 'closed') return;
+    bar = { kind: 'closed' };
+    qbar.classList.remove('in', 'show');
+  }
+  /** Above the selection's last line, below it on touch (the OS callout sits
+   *  above), or under the Add reaction button. Closes once the words scroll away. */
+  function placeBar() {
+    if (bar.kind === 'closed') return;
+    const box = bar.kind === 'target' ? bar.from : lastLine(bar.range);
+    if (!box || box.bottom < 0 || box.top > innerHeight) return closeBar();
+    const w = qbar.offsetWidth;
+    const h = qbar.offsetHeight;
+    const right = innerWidth - (bar.kind === 'selection' && docked ? PANEL_W : 0);
+    const below = bar.kind === 'target' || coarse.matches || box.top - h - 8 < 8;
+    const x = bar.kind === 'target' ? box.left - 4 : box.right - w / 2;
+    const top = below
+      ? Math.min(box.bottom + (coarse.matches ? 12 : 6), innerHeight - h - 8)
+      : box.top - h - 8;
+    qbar.style.left = `${Math.min(Math.max(8, x), right - w - 8)}px`;
+    qbar.style.top = `${top}px`;
+    qbar.style.setProperty('--qo', below ? 'center top' : 'center bottom');
+  }
+  function showBar(next: Exclude<Bar, { kind: 'closed' }>) {
+    const fresh = bar.kind === 'closed';
+    bar = next;
+    qbar.innerHTML = quickBarHtml(next.kind === 'selection' ? next.step : 'emoji');
+    qbar.classList.add('show');
+    placeBar();
+    if (fresh) requestAnimationFrame(() => bar.kind !== 'closed' && qbar.classList.add('in'));
+  }
+
+  const EDITABLE = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
+  /** A page selection the bar may offer: real words, outside fields and the widget. */
+  function barSelection(): Range | null {
+    if (hidden || collapsed || picking) return null;
+    const range = liveRange();
+    if (!range || !range.toString().trim()) return null;
+    const active = document.activeElement as HTMLElement | null;
+    if (active?.matches(EDITABLE) || active?.isContentEditable) return null;
+    const node = range.commonAncestorContainer;
+    const el = (node instanceof Element ? node : node.parentElement) as HTMLElement | null;
+    return !el || el.closest(EDITABLE) || el.isContentEditable ? null : range;
+  }
+  const sameRange = (a: Range, b: Range) =>
+    a.compareBoundaryPoints(Range.START_TO_START, b) === 0 &&
+    a.compareBoundaryPoints(Range.END_TO_END, b) === 0;
+  let pressing = false;
+  let selTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Debounced: a drag waits for mouseup, keyboard and touch selection for a pause. */
+  function checkSelection() {
+    clearTimeout(selTimer);
+    selTimer = setTimeout(() => {
+      if (pressing || bar.kind === 'target') return;
+      const range = barSelection();
+      if (!range) return bar.kind === 'selection' ? closeBar() : undefined;
+      if (bar.kind === 'selection' && sameRange(bar.range, range)) return;
+      showBar({ kind: 'selection', range: range.cloneRange(), step: 'actions' });
+    }, 200);
+  }
+
+  async function reactOnPage(range: Range, emoji: Emoji) {
+    const end = caretAfter(range);
+    const hit = end && quoteAt(range, end.x, end.y);
+    if (!hit) return toast('Could not quote that selection');
+    document.getSelection()?.removeAllRanges();
+    try {
+      await action('create', {
+        text: '',
+        reaction: emoji,
+        page: pageId(),
+        ...anchorFields(hit.anchor),
+        ...elementFields(hit.el),
+      });
+    } catch {
+      toast('Could not add the reaction');
+    }
+  }
+
+  const reacting = new Set<string>();
+  /** 'add' from the emoji row leaves a reaction I already have; a chip toggles mine. */
+  async function setReaction(threadId: string, to: string, emoji: Emoji, how: 'add' | 'toggle') {
+    const t = threadById(threadId);
+    const target = t?.id === to ? t : t?.replies.find((r) => r.id === to);
+    if (!t || t.kind === 'draft' || !target) return;
+    const mine = target.reactions.find((r) => r.emoji === emoji)?.mine ?? null;
+    const k = `${to}:${emoji}`;
+    if ((mine && how === 'add') || reacting.has(k)) return;
+    reacting.add(k);
+    try {
+      if (mine) await action('delete', { id: mine });
+      else await action('react', { id: to, emoji });
+    } catch {
+      toast(mine ? 'Could not remove the reaction' : 'Could not add the reaction');
+    } finally {
+      reacting.delete(k);
+    }
+  }
 
   // ---- popover --------------------------------------------------------------
   function placePop(x: number, y: number) {
@@ -547,7 +671,13 @@ type Brisk = {
     return true;
   }
 
-  function openCompose({ el, anchor, range }: Capture, x: number, y: number): boolean {
+  /** From comment mode, saving keeps picking; from the selection bar it is one comment. */
+  function openCompose(
+    { el, anchor, range }: Capture,
+    x: number,
+    y: number,
+    after: 'keep-picking' | 'done',
+  ): boolean {
     const q = anchor.kind === 'text' ? anchor.quote : null;
     const opened = showPop(
       `<div class="compose"><p class="ctx">New comment · ${q ? 'on the selected words' : escapeHtml(nameOf(el))}</p>${q ? quoteHtml(q, false, 200) : ''}
@@ -576,9 +706,7 @@ type Brisk = {
         text,
         page: pageId(),
         ...anchorFields(anchor),
-        label: nameOf(el),
-        textSnippet: clean(el.textContent ?? '', 140),
-        html: clean(el.outerHTML, 300),
+        ...elementFields(el),
         dataAttrs: clean(
           [...el.attributes]
             .filter((a) => a.name.startsWith('data-'))
@@ -591,8 +719,11 @@ type Brisk = {
       saveDrafts();
       closePop();
       render();
+      if (after === 'done') {
+        toast('Draft saved');
+        return;
+      }
       toast('Draft saved. Click the next spot, or Esc to stop.');
-      // Stay in comment mode: keep picking until Esc (or the toggle) ends it.
       setPick(true);
     };
     ta.onkeydown = (ev) => {
@@ -951,17 +1082,19 @@ type Brisk = {
       const { pin } = s;
       pin.className = [
         'pin',
+        t.reaction ? 'reaction' : '',
         t.kind === 'draft' ? 'draft' : t.status !== 'open' ? t.status : t.unread ? '' : 'read',
         t.id === focusedId() ? 'on' : '',
         pin.classList.contains('flash') ? 'flash' : '',
       ]
         .filter(Boolean)
         .join(' ');
-      pin.textContent = String(t.num);
-      pin.title = `${t.author} · ${clean(t.text, 60)}`;
+      pin.textContent = t.reaction ?? String(t.num);
+      pin.title = `#${t.num} · ${t.author}${t.reaction ? ` reacted ${t.reaction}` : ` · ${clean(t.text, 60)}`}`;
+      const kind = t.reaction ? `reaction ${t.reaction}` : 'comment';
       pin.setAttribute(
         'aria-label',
-        `${t.unread ? 'Unread comment' : 'Comment'} ${t.num} by ${t.author}`,
+        `${t.unread ? `Unread ${kind}` : kind[0]!.toUpperCase() + kind.slice(1)} ${t.num} by ${t.author}`,
       );
       s.placement = place(t);
       applyPin(pin, s.placement);
@@ -1071,6 +1204,7 @@ type Brisk = {
         s.placement = place(s.thread);
         applyPin(s.pin, s.placement);
       }
+      if (bar.kind === 'selection') placeBar();
       paint();
     });
   };
@@ -1266,6 +1400,7 @@ type Brisk = {
   }
   function applyCollapsed() {
     layer.classList.toggle('collapsed', collapsed);
+    closeBar();
     if (collapsed) {
       closePop();
       if (panel.open) setPanelOpen(false);
@@ -1275,6 +1410,7 @@ type Brisk = {
   }
   function applyHidden() {
     host.style.display = hidden ? 'none' : '';
+    closeBar();
     applyDock();
     paint();
   }
@@ -1363,6 +1499,39 @@ type Brisk = {
       toast('Drafts discarded');
     },
     'toggle-pins': togglePins,
+    'sel-comment': () => {
+      if (bar.kind !== 'selection') return;
+      const { range } = bar;
+      closeBar();
+      const end = caretAfter(range);
+      const hit = end && quoteAt(range, end.x, end.y);
+      if (hit && end) openCompose(hit, end.x, end.y, 'done');
+      else toast('Could not quote that selection');
+    },
+    'sel-react': () => {
+      if (bar.kind === 'selection') showBar({ ...bar, step: 'emoji' });
+    },
+    emoji: (el) => {
+      const emoji = parseEmoji(el.dataset.v);
+      const from = bar;
+      closeBar();
+      if (!emoji) return;
+      if (from.kind === 'selection') void reactOnPage(from.range, emoji);
+      else if (from.kind === 'target') void setReaction(from.thread, from.to, emoji, 'add');
+    },
+    react: (el) => {
+      const emoji = parseEmoji(el.dataset.v);
+      if (emoji) void setReaction(idOf(el), el.dataset.to ?? '', emoji, 'toggle');
+    },
+    'react-menu': (el) => {
+      if (bar.kind === 'target' && bar.to === el.dataset.to) return closeBar();
+      showBar({
+        kind: 'target',
+        thread: idOf(el),
+        to: el.dataset.to ?? '',
+        from: el.getBoundingClientRect(),
+      });
+    },
     hide: () => {
       hidden = true;
       remember('hidden', '1');
@@ -1388,10 +1557,12 @@ type Brisk = {
     } else if (act !== 'status-menu' && act !== 'more-menu') closeMenu();
     run(el);
   });
-  // Pressing Comment must not collapse a selection made first.
+  // Pressing Comment or the quick bar must not collapse a selection made first.
   root.addEventListener('mousedown', (e) => {
-    if ((e.target as Element).closest('[data-act="pick"]')) e.preventDefault();
+    const target = e.target as Element;
+    if (target.closest('[data-act="pick"], .qbar')) e.preventDefault();
     if (menuOpen && !e.composedPath().includes(menu)) closeMenu();
+    if (!e.composedPath().includes(qbar) && !target.closest('[data-act="react-menu"]')) closeBar();
   });
   root.addEventListener('input', (e) => {
     const ta = e.target;
@@ -1431,6 +1602,7 @@ type Brisk = {
       setPick(false);
       closePop();
       closeMenu();
+      closeBar();
     }
     // composedPath, not e.target: this listener sits outside our shadow root,
     // so retargeting would report the host <div> for keys typed in the widget's
@@ -1461,7 +1633,11 @@ type Brisk = {
     if (popHasUnsavedText()) nudge();
     else if (pop.classList.contains('show')) closePop();
     closeMenu();
+    closeBar();
   };
+  document.addEventListener('selectionchange', checkSelection);
+  for (const scroller of [panelEl, pop])
+    scroller.addEventListener('scroll', () => bar.kind === 'target' && closeBar(), true);
   document.addEventListener('mousedown', onClickAway, false);
   // Reposition pins on scroll; the popover stays put (it's fixed) so a scrolling
   // textarea can't dismiss it.

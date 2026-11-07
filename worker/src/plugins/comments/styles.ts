@@ -154,6 +154,7 @@ textarea::placeholder { color: var(--fg-muted); }
 .pin.resolved { background: var(--bg-muted); color: var(--fg-muted); border: 1px solid var(--line); line-height: 20px; }
 .pin.deleted { background: var(--bg-muted); color: var(--fg-faint); border: 1px solid var(--line); line-height: 20px; text-decoration: line-through; }
 .pin.detached { opacity: 0.7; }
+.pin.reaction { font-size: 12px; font-weight: 400; }
 .pin.on { box-shadow: var(--ring), 0 0 0 4px var(--accent), var(--shadow-pin); }
 .pin.flash { animation: pin-flash 900ms var(--ease) 2; }
 @keyframes pin-flash {
@@ -195,6 +196,24 @@ textarea::placeholder { color: var(--fg-muted); }
 .meta { margin-top: 6px; font-size: 12px; color: var(--fg-muted); display: flex; align-items: center; gap: 6px; }
 .meta .btn { margin-left: auto; }
 .meta .fresh { color: var(--accent-ink); font-weight: 600; }
+.rxq { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.rxq > :last-child { flex: 1; min-width: 0; }
+.rxe { font-size: 16px; line-height: 20px; margin: 6px 0 4px; flex: none; }
+.rxs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px; }
+.rp .rxs { padding-left: 32px; }
+.rc {
+  position: relative; display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px 0 6px;
+  border-radius: 12px; border: 1px solid var(--line); background: var(--bg); color: var(--fg-2);
+  font-size: 12px; font-weight: 500; line-height: 1; pointer-events: auto;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, transform 110ms var(--ease);
+}
+.rc .e { font-size: 13px; }
+.rc:hover:not(:disabled) { background: var(--bg-subtle); border-color: var(--line-strong); color: var(--fg); }
+.rc:active:not(:disabled) { transform: scale(0.96); }
+.rc.on { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-ink); }
+.rc:disabled { cursor: default; }
+.ib.add-rx { width: 24px; height: 24px; border-radius: 12px; }
+.rc[data-tip]::after, .add-rx[data-tip]::after { left: 0; right: auto; max-width: 240px; white-space: normal; }
 .rp { margin-top: 12px; }
 .rp .tx { margin-top: 2px; padding-left: 32px; }
 .new { font-size: 11px; font-weight: 600; color: var(--accent-ink); background: var(--accent-tint); border-radius: 4px; padding: 0 6px; line-height: 18px; }
@@ -338,6 +357,23 @@ textarea::placeholder { color: var(--fg-muted); }
 .layer.collapsed .nub { opacity: 1; transform: none; visibility: visible; pointer-events: auto; transition: transform 240ms var(--ease), opacity 160ms ease-out, visibility 0s; }
 .layer.collapsed .nub:active { transform: scale(0.96); }
 
+/* quick bar: Comment / React by a page selection, and the emoji row */
+.qbar {
+  position: fixed; display: none; align-items: center; gap: 2px; padding: 4px; pointer-events: auto; z-index: 6;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow-pop);
+  opacity: 0; transform: scale(0.97); transform-origin: var(--qo, center bottom);
+  transition: opacity 120ms ease-out, transform 140ms var(--ease);
+}
+.qbar.show { display: flex; }
+.qbar.in { opacity: 1; transform: none; }
+.qbar [data-tip]::after { left: 50%; right: auto; translate: -50% 0; }
+.emo {
+  width: 32px; height: 32px; border-radius: 6px; display: grid; place-items: center; font-size: 18px; line-height: 1;
+  pointer-events: auto; transition: background-color 120ms ease, transform 110ms var(--ease);
+}
+.emo:hover { background: var(--bg-muted); }
+.emo:active { transform: scale(0.9); }
+
 /* menu: right-click on the toolbar, the panel's More button, the status picker */
 .menu {
   position: fixed; min-width: 232px; padding: 4px; pointer-events: auto; background: var(--bg);
@@ -371,6 +407,9 @@ textarea::placeholder { color: var(--fg-muted); }
   .btn, .btn.sm, .chip, .stat, .mi { height: 40px; }
   .chip { border-radius: 20px; }
   .ib, .tools .ib, .send { width: 40px; height: 40px; }
+  .emo { width: 40px; height: 40px; }
+  .rc { height: 40px; border-radius: 20px; padding: 0 12px 0 10px; }
+  .ib.add-rx { width: 40px; height: 40px; border-radius: 20px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

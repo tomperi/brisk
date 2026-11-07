@@ -92,6 +92,63 @@ describe('threadHtml', () => {
   });
 });
 
+describe('reactions', () => {
+  const rx = (id: string, email: string, emoji: string, to: string) =>
+    doc(id, 5, {
+      parentId: 't',
+      reaction: emoji,
+      reactTo: to,
+      text: '',
+      createdByEmail: email,
+      createdBy: email.split('@')[0],
+    });
+  const docs = [
+    doc('t', 0),
+    doc('r', 1, { parentId: 't', text: 'a reply' }),
+    rx('x1', 'ana@example.com', '👍', 't'),
+    rx('x2', ME, '👍', 't'),
+    rx('x3', 'bo@example.com', '🎉', 'r'),
+  ];
+
+  it('shows a chip per emoji with its count and who, pressed when one is mine', () => {
+    const html = threadHtml(threadOf(docs), opts);
+    expect(html).toMatch(
+      /class="rc on" data-act="react" data-v="👍" data-to="t" aria-pressed="true" data-tip="ana, You"/,
+    );
+    expect(text(html)).toContain('👍2');
+    expect(text(html)).toContain('1 reply');
+    expect(html).not.toContain('data-act="react-menu"');
+  });
+
+  it('offers Add reaction on the open comment and on each reply', () => {
+    const html = threadHtml(threadOf(docs), { ...opts, open: true });
+    expect(html).toContain('data-act="react-menu" data-to="t"');
+    expect(html).toContain('data-act="react-menu" data-to="r"');
+    expect(html).toMatch(
+      /class="rc" data-act="react" data-v="🎉" data-to="r" aria-pressed="false"/,
+    );
+  });
+
+  it('freezes the chips on a deleted thread', () => {
+    const html = threadHtml(threadOf([{ ...docs[0]!, deleted: true }, ...docs.slice(1)]), {
+      ...opts,
+      open: true,
+    });
+    expect(html).not.toContain('data-act="react"');
+    expect(html).toContain('disabled');
+  });
+
+  it('renders a reaction on the page as its emoji beside the quote, with no text', () => {
+    const html = threadHtml(
+      threadOf([doc('p', 0, { reaction: '🔥', text: '', selector: 'p', quote: 'ships today' })]),
+      opts,
+    );
+    expect(text(html)).toContain('🔥“ships today”');
+    expect(html).not.toContain('class="tx"');
+    expect(html).toContain('aria-label="Unread. ana reacted 🔥"');
+  });
+});
+
 describe('panelHtml', () => {
   it('points to unread threads the active filter hides', () => {
     const threads = buildThreads({

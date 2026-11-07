@@ -6,7 +6,9 @@ import { icon, type IconName } from './icons';
 import {
   isNewReply,
   newReplyCount,
+  REACTIONS,
   type Filter,
+  type Reaction,
   type PanelState,
   type PanelView,
   type Scope,
@@ -161,6 +163,40 @@ const btn = (act: string, label: string, opts: { icon?: IconName; cls?: string }
 const ib = (act: string, label: string, name: IconName) =>
   `<button class="ib" data-act="${act}" aria-label="${label}" data-tip="${label}">${icon(name)}</button>`;
 
+/** The eight emoji as buttons; each runs `emoji` with its emoji in data-v. */
+export const emojiRowHtml = () =>
+  REACTIONS.map(
+    (e) =>
+      `<button class="emo" data-act="emoji" data-v="${e}" aria-label="React with ${e}">${e}</button>`,
+  ).join('');
+
+/** The bar that floats by a selection or an Add reaction button. */
+export const quickBarHtml = (step: 'actions' | 'emoji') =>
+  step === 'emoji'
+    ? emojiRowHtml()
+    : `${ib('sel-comment', 'Add comment', 'comment')}${ib('sel-react', 'Add reaction', 'smile')}`;
+
+const sameEmail = (a: string, b: string) =>
+  !!a && a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** Chips under a comment or reply; `to` is its id. Clicking one toggles mine. */
+function reactionsHtml(rs: readonly Reaction[], to: string, o: ThreadOpts, live: boolean): string {
+  const chips = rs.map((r) => {
+    const names = r.by
+      .map((p) => (sameEmail(p.email, o.me) ? 'You' : p.name || p.email))
+      .join(', ');
+    const act = live
+      ? ` data-act="react" data-v="${r.emoji}" data-to="${escapeHtml(to)}" aria-pressed="${!!r.mine}"`
+      : ' disabled';
+    return `<button class="rc${r.mine ? ' on' : ''}"${act} data-tip="${escapeHtml(names)}" aria-label="${escapeHtml(`${r.emoji} ${r.by.length}: ${names}`)}"><span class="e">${r.emoji}</span>${r.by.length}</button>`;
+  });
+  const add =
+    live && o.open
+      ? `<button class="ib add-rx" data-act="react-menu" data-to="${escapeHtml(to)}" aria-label="Add reaction" data-tip="Add reaction">${icon('smile')}</button>`
+      : '';
+  return chips.length || add ? `<div class="rxs">${chips.join('')}${add}</div>` : '';
+}
+
 export interface ThreadOpts {
   open: boolean;
   /** Its Delete (or a draft's Discard) waits for a second click. */
@@ -211,11 +247,13 @@ function collapsedMeta(t: Thread, o: ThreadOpts): string {
     : '';
 }
 
+const reactable = (t: Thread) => t.kind === 'published' && t.status !== 'deleted';
+
 function repliesHtml(t: Thread, o: ThreadOpts): string {
   return t.replies
     .map(
       (r) =>
-        `<div class="rp"><div class="row">${avatar(r.author || r.email, r.email)}<span class="nm" title="${escapeHtml(r.email)}">${escapeHtml(r.author || r.email)}</span>${timeHtml(r.createdAt)}${isNewReply(r, o.since, o.me) ? '<span class="new">New</span>' : ''}</div><p class="tx">${escapeHtml(r.text)}</p></div>`,
+        `<div class="rp"><div class="row">${avatar(r.author || r.email, r.email)}<span class="nm" title="${escapeHtml(r.email)}">${escapeHtml(r.author || r.email)}</span>${timeHtml(r.createdAt)}${isNewReply(r, o.since, o.me) ? '<span class="new">New</span>' : ''}</div><p class="tx">${escapeHtml(r.text)}</p>${reactionsHtml(r.reactions, r.id, o, reactable(t))}</div>`,
     )
     .join('');
 }
@@ -252,14 +290,16 @@ export function threadHtml(t: Thread, o: ThreadOpts): string {
   const toggle = o.surface === 'pop' ? '' : o.open ? ' data-act="collapse" title="Collapse"' : '';
   const rowAttrs =
     o.surface === 'panel' && !o.open
-      ? ` data-act="expand" tabindex="0" role="button" aria-expanded="false" aria-label="${escapeHtml(`${t.unread ? 'Unread. ' : ''}${t.author}: ${ellipsis(t.text, 80)}`)}"`
+      ? ` data-act="expand" tabindex="0" role="button" aria-expanded="false" aria-label="${escapeHtml(`${t.unread ? 'Unread. ' : ''}${t.author}${t.reaction ? ` reacted ${t.reaction}` : `: ${ellipsis(t.text, 80)}`}`)}"`
       : '';
   const head = `<div class="row"${toggle}>${avatar(t.author || t.email, t.email, t.kind === 'draft')}<span class="nm" title="${escapeHtml(t.email)}">${escapeHtml(t.author || t.email)}</span>${statusTag(t)}${timeHtml(t.createdAt)}<span class="num">#${t.num}</span>${t.unread ? '<span class="dot" role="img" aria-label="Unread"></span>' : ''}</div>`;
-  const text =
-    t.kind === 'draft' && o.open
-      ? `<div class="field"><textarea data-draft="${id}" data-keep="draft:${id}" aria-label="Edit draft"></textarea></div>`
-      : `<p class="tx">${escapeHtml(t.text)}</p>`;
-  const body = `<div class="bd">${anchorHtml(t, o.lost, o.open)}${text}${o.open ? '' : collapsedMeta(t, o)}</div>`;
+  const said = t.reaction
+    ? `<div class="rxq"><span class="rxe" role="img" aria-label="Reacted ${t.reaction}">${t.reaction}</span>${anchorHtml(t, o.lost, o.open)}</div>`
+    : anchorHtml(t, o.lost, o.open) +
+      (t.kind === 'draft' && o.open
+        ? `<div class="field"><textarea data-draft="${id}" data-keep="draft:${id}" aria-label="Edit draft"></textarea></div>`
+        : `<p class="tx">${escapeHtml(t.text)}</p>`);
+  const body = `<div class="bd">${said}${reactionsHtml(t.reactions, t.id, o, reactable(t))}${o.open ? '' : collapsedMeta(t, o)}</div>`;
   const tools = o.surface === 'panel' && !o.open ? quickTools(t) : '';
   const open = o.open ? `${repliesHtml(t, o)}${openFooter(t, o)}` : '';
   return `<article class="${cls}" data-id="${id}"${rowAttrs}>${tools}${head}${body}${open}</article>`;
