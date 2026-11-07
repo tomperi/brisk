@@ -333,7 +333,6 @@ const hiddenUnreadHtml = (hidden: PanelView['hiddenUnread']) =>
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
-/** Copy all always; with drafts, their count, Copy, and Publish all. */
 function footerHtml(drafts: number): string {
   const copyAll = `<button class="btn sm ghost" data-act="copy-all" title="Copy every comment as Markdown for an agent">${icon('copy')}Copy all</button>`;
   if (!drafts) return `<div class="ft">${copyAll}</div>`;

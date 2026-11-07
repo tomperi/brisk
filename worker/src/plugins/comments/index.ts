@@ -326,9 +326,9 @@ async function list(ctx: PluginActionCtx, args: Record<string, string>): Promise
   }));
 }
 
-/** Every thread on the site, numbered as the widget numbers them. */
+/** Every thread in the newest 500 records, newest first, numbered as the widget numbers them. */
 async function siteThreads(store: DocStore, site: string): Promise<Thread[]> {
-  const docs = await store.list(site, COMMENTS, { limit: 500, sort: 'created' });
+  const docs = await store.list(site, COMMENTS, { limit: 500, sort: '-created' });
   return buildThreads({ drafts: [], docs, seen: {}, me: '' });
 }
 
@@ -372,7 +372,7 @@ async function exportMd(ctx: PluginActionCtx, args: Record<string, string>): Pro
   const status = statusArg(args.status);
   const threads = await siteThreads(new DocStore(ctx.platform.db), args.site);
   let out = `# comments on ${args.site}\n`;
-  for (const t of threads.reverse())
+  for (const t of threads)
     if (status === 'all' || t.status === status) out += `\n${threadMarkdown(t)}\n`;
   return out;
 }
