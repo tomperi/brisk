@@ -122,6 +122,18 @@ components:
     textColor: '{colors.on-accent}'
     rounded: '12px'
     size: '24px'
+  reaction-chip:
+    textColor: '{colors.ink-2}'
+    rounded: '12px'
+    padding: '0 8px 0 6px'
+    height: '24px'
+  reaction-chip-mine:
+    backgroundColor: '{colors.brisk-blue-soft}'
+    textColor: '{colors.brisk-blue-ink}'
+  quick-bar:
+    backgroundColor: '{colors.surface}'
+    rounded: '{rounded.toolbar}'
+    padding: '4px'
 ---
 
 # Design System: Brisk Comments
@@ -188,7 +200,7 @@ A near-achromatic cool-gray UI with a single saturated blue that always means "t
 
 The panel is a fixed right column (400px, `min(400px, 100vw)`). At ≥900px it docks: the widget sets `margin-right: 400px !important` on `<html>` (restoring any prior inline value on close) so the page reflows beside it; below 900px it overlays. Toast and positioning math respect the docked width.
 
-Panel stack, top to bottom: 52px header (title, site tag, More, close) → action row (Comment + hint) → 40px scope tabs with counts → filter row (Unread / Open chips, Resolved menu at the right) → scrolling list with 32px sticky group headers. Rows pad 14px 20px; thread body, quote, input and actions indent 32px to align under the name past the 24px avatar. Popovers are 360px wide, max 520px tall. The floating toolbar sits 16px from the bottom-right and collapses into a 42px round bubble.
+Panel stack, top to bottom: 52px header (title, site tag, More, close) → action row (Comment + hint) → 40px scope tabs with counts → filter row (Unread / Open chips, Resolved menu at the right) → scrolling list with 32px sticky group headers → footer bar. The list opens with a "Your drafts" group (every draft in scope, whatever the filter; a draft on another page names its page) and then the published threads the filter lists, under a header named after the filter on This page. The footer always has a ghost "Copy all" (Markdown for an agent); with drafts it adds "N drafts", a ghost Copy, and a primary Publish all at the right edge. Rows pad 14px 20px; thread body, quote, input and actions indent 32px to align under the name past the 24px avatar. Popovers are 360px wide, max 520px tall. The floating toolbar sits 16px from the bottom-right and collapses into a 42px round bubble.
 
 Under `pointer: coarse` every control becomes a 40px target (buttons, chips, status, menu items, icon buttons, send); chips round to 20px. Hover-only row tools are gated by `hover: hover`.
 
@@ -234,15 +246,19 @@ Small, consistent radii: 6px on controls, 8px on popovers, menus, inputs and toa
 
 ### Thread row
 
-Avatar, name (600 unread / 500 read), time, `#n` thread number (matches its pin), 8px unread dot. Quote as a highlighted snippet (soft blue fill, 2px blue underline) or a target-icon spot line for element comments. Text clamps to 3 lines closed. Open: expands in place with replies, input, and Resolve / Mark unread / Delete.
+Avatar, name (600 unread / 500 read), time, `#n` thread number (matches its pin; one sequence per site, published threads first by creation, drafts after them), 8px unread dot. Quote as a highlighted snippet (soft blue fill, 2px blue underline) or a target-icon spot line for element comments. Text clamps to 3 lines closed. Open: expands in place with replies, input, and Resolve / Mark unread / Delete.
+
+### Reactions
+
+A reaction on a comment or reply is a 24px pill chip under its text: the emoji at 13px and the count. Mine is pressed (blue soft fill, blue line, blue ink); hovering names who reacted, "You" first-person. Clicking a chip toggles mine. An open thread adds a 24px round "Add reaction" smile button after the chips of the head and of each reply. A deleted thread keeps its chips, frozen. A reaction left on page text is its own thread: its row shows the 16px emoji beside the quote and no text, and it takes replies and chips like any thread. The eight emoji are fixed: 👍 ❤️ 😂 🎉 👀 ✅ ❓ 🔥. Emoji are content here, never stand-ins for icons.
 
 ### Pins
 
-22px teardrops numbered in micro type. Unread: solid blue. Read: surface with strong hairline. Draft: dashed. Resolved/deleted: muted (deleted strikes through). Selected: 4px blue ring. Enter with a 220ms scale-in; flash twice to locate.
+22px teardrops numbered in micro type; a reaction thread's pin shows its emoji instead (its number stays in the tooltip and label). Unread: solid blue. Read: surface with strong hairline. Draft: dashed. Resolved/deleted: muted (deleted strikes through). Selected: 4px blue ring. Enter with a 220ms scale-in; flash twice to locate.
 
 ### Floating layers
 
-Popover, menu (232px min, 32px items, `armed` destructive item turns red), toolbar, inverted toast and tooltip (ink fill, surface text, 400ms delay). All enter with opacity + `scale(0.97)` on `cubic-bezier(0.23, 1, 0.32, 1)` in 120–240ms; reduced motion removes all transitions.
+Popover, menu (232px min, 32px items, `armed` destructive item turns red), toolbar, inverted toast and tooltip (ink fill, surface text, 400ms delay). The quick bar is a toolbar-styled pill (10px radius, 4px padding, pop shadow). Selecting page text shows it 8px above the selection's last line, centered on its end, with two icon buttons, Add comment and Add reaction, tooltips below; under `pointer: coarse` it sits 12px below the selection, clear of the OS callout. Add reaction swaps the buttons for the row of eight 32px emoji buttons in place. The same row opens under a thread's Add reaction button. Esc, a click elsewhere, or scrolling the words off screen closes it; it never takes focus or the selection, so copy still works. All enter with opacity + `scale(0.97)` on `cubic-bezier(0.23, 1, 0.32, 1)` in 120–240ms; reduced motion removes all transitions.
 
 ### Icons
 

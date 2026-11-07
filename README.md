@@ -408,9 +408,13 @@ brisk plugin comments list   my-site        # open feedback, as a table
 brisk plugin comments export my-site        # markdown an agent can act on: quote, before/after, selector
 brisk plugin comments reply  my-site <id> "fixed — sentence-cased the heading"
 brisk plugin comments resolve my-site <id>
+brisk plugin comments react   my-site <id> ✅   # 👍 ❤️ 😂 🎉 👀 ✅ ❓ 🔥
 ```
 
-The comments panel lists this page's threads (or every page of the site), the
+Select text on a page and a small bar offers **Comment** or **React**: a
+reaction drops one of eight emoji on those words at once, and every comment and
+reply takes the same emoji as chips you click to add or remove yours. Pins
+count once per site, so no two share a number. The comments panel lists this page's threads (or every page of the site), the
 ones you haven't read first: open one to read and answer its replies, resolve,
 reopen or delete it, or mark it unread to come back to it. A new reply from
 someone else makes a thread unread again; your own never do. On screens 900px

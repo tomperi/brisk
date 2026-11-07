@@ -39,6 +39,16 @@ releases are published to
   Your unpublished drafts list first under "Your drafts" whatever the filter,
   and the panel's footer copies every comment as Markdown or, when you have
   drafts, copies or publishes them all.
+- **Comments** — select text on the page and a small bar offers Comment or
+  React, with no need to enter comment mode first. React posts one of eight
+  emoji (👍 ❤️ 😂 🎉 👀 ✅ ❓ 🔥) on the selected words at once: its pin shows
+  the emoji, and it is a thread like any other, numbered, unread for others,
+  open to replies, resolve and delete.
+- **Comments** — react to any comment or reply with the same emoji. Chips
+  under the text count each emoji and name who left it; click one to add or
+  remove yours. `brisk plugin comments react <site> <id> <emoji>` does the same
+  from the CLI, and `export`, `show` and `list` print reactions, so an agent
+  sees a ✅ or a ❓ on its work. Reactions never make a thread unread.
 
 ### Changed
 
