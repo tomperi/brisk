@@ -63,18 +63,38 @@ describe('buildThreads', () => {
     });
   });
 
-  it('numbers each author chronologically, drafts counting as mine', () => {
+  it('numbers published threads once per site by creation, then drafts after them', () => {
     const threads = threadsOf(
-      [doc('a', ME, 0), doc('b', 'ana@example.com', 1), doc('c', ME, 3)],
+      [
+        doc('c', ME, 3, { page: '/pricing' }),
+        doc('a', ME, 0),
+        doc('b', 'ana@example.com', 1, { deleted: true }),
+        doc('tie-y', 'bo@example.com', 2),
+        doc('tie-x', 'ana@example.com', 2, { resolved: true }),
+        doc('r', 'ana@example.com', 4, { parentId: 'a' }),
+      ],
       {},
-      [draft('d', 4)],
+      [draft('d2', 9), draft('d1', 1)],
     );
     expect(Object.fromEntries(threads.map((t) => [t.id, t.num]))).toEqual({
       a: 1,
-      b: 1,
-      c: 2,
-      d: 3,
+      b: 2,
+      'tie-x': 3,
+      'tie-y': 4,
+      c: 5,
+      d1: 6,
+      d2: 7,
     });
+  });
+
+  it('keeps a published number when a draft is published after it', () => {
+    const before = threadsOf([doc('a', ME, 0), doc('b', 'ana@example.com', 5)], {}, [
+      draft('d', 3),
+    ]);
+    const after = threadsOf([doc('a', ME, 0), doc('b', 'ana@example.com', 5), doc('p', ME, 6)]);
+    expect(before.find((t) => t.id === 'b')!.num).toBe(2);
+    expect(after.find((t) => t.id === 'b')!.num).toBe(2);
+    expect(after.find((t) => t.id === 'p')!.num).toBe(3);
   });
 
   it('reads status and who set it', () => {

@@ -52,7 +52,8 @@ export interface Thread {
   replies: Reply[];
   unread: boolean;
   seenAt: string | undefined;
-  /** Chronological within each author, so a person's comments count 1, 2, 3. */
+  /** One sequence per site: published threads count 1..n by creation, so a
+   *  published number never changes; drafts continue after them. */
   num: number;
 }
 
@@ -77,7 +78,6 @@ export const parseFilter = (raw: string | null): Filter =>
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 const later = (a: string, b: string) => (Date.parse(b) > Date.parse(a) ? b : a);
-const identity = (email: string, name: string) => (email || name).trim().toLowerCase();
 const statusOf = (d: StoredDoc): Status =>
   d.deleted ? 'deleted' : d.resolved ? 'resolved' : 'open';
 
@@ -93,7 +93,7 @@ export function buildThreads(input: {
     const parent = str(d.parentId);
     if (parent) replies.set(parent, [...(replies.get(parent) ?? []), d]);
   }
-  const threads: (Thread & { key: string })[] = [
+  const threads: Thread[] = [
     ...drafts.map((d) => ({
       id: d.id,
       kind: 'draft' as const,
@@ -112,7 +112,6 @@ export function buildThreads(input: {
       unread: false,
       seenAt: undefined,
       num: 0,
-      key: identity(me, ''),
     })),
     ...docs
       .filter((d) => !str(d.parentId))
@@ -152,17 +151,17 @@ export function buildThreads(input: {
           unread: status !== 'deleted' && isUnread(d, own, me, seen[d.id]),
           seenAt: seen[d.id],
           num: 0,
-          key: identity(str(d.createdByEmail), str(d.createdBy)),
         };
       }),
   ];
-  const next = new Map<string, number>();
-  for (const t of [...threads].sort((a, b) => (a.createdAt < b.createdAt ? -1 : 1))) {
-    const n = (next.get(t.key) ?? 0) + 1;
-    next.set(t.key, n);
-    t.num = n;
-  }
-  return threads.map(({ key: _key, ...t }) => t);
+  const byCreation = (a: Thread, b: Thread) =>
+    a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : 1;
+  const ordered = [
+    ...threads.filter((t) => t.kind === 'published').sort(byCreation),
+    ...threads.filter((t) => t.kind === 'draft').sort(byCreation),
+  ];
+  ordered.forEach((t, i) => (t.num = i + 1));
+  return threads;
 }
 
 /** The open thread keeps the unread state it had when it was opened. */

@@ -42,6 +42,10 @@ releases are published to
 - **Comments** — the panel docks beside the page and pushes it aside instead of
   covering it (on screens 900px and wider; narrower, it overlays). The widget
   has a new look: system type, one blue accent, soft shadows, light and dark.
+- **Comments** — pins number once per site instead of per author, so no two
+  pins share a number. Published comments count 1, 2, 3 in the order they were
+  posted, on every page, and keep their number; your drafts come after them
+  and take their final number when you publish.
 
 ### Fixed
 
