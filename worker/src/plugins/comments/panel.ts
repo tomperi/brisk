@@ -359,7 +359,7 @@ export function panelHtml(
           const head =
             state.scope === 'page'
               ? drafts
-                ? `<div class="grp">${icon('page')}<span>${FILTER_LABEL[state.filter]}</span></div>`
+                ? `<div class="grp"><span>${FILTER_LABEL[state.filter]}</span></div>`
                 : ''
               : g.here
                 ? `<div class="grp">${icon('page')}<span>This page</span></div>`
