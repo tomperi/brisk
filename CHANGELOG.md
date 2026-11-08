@@ -70,6 +70,10 @@ releases are published to
 
 - **Comments** — a half-typed comment no longer vanishes on a stray click: the
   popover shakes and keeps your text until you save or cancel.
+- The dashboard's drop-to-deploy name step shows the right address form (a
+  subdomain or `/s/<name>/`) when the site URLs the server hands out use a
+  different scheme from the page, as they can behind a TLS-terminating proxy.
+  It compared schemes; it compares hosts now.
 
 ## [0.4.2] - 2026-08-30
 

@@ -103,7 +103,10 @@
 
   function subdomainMode() {
     const first = (window.sites ?? sites ?? [])[0];
-    if (first?.url) return first.url.startsWith(`${location.protocol}//${first.name}.`);
+    // Compare hosts, not schemes: the server derives the scheme it hands out
+    // (a TLS-terminating proxy in front means it need not match this page's),
+    // and only the shape of the host answers subdomain-or-path.
+    if (first?.url) return first.url.includes(`//${first.name}.`);
     return location.hostname !== 'localhost';
   }
 
