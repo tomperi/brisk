@@ -693,7 +693,7 @@ interface BdDoc {
 
   function quoteAt(range: Range, x: number, y: number): Capture | null {
     const scope = blockAncestor(range.commonAncestorContainer);
-    const selector = scope ? cssPath(scope) : '';
+    const selector = scope === document.body ? 'body' : scope ? cssPath(scope) : '';
     const nodes = scope && selector ? textNodes(scope) : null;
     if (!scope || !nodes) return null;
     const flat = flatten(nodes.map((t) => t.data));
@@ -1158,8 +1158,11 @@ interface BdDoc {
       c = { scope, range: null, mutatedSinceResolve: true, scannedAt: -Infinity };
       textCache.set(id, c);
     }
-    if (!c.mutatedSinceResolve) return c.range;
-    if (c.range && rangeStillReadsAs(c.range, q.exact)) {
+    // Moving a node pulls a Range's endpoints out to its old parent, and the
+    // mutation records name only the parents, so check the endpoints too.
+    const held = (r: Range) => scope.contains(r.startContainer) && scope.contains(r.endContainer);
+    if (!c.mutatedSinceResolve && (!c.range || held(c.range))) return c.range;
+    if (c.range && held(c.range) && rangeStillReadsAs(c.range, q.exact)) {
       c.mutatedSinceResolve = false;
       return c.range;
     }
