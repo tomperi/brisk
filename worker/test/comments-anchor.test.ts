@@ -46,6 +46,17 @@ describe('flatten', () => {
     expect(flat.toRaw(5, 'end')).toEqual({ chunk: 1, offset: 3 });
   });
 
+  it('reads a line or block break between nodes as one space', () => {
+    const flat = flatten(['Hello', 'world', ' again'], [false, true, true]);
+    expect(flat.text).toBe('Hello world again');
+    const hit = locateQuote(flat.text, { exact: 'world', prefix: 'Hello ', suffix: '' })!;
+    expect(flat.toRaw(hit.start, 'start')).toEqual({ chunk: 1, offset: 0 });
+    expect(flat.toRaw(hit.end, 'end')).toEqual({ chunk: 1, offset: 5 });
+    expect(flat.toFlat(0, 5)).toBe(5);
+    expect(flat.toFlat(1, 0)).toBe(6);
+    expect(flatten(['a'], [true]).text).toBe('a');
+  });
+
   it('keeps zero-width joiners, which are not whitespace', () => {
     expect(normalizeText('👩‍💻  ok')).toBe('👩‍💻 ok');
   });
