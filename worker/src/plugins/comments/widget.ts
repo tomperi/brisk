@@ -641,24 +641,70 @@ interface BdDoc {
 
   const SKIP_TEXT = new Set(['script', 'style', 'noscript', 'template']);
   const textFilter = (n: Node) =>
-    n.nodeType === Node.TEXT_NODE
+    n.nodeType === Node.TEXT_NODE || (n as Element).localName === 'br'
       ? NodeFilter.FILTER_ACCEPT
       : SKIP_TEXT.has((n as Element).localName)
         ? NodeFilter.FILTER_REJECT
         : NodeFilter.FILTER_SKIP;
+  /** Walks text nodes and `<br>` elements. */
   const textWalker = (root: Node) =>
     document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, textFilter);
 
-  function textNodes(scope: Element): Text[] | null {
-    const out: Text[] = [];
+  /** Says, text node by text node, whether the page breaks the line before it. */
+  function lineBreaks() {
+    const blocks = new Map<Element | null, Element | null>();
+    const blockOf = (t: Text) => {
+      const p = t.parentElement;
+      if (!blocks.has(p)) {
+        let el = p;
+        while (
+          el &&
+          el !== document.body &&
+          /^(inline|contents)/.test(getComputedStyle(el).display)
+        )
+          el = el.parentElement;
+        blocks.set(p, el);
+      }
+      return blocks.get(p)!;
+    };
+    let prev: Element | null | undefined;
+    let br = false;
+    return {
+      br: () => void (br = true),
+      before(t: Text): boolean {
+        const block = blockOf(t);
+        const out = br || (prev !== undefined && block !== prev);
+        prev = block;
+        br = false;
+        return out;
+      },
+    };
+  }
+
+  function scopeText(scope: Element): { nodes: Text[]; flat: FlatText } | null {
+    const nodes: Text[] = [];
+    const breaks: boolean[] = [];
+    const lines = lineBreaks();
     let n = 0;
     const w = textWalker(scope);
-    for (let t = w.nextNode() as Text | null; t; t = w.nextNode() as Text | null) {
+    for (let x = w.nextNode(); x; x = w.nextNode()) {
+      if (x.nodeType !== Node.TEXT_NODE) {
+        lines.br();
+        continue;
+      }
+      const t = x as Text;
       n += t.data.length;
       if (n > SCAN_MAX) return null;
-      out.push(t);
+      breaks.push(lines.before(t));
+      nodes.push(t);
     }
-    return out;
+    return {
+      nodes,
+      flat: flatten(
+        nodes.map((t) => t.data),
+        breaks,
+      ),
+    };
   }
 
   const liveRange = (): Range | null => {
@@ -694,9 +740,9 @@ interface BdDoc {
   function quoteAt(range: Range, x: number, y: number): Capture | null {
     const scope = blockAncestor(range.commonAncestorContainer);
     const selector = scope === document.body ? 'body' : scope ? cssPath(scope) : '';
-    const nodes = scope && selector ? textNodes(scope) : null;
-    if (!scope || !nodes) return null;
-    const flat = flatten(nodes.map((t) => t.data));
+    const scanned = scope && selector ? scopeText(scope) : null;
+    if (!scope || !scanned) return null;
+    const { nodes, flat } = scanned;
     const quote = captureQuote(
       flat.text,
       flatAt(nodes, flat, range.startContainer, range.startOffset),
@@ -1132,6 +1178,8 @@ interface BdDoc {
     if (range.collapsed) return false;
     const max = exact.length * 4 + 64;
     const chunks: string[] = [];
+    const breaks: boolean[] = [];
+    const lines = lineBreaks();
     let n = 0;
     const w = textWalker(range.commonAncestorContainer);
     w.currentNode = range.startContainer;
@@ -1142,14 +1190,19 @@ interface BdDoc {
         if (range.comparePoint(t, 0) > 0) break;
         continue;
       }
+      if (t.nodeType !== Node.TEXT_NODE) {
+        lines.br();
+        continue;
+      }
       const data = (t as Text).data;
       const s = t === range.startContainer ? range.startOffset : 0;
       const e = t === range.endContainer ? range.endOffset : data.length;
       n += e - s;
       if (n > max) return false;
+      breaks.push(lines.before(t as Text));
       chunks.push(data.slice(s, e));
     }
-    return flatten(chunks).text === exact;
+    return flatten(chunks, breaks).text === exact;
   }
 
   function quoteRange(id: string, scope: Element, q: Quote): Range | null {
@@ -1177,9 +1230,9 @@ interface BdDoc {
     c.mutatedSinceResolve = false;
     c.scannedAt = performance.now();
     c.range = null;
-    const nodes = textNodes(scope);
-    if (!nodes) return null;
-    const flat = flatten(nodes.map((n) => n.data));
+    const scanned = scopeText(scope);
+    if (!scanned) return null;
+    const { nodes, flat } = scanned;
     const hit = locateQuote(flat.text, q);
     if (!hit) return null;
     const s = flat.toRaw(hit.start, 'start');

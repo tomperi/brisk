@@ -99,7 +99,8 @@ export function anchorFields(a: Anchor): AnchorFields {
 
 /** Normalized concatenation of raw text chunks (one per DOM text node, in
  *  document order) with a two-way offset map. Whitespace runs (NBSP included)
- *  collapse to one space across chunk boundaries. */
+ *  collapse to one space across chunk boundaries; `breakBefore[k]` adds one
+ *  where the page breaks the line before chunk k (a `<br>` or a new block). */
 export interface FlatText {
   text: string;
   toFlat(chunk: number, offset: number): number;
@@ -108,13 +109,19 @@ export interface FlatText {
   toRaw(flat: number, edge: 'start' | 'end'): { chunk: number; offset: number };
 }
 
-export function flatten(chunks: readonly string[]): FlatText {
+export function flatten(chunks: readonly string[], breakBefore: readonly boolean[] = []): FlatText {
   let text = '';
   let space = false;
   const rawToFlat: Int32Array[] = [];
   const srcChunk: number[] = [];
   const srcOffset: number[] = [];
   chunks.forEach((chunk, k) => {
+    if (breakBefore[k] && text && !space) {
+      text += ' ';
+      space = true;
+      srcChunk.push(k);
+      srcOffset.push(0);
+    }
     const map = new Int32Array(chunk.length + 1);
     for (let o = 0; o < chunk.length; o++) {
       map[o] = text.length;
