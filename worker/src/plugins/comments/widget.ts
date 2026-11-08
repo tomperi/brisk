@@ -65,7 +65,8 @@ type Brisk = {
   const tag = document.querySelector<HTMLScriptElement>('script[data-brisk-plugin="comments"]');
   const SITE = tag?.dataset.briskSite ?? '';
   const marker = window as { __briskComments?: boolean };
-  if (marker.__briskComments) return;
+  // A framed page is part of the page around it, so only the top page gets one.
+  if (marker.__briskComments || window.self !== window.top) return;
   marker.__briskComments = true;
 
   // The SDK is optional: without /brisk.js the widget reads over plain fetch
