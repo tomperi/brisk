@@ -6,6 +6,8 @@ data/
 .env
 worker/assets/brisk.js
 worker/assets/changelog.html
+worker/assets/skill.md
+worker/assets/sdk.md
 worker/assets/llms.txt
 worker/assets/plugins/
 .dev.vars

@@ -657,6 +657,20 @@ describe('comments seen state', () => {
     expect((await readSeen('dev@localhost'))!.seen[id]).toBe('');
   });
 
+  it('lists to nothing before anyone reads a thread, then holds my doc under my email', async () => {
+    // The widget's first read: an empty list, never a 404 for a doc not yet made.
+    const fresh = await cc('/api/db/_plugin:comments:seen?limit=500', {
+      headers: { 'x-brisk-site': 'seenfresh' },
+    });
+    expect(fresh.status).toBe(200);
+    expect((await fresh.json<{ docs: Seen[] }>()).docs).toEqual([]);
+
+    const id = await comment();
+    await actAs('List@Example.com', 'seen', id);
+    const mine = (await listSeen()).find((d) => d.id === 'list@example.com');
+    expect(mine?.seen).toHaveProperty(id);
+  });
+
   it('records an explicit unread for a thread I never opened', async () => {
     const id = await comment();
     const doc = await actAs('fresh@example.com', 'unseen', id);

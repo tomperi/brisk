@@ -59,6 +59,22 @@ a {
   background: var(--accent-soft);
 }
 
+.skill-actions {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  margin: 1.2rem 0;
+}
+
+.skill-actions a {
+  text-decoration: none;
+}
+
+.skill-source {
+  max-height: 70vh;
+  overflow: auto;
+}
+
 /* ---- header ------------------------------------------------------------- */
 
 header {
@@ -254,6 +270,7 @@ td code {
 .sites-head {
   display: flex;
   align-items: baseline;
+  flex-wrap: wrap;
   gap: 1rem;
   margin: 3rem 0 0.5rem;
 }
@@ -275,7 +292,7 @@ td code {
   border: none;
   border-bottom: 1px solid var(--line);
   padding: 0.1rem 0;
-  width: 11rem;
+  width: 13rem;
   outline: none;
   transition: border-color 150ms ease;
 }

@@ -13,12 +13,20 @@ releases are published to
 - **`/llms.txt`** — everything about Brisk as one text file for coding agents:
   the companion skill and how to install it, the `/docs` and `/host` pages, the
   architecture, and the changelog, generated from the repo at build time so it
-  always matches the running version. It is the one page every instance serves
-  without a login, private ones included, since the agents it is for can't
-  complete OAuth — apex only, and it holds nothing but the repo's docs.
+  always matches the running version. It is served without a login, private
+  instances included, since the agents it is for can't complete OAuth — apex
+  only, and it holds nothing but the repo's docs.
+- **`/skill`** — a page on every instance that shows the Brisk skill and the
+  commands to install it from that instance, with copy and download buttons.
+  It and the raw files it points at, `/skill.md` and `/sdk.md`, are served
+  without a login like `/llms.txt`, so a teammate or an agent can install the
+  skill before signing in. The dashboard, docs and changelog link to it.
 - **Skill** — the Brisk skill explains plugins and how an agent discovers the
   ones an instance has (`brisk plugin list`, `/api/plugins`) instead of
   assuming a registry, and how to act on teammates' comments.
+- **Comments** — discard all your drafts at once: "Discard N drafts" in the
+  panel's ⋯ menu and the toolbar's right-click menu asks for a second click,
+  like discarding one draft.
 - **Comments** — select text before you click and the comment quotes those
   exact words. The words are highlighted on the page (without changing its
   markup) and found again after a redeploy; when they are gone, the comment
@@ -49,6 +57,12 @@ releases are published to
   remove yours. `brisk plugin comments react <site> <id> <emoji>` does the same
   from the CLI, and `export`, `show` and `list` print reactions, so an agent
   sees a ✅ or a ❓ on its work. Reactions never make a thread unread.
+- **The dashboard filter matches deployers, not just site names.** Typing a name
+  into the site filter now also matches the people on a site, so your own name
+  finds your sites and a teammate's finds theirs. Both deploy labels count: the
+  one stamped when the site was created and the one from its latest deploy,
+  which a forced overwrite splits apart. No new control and no permission — the
+  same filter over the same list everyone already sees in full.
 
 ### Changed
 
@@ -64,6 +78,21 @@ releases are published to
 
 - **Comments** — a half-typed comment no longer vanishes on a stray click: the
   popover shakes and keeps your text until you save or cancel.
+- **Comments** — the header of the ⋯ and right-click menus counts only published
+  threads as open. It used to count your unpublished drafts too, so it said
+  "2 open" on a page where nothing was published yet.
+- **Comments** — the widget no longer logs a 404 in the browser console the
+  first time you open a site. It read your unread state by asking for a
+  record that only exists once you have read a thread; it now lists the
+  read-state records and treats a missing one as nothing read yet.
+- The dashboard's drop-to-deploy name step shows the right address form (a
+  subdomain or `/s/<name>/`) when the site URLs the server hands out use a
+  different scheme from the page, as they can behind a TLS-terminating proxy.
+  It compared schemes; it compares hosts now.
+- On an instance with `AUTH=none`, the header no longer shows the shared dev
+  identity (`dev@localhost`) or a presence dot for it: everyone there is the
+  same user, so neither says who is looking. Signed-in users still see their
+  name and the dot.
 
 ## [0.4.2] - 2026-08-30
 

@@ -37,8 +37,10 @@ function demote(md) {
     .join('\n');
 }
 
-/** Drop the YAML frontmatter block a skill file opens with. */
-const stripFrontmatter = (md) => md.replace(/^---\n[\s\S]*?\n---\n+/, '');
+/** The YAML frontmatter block a skill file opens with, and the file without it. */
+const FRONTMATTER = /^---\n[\s\S]*?\n---\n/;
+const frontmatterOf = (md) => md.match(FRONTMATTER)?.[0].trim() ?? '';
+const stripFrontmatter = (md) => md.replace(FRONTMATTER, '').replace(/^\n+/, '');
 
 /** Repo-relative markdown links (`[x](worker/src/platform)`) only resolve on
  *  GitHub, so point them there; anchors, root paths, and full URLs pass through. */
@@ -156,13 +158,15 @@ function section(md, title) {
   return (end < 0 ? rest : rest.slice(0, end)).replace(/^!\[[^\]]*\]\([^)]*\)\n+/gm, '');
 }
 
+const skillSource = read('skills', 'brisk', 'SKILL.md');
+
 const header = `# Brisk
 
 > Drop a folder, get a site. Brisk is an open-source internal hosting platform: deploy a folder of static files and get a live URL in about a second, plus six zero-config browser APIs — database, identity, AI, file storage, realtime channels, and the hosting itself — from one script tag.
 
 Brisk is for internal use behind a login. Every site is visible and writable by every authenticated teammate; there are no permissions, no site owners, no custom backends, no build steps, no cron jobs, and no seventh primitive. Those constraints are the product. It runs on Cloudflare (one Worker + R2 + D1 + Durable Objects) or self-hosted on any Node box (SQLite plus a disk or an S3 bucket) from the same code.
 
-This file is generated at build time for Brisk ${version} from the repository and the pages of the instance serving it, so it matches what is running here. Root-relative links (\`/docs\`) resolve on this instance — but on a private instance they need a signed-in browser, and \`/llms.txt\` is the one page served without a login. The copies mirrored below are what an agent should read.
+This file is generated at build time for Brisk ${version} from the repository and the pages of the instance serving it, so it matches what is running here. Root-relative links (\`/docs\`) resolve on this instance — but on a private instance they need a signed-in browser; \`/llms.txt\`, \`/skill\`, \`/skill.md\` and \`/sdk.md\` are the only pages served without a login. The copies mirrored below are what an agent should read.
 
 ## Pages on this instance
 
@@ -170,6 +174,7 @@ This file is generated at build time for Brisk ${version} from the repository an
 - [Docs](/docs): the one-page SDK reference (mirrored below)
 - [Hosting](/host): running your own instance (mirrored below)
 - [Changelog](/changelog): every release (mirrored below)
+- [Skill](/skill): the companion skill for coding agents, raw at [/skill.md](/skill.md) and [/sdk.md](/sdk.md) (mirrored below)
 - [brisk.js](/brisk.js): the browser SDK, served on every site
 - [Plugins](/api/plugins): JSON list of the plugins installed here; \`/api/plugins/<id>\` is a plugin's manifest (a signed-in member's call wherever the instance has a login)
 
@@ -182,9 +187,17 @@ This file is generated at build time for Brisk ${version} from the repository an
 
 ## For coding agents: install the Brisk skill
 
-The repository ships a companion skill, \`skills/brisk/\`, that teaches a coding agent the lifecycle around Brisk — target an instance, \`brisk init\`, build with the SDK, \`brisk deploy\`, verify, iterate, act on teammates' comments — and the product constraints that keep a site a Brisk site. It is self-contained: two markdown files that link only to the public repository and \`brisk --help\`.
+The repository ships a companion skill, \`skills/brisk/\`, that teaches a coding agent the lifecycle around Brisk — target an instance, \`brisk init\`, build with the SDK, \`brisk deploy\`, verify, iterate, act on teammates' comments — and the product constraints that keep a site a Brisk site. It is self-contained: two markdown files that link only to the public repository and \`brisk --help\`. Every instance serves them raw at \`/skill.md\` and \`/sdk.md\`, with no login, like this file.
 
-**Claude Code** discovers skills in \`~/.claude/skills/\` (or a project's \`.claude/skills/\`) from the frontmatter in \`SKILL.md\`. Install it without cloning:
+**Claude Code** discovers skills in \`~/.claude/skills/\` (or a project's \`.claude/skills/\`) from the frontmatter in \`SKILL.md\`. Install it straight from this instance, with its address in place of \`<this host>\`:
+
+\`\`\`sh
+mkdir -p ~/.claude/skills/brisk/references
+curl -fsSL <this host>/skill.md -o ~/.claude/skills/brisk/SKILL.md
+curl -fsSL <this host>/sdk.md -o ~/.claude/skills/brisk/references/sdk.md
+\`\`\`
+
+Or from the public repository, without cloning:
 
 \`\`\`sh
 mkdir -p ~/.claude/skills/brisk/references
@@ -192,7 +205,11 @@ curl -fsSL ${RAW}/skills/brisk/SKILL.md -o ~/.claude/skills/brisk/SKILL.md
 curl -fsSL ${RAW}/skills/brisk/references/sdk.md -o ~/.claude/skills/brisk/references/sdk.md
 \`\`\`
 
-From a checkout, \`cp -r skills/brisk ~/.claude/skills/brisk\` does the same.
+From a checkout of the repository, \`cp -r skills/brisk ~/.claude/skills/brisk\` does the same. If none is reachable, the skill is reproduced verbatim below: save the "Building and deploying Brisk apps" section as \`SKILL.md\`, with this frontmatter above it, and the cheat-sheet as \`references/sdk.md\`.
+
+\`\`\`yaml
+${frontmatterOf(skillSource)}
+\`\`\`
 
 **Codex and other agents** do not read the frontmatter, so point them at the file directly: reference \`SKILL.md\` from the project's \`AGENTS.md\` ("For Brisk work, follow \`./brisk/SKILL.md\`"), or drop it where the agent already reads project docs. Same content, no second copy to maintain.
 
@@ -201,7 +218,7 @@ Then install the CLI (\`npm install -g @usebrisk/cli\`) and run \`brisk login <t
 The skill follows, then the SDK cheat-sheet it loads on demand, then the pages of this instance.
 `;
 
-const skill = demote(stripFrontmatter(read('skills', 'brisk', 'SKILL.md'))).replace(
+const skill = demote(stripFrontmatter(skillSource)).replace(
   '](references/sdk.md)',
   '](#brisk-sdk-cheat-sheet)',
 );

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { panelHtml, spotName, threadHtml, type ThreadOpts } from '../src/plugins/comments/panel';
+import {
+  menuHead,
+  panelHtml,
+  spotName,
+  threadHtml,
+  type ThreadOpts,
+} from '../src/plugins/comments/panel';
 import { buildThreads, panelView, type StoredDoc } from '../src/plugins/comments/threads';
 
 const ME = 'tom@example.com';
@@ -211,5 +217,37 @@ describe('panelHtml', () => {
     expect(html).toContain('data-act="copy-all"');
     expect(html).not.toContain('data-act="publish-all"');
     expect(text(html)).not.toContain('Your drafts');
+  });
+});
+
+describe('menuHead', () => {
+  const draft = (id: string) => ({
+    id,
+    text: `draft ${id}`,
+    page: '/',
+    label: 'p',
+    textSnippet: '',
+    html: '',
+    createdAt: at(9),
+  });
+
+  it('counts drafts as drafts, never as open threads', () => {
+    const threads = buildThreads({
+      drafts: [draft('d1'), draft('d2')],
+      docs: [],
+      seen: {},
+      me: ME,
+    });
+    expect(menuHead('s', threads)).toBe('s · 0 open · 0 unread · 2 drafts');
+  });
+
+  it('counts the published threads that are open and unread', () => {
+    const threads = buildThreads({
+      drafts: [draft('d1')],
+      docs: [doc('a', 0), doc('b', 1), doc('c', 2, { resolved: true })],
+      seen: { b: at(5) },
+      me: ME,
+    });
+    expect(menuHead('s', threads)).toBe('s · 2 open · 2 unread · 1 draft');
   });
 });

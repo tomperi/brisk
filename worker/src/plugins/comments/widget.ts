@@ -20,6 +20,7 @@ import { icon } from './icons';
 import { seenDocId } from './inbox';
 import {
   escapeHtml,
+  menuHead,
   menuHtml,
   panelHtml,
   quickBarHtml,
@@ -125,6 +126,19 @@ type Brisk = {
   };
 
   const myDocId = () => seenDocId(me.email);
+  /** A list, not `GET /:id`: until you first read a thread you have no doc, and
+   *  that 404 lands in the console. Past one full page, ask for the doc by id. */
+  const readMySeen = async (): Promise<StoredDoc | undefined> => {
+    const headers = { 'x-brisk-site': SITE };
+    const res = await fetch(`/api/db/${SEEN}?limit=500`, { headers });
+    if (!res.ok) throw new Error(`seen state: ${res.status}`);
+    const { docs } = (await res.json()) as { docs: StoredDoc[] };
+    const mine = docs.find((d) => d.id === myDocId());
+    if (mine || docs.length < 500) return mine;
+    const one = await fetch(`/api/db/${SEEN}/${encodeURIComponent(myDocId())}`, { headers });
+    if (!one.ok && one.status !== 404) throw new Error(`seen state: ${one.status}`);
+    return one.ok ? ((await one.json()) as StoredDoc) : undefined;
+  };
   const applySeen = (doc: StoredDoc) => {
     if (doc.id !== myDocId()) return;
     serverSeen = { ...(doc.seen as Record<string, string> | undefined) };
@@ -165,13 +179,7 @@ type Brisk = {
     .then(async (who) => {
       if (!who?.email) throw new Error('/api/me refused');
       me = { email: who.email, name: who.name ?? '' };
-      const res = await fetch(`/api/db/${SEEN}/${encodeURIComponent(myDocId())}`, {
-        headers: { 'x-brisk-site': SITE },
-      });
-      if (!res.ok && res.status !== 404) throw new Error(`seen state: ${res.status}`);
-      serverSeen = res.ok
-        ? { ...((await res.json()) as { seen?: Record<string, string> }).seen }
-        : {};
+      serverSeen = { ...((await readMySeen())?.seen as Record<string, string> | undefined) };
       seenReady = true;
       render();
     })
@@ -1382,11 +1390,7 @@ type Brisk = {
       { act: 'hide', label: 'Hide until Shift+C', icon: 'hide' },
     ];
   };
-  const commandHead = () => {
-    const open = threads.filter((t) => t.status === 'open').length;
-    const unread = threads.filter((t) => t.unread).length;
-    return `${SITE} · ${open} open · ${unread} unread · ${plural(drafts.length, 'draft')}`;
-  };
+  const commandHead = () => menuHead(SITE, threads);
   const statusItems = (): MenuItem[] => {
     const counts = panelView(threads, panel, here).filterCounts;
     return (['resolved', 'deleted'] as const).map((f) => ({

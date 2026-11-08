@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>brisk skill</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/app.css" />
+    <script src="/brisk.js" defer></script>
+    <script src="/header.js" defer></script>
+  </head>
+  <body>
+    <main class="doc">
+      <header>
+        <a class="wordmark" href="/">brisk<span class="cursor">▮</span></a>
+        <nav>
+          <a href="/docs">docs</a>
+          <a href="/host">hosting</a>
+          <a href="/changelog">changelog</a>
+          <a href="/skill">skill</a>
+          <a href="https://github.com/tomperi/brisk">source</a>
+          <a href="/auth/login" id="signin" hidden>sign in</a>
+          <span class="whoami" id="whoami" hidden>
+            <span class="presence" id="presence" hidden></span><span id="who"></span>
+          </span>
+        </nav>
+      </header>
+
+      <h1>The Brisk skill</h1>
+      <p class="lede">
+        A drop-in skill that teaches your coding agent (Claude Code, Cursor, …) to build and ship
+        Brisk sites against this instance. View it below, copy it, or have your agent install it
+        straight from here.
+      </p>
+
+      <h2 id="install"><a href="#install">Install</a></h2>
+      <p>Point your agent at the raw skill and drop it into <code>.claude/skills/brisk/</code>:</p>
+      <div class="cmd">
+        <code id="install-cmd"></code
+        ><button class="copy" id="copy-install" data-copy="">copy</button>
+      </div>
+      <p>
+        Or just tell it:
+        <em
+          >“install the Brisk skill from
+          <a href="/skill.md"><span class="origin"></span>/skill.md</a>”</em
+        >. The raw markdown lives at <a href="/skill.md"><code>/skill.md</code></a> (and the SDK
+        reference at <a href="/sdk.md"><code>/sdk.md</code></a
+        >) — stable routes agents can fetch directly, with no login.
+      </p>
+
+      <h2 id="skill"><a href="#skill">The skill</a></h2>
+      <div class="skill-actions">
+        <button class="copy" id="copy-skill" data-copy="">copy</button>
+        <a class="copy" href="/skill.md" download="SKILL.md">download SKILL.md</a>
+        <a class="copy" href="/sdk.md" download="sdk.md">download sdk.md</a>
+      </div>
+      <pre class="skill-source"><code id="skill-md">loading…</code></pre>
+
+      <footer>
+        <span>brisk</span>
+        <a href="/">home</a>
+        <a href="/docs">docs</a>
+        <a href="https://github.com/tomperi/brisk">source</a>
+      </footer>
+    </main>
+
+    <script>
+      // The install command names this instance, whatever host serves the page.
+      const origin = location.origin;
+      document.querySelectorAll('.origin').forEach((el) => (el.textContent = origin));
+      const install = `mkdir -p .claude/skills/brisk/references && curl -sfL ${origin}/skill.md -o .claude/skills/brisk/SKILL.md && curl -sfL ${origin}/sdk.md -o .claude/skills/brisk/references/sdk.md`;
+      document.getElementById('install-cmd').textContent = install;
+      document.getElementById('copy-install').dataset.copy = install;
+
+      // Render the raw skill and arm its copy button from the same /skill.md the
+      // install command and download link use — one source, no drift.
+      fetch('/skill.md')
+        .then((r) => r.text())
+        .then((text) => {
+          document.getElementById('skill-md').textContent = text;
+          document.getElementById('copy-skill').dataset.copy = text;
+        })
+        .catch(() => {
+          document.getElementById('skill-md').textContent = 'could not load /skill.md';
+        });
+
+      // Copy buttons (this page doesn't load the dashboard's app.js).
+      document.querySelectorAll('button.copy[data-copy]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          await navigator.clipboard.writeText(btn.dataset.copy || '');
+          const label = btn.textContent.trim();
+          btn.textContent = 'copied';
+          btn.classList.add('done');
+          setTimeout(() => {
+            btn.textContent = label;
+            btn.classList.remove('done');
+          }, 1200);
+        });
+      });
+    </script>
+  </body>
+</html>

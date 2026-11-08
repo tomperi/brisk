@@ -116,6 +116,7 @@ function page(releases) {
           <a href="/docs">docs</a>
           <a href="/host">hosting</a>
           <a href="/changelog">changelog</a>
+          <a href="/skill">skill</a>
           <a href="https://github.com/tomperi/brisk">source</a>
           <a href="/auth/login" id="signin" hidden>sign in</a>
           <span class="whoami" id="whoami" hidden>
@@ -138,6 +139,7 @@ ${sections}
         <span>brisk</span>
         <a href="/">home</a>
         <a href="/docs">docs</a>
+        <a href="/skill">skill</a>
         <a href="https://github.com/tomperi/brisk/releases">releases</a>
       </footer>
     </main>

@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { createApp } from '../src/app';
 import { isAllowedEmail } from '../src/auth';
 import { buildCloudflarePlatform } from '../src/platform/cloudflare/platform';
+import { deploySite } from '../src/sites';
 
 const app = createApp((c) => buildCloudflarePlatform(c.env, c.executionCtx));
 
@@ -40,34 +41,57 @@ describe('auth=google', () => {
     expect(browser.headers.get('location')).toContain('/auth/login');
   });
 
-  it('serves /llms.txt with no session, and only ever the platform file', async () => {
-    // The page exists for agents that can't log in, so a private instance
-    // answers it — but a deployed site named `home` shadows the dashboard, and
-    // must not get to publish a file under that name (or its `.html` twin) to
-    // the world through the same door.
-    const form = new FormData();
-    form.append('files', new File(['NOT-THE-PLATFORM-FILE'], 'llms.txt'));
-    form.append('files', new File(['NOT-THE-PLATFORM-FILE'], 'llms.txt.html'));
-    form.append('files', new File(['<h1>home</h1>'], 'index.html'));
+  it('serves the open pages with no session, and only ever the platform files', async () => {
+    // A deployed `home` site shadows the dashboard, and must not publish a file
+    // under an open page's name (or its `.html` twin) to the world.
+    const ctx = createExecutionContext();
+    await deploySite(
+      buildCloudflarePlatform(googleEnv, ctx),
+      'home',
+      [
+        'llms.txt',
+        'llms.txt.html',
+        'skill.md',
+        'sdk.md.html',
+        'skill.html',
+        'app.css',
+        'header.js',
+        'index.html',
+      ].map((path) => ({ path, file: new File(['NOT-THE-PLATFORM-FILE'], path) })),
+      'ci@brisk',
+      false,
+      [],
+    );
+    await waitOnExecutionContext(ctx);
     const ci = { authorization: 'Bearer ci-token' };
-    const deployed = await fetchAs(googleEnv, '/api/deploy/home', {
-      method: 'POST',
-      headers: ci,
-      body: form,
-    });
-    expect(deployed.status).toBe(200);
     try {
+      for (const path of ['/skill', '/app.css', '/header.js']) {
+        const res = await fetchAs(googleEnv, path);
+        expect(res.status, path).toBe(200);
+        expect(await res.text(), path).not.toContain('NOT-THE-PLATFORM-FILE');
+      }
       const platform = async (res: Response) => {
         expect(res.status).toBe(200);
         expect(res.headers.get('content-type')).toContain('text/plain');
         expect((await res.text()).startsWith('# Brisk\n')).toBe(true);
       };
       await platform(await fetchAs(googleEnv, '/llms.txt'));
+      for (const path of ['/skill.md', '/sdk.md']) {
+        const res = await fetchAs(googleEnv, path);
+        expect(res.status, path).toBe(200);
+        expect(res.headers.get('content-type'), path).toContain('text/markdown');
+        expect(await res.text(), path).not.toContain('NOT-THE-PLATFORM-FILE');
+      }
       // The SDK header can't steer it onto a site, and a member sees the same.
       await platform(
         await fetchAs(googleEnv, '/llms.txt', { headers: { 'x-brisk-site': 'home' } }),
       );
       await platform(await fetchAs(googleEnv, '/llms.txt', { headers: ci }));
+      // Whoever could already read the site keeps its own shell assets.
+      const own = await fetchAs(googleEnv, '/app.css', { headers: ci });
+      expect(await own.text()).toBe('NOT-THE-PLATFORM-FILE');
+      const visitor = await fetchAs(publicEnv, '/header.js');
+      expect(await visitor.text()).toBe('NOT-THE-PLATFORM-FILE');
       // On a site's own host the path is that site's file: members only.
       expect((await fetchUrl(googleEnv, 'http://home.localhost/llms.txt')).status).toBe(401);
       expect((await fetchUrl(googleEnv, 'http://somesite.localhost/llms.txt')).status).toBe(401);
@@ -76,6 +100,23 @@ describe('auth=google', () => {
     } finally {
       await fetchAs(googleEnv, '/api/sites/home', { method: 'DELETE', headers: ci });
     }
+  });
+
+  it('serves the /skill page and every asset it loads with no session', async () => {
+    const page = await fetchAs(googleEnv, '/skill', { headers: { accept: 'text/html' } });
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).toContain('The Brisk skill');
+
+    const assets = [...html.matchAll(/<(?:script|link)\b[^>]*\b(?:src|href)="(\/[^"]+)"/g)].map(
+      (m) => m[1]!,
+    );
+    expect(assets).toContain('/app.css');
+    for (const path of assets) {
+      expect((await fetchAs(googleEnv, path)).status, path).toBe(200);
+    }
+    // Links out of the page still need a login.
+    expect((await fetchAs(googleEnv, '/docs')).status).toBe(401);
   });
 
   it('builds an https OAuth redirect_uri when TLS is terminated upstream', async () => {
@@ -120,6 +161,18 @@ describe('auth=google', () => {
     expect(new URL(local.headers.get('location')!).searchParams.get('redirect_uri')).toBe(
       'http://localhost/auth/callback',
     );
+  });
+
+  it('marks cookies Secure exactly when the public origin is https', async () => {
+    // Every cookie this server writes — the 7-day session JWT, the CSRF cookie,
+    // the OAuth state cookie below — takes its Secure flag from the same
+    // derivation. Losing it puts them on the wire in clear on an https-fronted
+    // instance, and no other assertion in the suite would notice.
+    const proxied = await fetchUrl(googleEnv, 'http://brisk.example.com/auth/login');
+    expect(proxied.headers.get('set-cookie')).toContain('Secure');
+
+    const local = await fetchUrl(googleEnv, 'http://localhost/auth/login');
+    expect(local.headers.get('set-cookie')).not.toContain('Secure');
   });
 
   it('accepts the CI deploy token and attributes it as ci@brisk', async () => {

@@ -39,9 +39,16 @@ document.querySelectorAll('.copy[data-copy]').forEach((b) => wireCopy(b));
 
 let sites = [];
 
-function render(filter = '') {
+// `owner` is stamped at creation and `updatedBy` is the latest deployer, so a
+// forced overwrite splits them — both count. `owner` is NULL on older sites.
+const matches = (site, needle) =>
+  site.name.includes(needle) ||
+  [site.owner, site.updatedBy].some((label) => label?.toLowerCase().includes(needle));
+
+function render() {
   const list = $('site-list');
-  const visible = sites.filter((s) => s.name.includes(filter.toLowerCase()));
+  const typed = $('filter').value.trim();
+  const visible = sites.filter((s) => matches(s, typed.toLowerCase()));
   list.replaceChildren(
     ...visible.map((site) => {
       const li = document.createElement('li');
@@ -67,10 +74,10 @@ function render(filter = '') {
       return li;
     }),
   );
-  if (!visible.length && filter) {
+  if (!visible.length && typed) {
     const li = document.createElement('li');
     li.className = 'list-empty';
-    li.textContent = `nothing matches “${filter}”`;
+    li.textContent = `nothing matches “${typed}”`;
     list.append(li);
   }
 }
@@ -88,7 +95,7 @@ async function load() {
     const section = $('sites-section');
     section.hidden = false;
     $('site-count').textContent = `couldn't load sites (${res.status}) — try reloading`;
-    $('filter').hidden = true;
+    showFilter(false);
     return;
   }
   ({ sites } = await res.json());
@@ -101,21 +108,31 @@ async function load() {
       const section = $('sites-section');
       section.hidden = false;
       $('site-count').textContent = 'nothing deployed yet — sign in to ship the first site';
-      $('filter').hidden = true;
+      showFilter(false);
     }
     return;
   }
   $('sites-section').hidden = false;
   $('site-count').textContent =
     `${sites.length} ${sites.length === 1 ? 'site' : 'sites'}, freshest first`;
-  $('filter').hidden = sites.length < 9;
+  showFilter(sites.length >= 9);
   render();
 }
 
-$('filter').addEventListener('input', (e) => render(e.target.value.trim()));
+/** Hiding the box clears it and repaints. Clearing alone fires no input event,
+ *  so the rows a stale value was hiding would stay hidden with the only control
+ *  that could bring them back gone from the page. */
+function showFilter(on) {
+  $('filter').hidden = !on;
+  if (on || !$('filter').value) return;
+  $('filter').value = '';
+  render();
+}
+
+$('filter').addEventListener('input', () => render());
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === '/' && document.activeElement !== $('filter')) {
+  if (e.key === '/' && !$('filter').hidden && document.activeElement !== $('filter')) {
     e.preventDefault();
     $('filter').focus();
   }

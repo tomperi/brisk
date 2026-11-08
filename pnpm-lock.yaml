@@ -63,7 +63,7 @@ importers:
         specifier: ^4.7.0
         version: 4.12.25
       ws:
-        specifier: ^8.18.0
+        specifier: ^8.21.0
         version: 8.21.0
     devDependencies:
       '@cloudflare/vitest-pool-workers':
@@ -79,8 +79,8 @@ importers:
         specifier: ^8.5.12
         version: 8.18.1
       esbuild:
-        specifier: ^0.25.0
-        version: 0.25.4
+        specifier: ^0.28.1
+        version: 0.28.1
       typescript:
         specifier: ^5.7.0
         version: 5.9.3

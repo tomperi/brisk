@@ -203,8 +203,12 @@ instance — so you can't expose one silently.
 | `google`         | `private` (default) | members only                       | members + CI token                          |
 | `google`         | `public`            | **anyone**, read-only, edge-cached | members + CI token                          |
 
-`/llms.txt` is the one page every instance serves without a login — it holds
-only this repo's docs, and the agents it is for can't complete OAuth.
+`/llms.txt`, the `/skill` install page, `/skill.md` and `/sdk.md` are the pages
+served without a login (with the stylesheet and scripts `/skill` loads) — they
+hold only this repo's docs, so a teammate or an agent can install the skill
+before signing in. They always come from the platform, even when a deployed
+`home` site has files of the same names; that site's own stylesheet and scripts
+still reach everyone who could already read it.
 
 Members are whoever passes `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS`. Three
 credentials exist: the browser session cookie (7 days, covers every site
@@ -355,8 +359,8 @@ skip profiles entirely: `BRISK_SERVER` + `BRISK_TOKEN`.
 `brisk init` also drops an `AGENTS.md` so coding agents immediately know the
 SDK — "make me a lunch-voting site" works out of the box. For an agent to know
 Brisk _before_ a folder exists, install the [companion skill](skills/brisk)
-(Claude Code and Codex instructions in its README), and point it at `/llms.txt`
-on any instance: the whole product — docs, hosting, changelog, the skill and how
+(Claude Code and Codex instructions in its README, or the `/skill` page of any
+instance), and point it at `/llms.txt` on any instance: the whole product — docs, hosting, changelog, the skill and how
 to install it — as one text file, generated from this repo at build time.
 
 ## The SDK

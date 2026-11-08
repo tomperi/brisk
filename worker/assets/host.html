@@ -60,6 +60,7 @@
           <a href="/docs">docs</a>
           <a href="/host">hosting</a>
           <a href="/changelog">changelog</a>
+          <a href="/skill">skill</a>
           <a href="https://github.com/tomperi/brisk">source</a>
           <a href="/auth/login" id="signin" hidden>sign in</a>
           <span class="whoami" id="whoami" hidden>
@@ -230,9 +231,10 @@ npx wrangler secret put DEPLOY_TOKEN       # optional, for CI</code></pre>
 
       <h2 id="visibility"><a href="#visibility">Public demo mode</a></h2>
       <p>
-        Instances are private by default — everything but <code>/llms.txt</code> needs a login. To
-        let strangers <em>see</em> your sites without being able to touch them, set
-        <code>VISIBILITY=public</code> alongside <code>AUTH=google</code>.
+        Instances are private by default — everything but <code>/llms.txt</code> and the
+        <a href="/skill">skill</a> pages needs a login. To let strangers <em>see</em> your sites
+        without being able to touch them, set <code>VISIBILITY=public</code> alongside
+        <code>AUTH=google</code>.
       </p>
       <ul>
         <li>
@@ -362,6 +364,7 @@ npx wrangler secret put DEPLOY_TOKEN       # optional, for CI</code></pre>
         <a href="/">home</a>
         <a href="/docs">docs</a>
         <a href="/changelog">changelog</a>
+        <a href="/skill">skill</a>
         <a href="https://shopify.engineering/quick">inspired by Shopify's Quick</a>
       </footer>
     </main>
