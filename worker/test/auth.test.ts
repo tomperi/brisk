@@ -122,6 +122,18 @@ describe('auth=google', () => {
     );
   });
 
+  it('marks cookies Secure exactly when the public origin is https', async () => {
+    // Every cookie this server writes — the 7-day session JWT, the CSRF cookie,
+    // the OAuth state cookie below — takes its Secure flag from the same
+    // derivation. Losing it puts them on the wire in clear on an https-fronted
+    // instance, and no other assertion in the suite would notice.
+    const proxied = await fetchUrl(googleEnv, 'http://brisk.example.com/auth/login');
+    expect(proxied.headers.get('set-cookie')).toContain('Secure');
+
+    const local = await fetchUrl(googleEnv, 'http://localhost/auth/login');
+    expect(local.headers.get('set-cookie')).not.toContain('Secure');
+  });
+
   it('accepts the CI deploy token and attributes it as ci@brisk', async () => {
     const res = await fetchAs(googleEnv, '/api/me', {
       headers: { authorization: 'Bearer ci-token' },
