@@ -21,6 +21,10 @@ curl -fsSL https://raw.githubusercontent.com/tomperi/brisk/main/skills/brisk/SKI
 curl -fsSL https://raw.githubusercontent.com/tomperi/brisk/main/skills/brisk/references/sdk.md -o ~/.claude/skills/brisk/references/sdk.md
 ```
 
+Every Brisk instance also serves the two files raw with no login, at
+`/skill.md` and `/sdk.md`, and its `/skill` page shows the same commands with
+that instance's address filled in.
+
 It's auto-discovered via the frontmatter in `SKILL.md`; it fires when you ask to
 build or deploy a Brisk site. Any Brisk instance also serves these instructions,
 with the skill itself and the rest of the docs, at `/llms.txt`.

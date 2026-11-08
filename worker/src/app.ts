@@ -5,9 +5,11 @@ import {
   authRoutes,
   cliConsent,
   cliMint,
+  inOnlyAsOpenPage,
   isVisitor,
   OPEN_PAGES,
   publicScheme,
+  SHELL_ASSETS,
   type SchemeSource,
 } from './auth';
 import { DocStore } from './docs';
@@ -476,6 +478,7 @@ export function createApp(
   for (const path of OPEN_PAGES) {
     app.get(path, async (c, next) => {
       if (siteFromHost(new URL(c.req.url).host, c.env.BASE_HOST) !== null) return next();
+      if (SHELL_ASSETS.has(path) && !inOnlyAsOpenPage(c)) return next();
       const asset = await c.var.platform.assets.fetch(path);
       return asset.ok ? securedAsset(asset) : c.notFound();
     });

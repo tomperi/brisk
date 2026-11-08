@@ -64,12 +64,35 @@ function visitorAllowed(method: string, pathname: string): boolean {
   return true; // static site files, dashboard assets, /brisk.js, /docs
 }
 
-/** Pages every instance serves with no login, private ones included: they hold
- *  only this repo's docs, and exist to be fetched by agents and crawlers that
- *  can't complete OAuth. app.ts serves them from the worker's own assets by
+/** Pages served with no login, private instance or not: they hold only this
+ *  repo's docs and the dashboard shell, so anyone can install the skill before
+ *  signing in — agents can't complete OAuth at all. The shell assets are the
+ *  ones /skill loads. app.ts serves them from the worker's own assets by
  *  explicit route, so no deployed site can publish a file under one of these
  *  names to the world. */
-export const OPEN_PAGES: ReadonlySet<string> = new Set(['/llms.txt']);
+export const OPEN_PAGES: ReadonlySet<string> = new Set([
+  '/llms.txt',
+  '/skill',
+  '/skill.md',
+  '/sdk.md',
+  '/app.css',
+  '/header.js',
+  '/brisk.js',
+  '/favicon.svg',
+]);
+
+/** The open pages a deployed `home` site may ship its own copy of. Whoever can
+ *  already read that site's files keeps getting them; only a request let in
+ *  solely as an open page gets the platform's copy instead. */
+export const SHELL_ASSETS: ReadonlySet<string> = new Set([
+  '/app.css',
+  '/header.js',
+  '/brisk.js',
+  '/favicon.svg',
+]);
+
+export const inOnlyAsOpenPage = (c: Context<AppEnv>): boolean =>
+  isVisitor(c.var.user) && c.env.VISIBILITY !== 'public';
 
 /** The bare host only, judged from the Host and never from x-brisk-site:
  *  `foo.<BASE_HOST>/llms.txt` is that site's own file and stays a member's. */

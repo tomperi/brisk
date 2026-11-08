@@ -59,6 +59,22 @@ a {
   background: var(--accent-soft);
 }
 
+.skill-actions {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  margin: 1.2rem 0;
+}
+
+.skill-actions a {
+  text-decoration: none;
+}
+
+.skill-source {
+  max-height: 70vh;
+  overflow: auto;
+}
+
 /* ---- header ------------------------------------------------------------- */
 
 header {

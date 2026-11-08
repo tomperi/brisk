@@ -14,6 +14,7 @@ describe('/llms.txt', () => {
     const body = await res.text();
     expect(body.startsWith('# Brisk\n')).toBe(true);
     expect(body).toContain('## For coding agents: install the Brisk skill');
+    expect(body).toContain('curl -fsSL <this host>/skill.md'); // install from this instance
     expect(body).toContain('raw.githubusercontent.com/tomperi/brisk/main/skills/brisk/SKILL.md');
     expect(body).toContain('## Building and deploying Brisk apps'); // the skill itself
     expect(body).toContain('brisk plugin list'); // plugin discovery
