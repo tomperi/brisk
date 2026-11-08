@@ -254,6 +254,7 @@ td code {
 .sites-head {
   display: flex;
   align-items: baseline;
+  flex-wrap: wrap;
   gap: 1rem;
   margin: 3rem 0 0.5rem;
 }
@@ -275,7 +276,7 @@ td code {
   border: none;
   border-bottom: 1px solid var(--line);
   padding: 0.1rem 0;
-  width: 11rem;
+  width: 13rem;
   outline: none;
   transition: border-color 150ms ease;
 }

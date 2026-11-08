@@ -420,6 +420,20 @@ describe('site ownership', () => {
     expect(await ownerOf('attributed')).toBe('alice');
   });
 
+  it('carries both deploy labels on the list endpoint the dashboard reads', async () => {
+    // The dashboard's filter matches site.owner and site.updatedBy client-side,
+    // and it reads the list, not /api/sites/:name. A forced overwrite splits the
+    // two, and typing either name has to keep finding the site.
+    expect((await deployAs('ownerlisted', 'alice')).status).toBe(200);
+    expect((await deployAs('ownerlisted', 'bob', true)).status).toBe(200);
+    const { sites } = await (
+      await SELF.fetch(`${HOST}/api/sites`)
+    ).json<{ sites: { name: string; owner: string | null; updatedBy: string | null }[] }>();
+    const row = sites.find((s) => s.name === 'ownerlisted');
+    expect(row?.owner).toBe('alice');
+    expect(row?.updatedBy).toBe('bob');
+  });
+
   it('records the deployer as owner and guards overwrites by others', async () => {
     // alice claims the site — she becomes its owner.
     expect((await deployAs('own', 'alice')).status).toBe(200);

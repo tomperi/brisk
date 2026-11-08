@@ -49,6 +49,12 @@ releases are published to
   remove yours. `brisk plugin comments react <site> <id> <emoji>` does the same
   from the CLI, and `export`, `show` and `list` print reactions, so an agent
   sees a ✅ or a ❓ on its work. Reactions never make a thread unread.
+- **The dashboard filter matches deployers, not just site names.** Typing a name
+  into the site filter now also matches the people on a site, so your own name
+  finds your sites and a teammate's finds theirs. Both deploy labels count: the
+  one stamped when the site was created and the one from its latest deploy,
+  which a forced overwrite splits apart. No new control and no permission — the
+  same filter over the same list everyone already sees in full.
 
 ### Changed
 
