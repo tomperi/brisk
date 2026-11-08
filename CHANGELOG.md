@@ -79,6 +79,10 @@ releases are published to
   subdomain or `/s/<name>/`) when the site URLs the server hands out use a
   different scheme from the page, as they can behind a TLS-terminating proxy.
   It compared schemes; it compares hosts now.
+- On an instance with `AUTH=none`, the header no longer shows the shared dev
+  identity (`dev@localhost`) or a presence dot for it: everyone there is the
+  same user, so neither says who is looking. Signed-in users still see their
+  name and the dot.
 
 ## [0.4.2] - 2026-08-30
 

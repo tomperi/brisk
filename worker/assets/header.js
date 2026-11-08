@@ -9,7 +9,12 @@ window.briskWhoami = (() => {
   // link and skip presence (its websocket would be rejected anyway).
   return brisk.me().then(
     (user) => {
-      el('who').textContent = user.name === 'Dev' ? user.email : user.name.toLowerCase();
+      // AUTH=none gives everyone one shared, trusted identity — there's no
+      // per-user login, so don't surface it. Real users still get a name label
+      // and the presence dot.
+      if (user.name === 'Dev') return user;
+
+      el('who').textContent = user.name.toLowerCase();
       el('whoami').hidden = false;
 
       const presence = el('presence');
