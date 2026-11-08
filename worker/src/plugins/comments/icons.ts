@@ -1,4 +1,3 @@
-/** One drawn set: 16px grid, 1.5 stroke, round caps. */
 const PATHS = {
   x: '<path d="M4 4l8 8M12 4l-8 8"/>',
   plus: '<path d="M8 3.5v9M3.5 8h9"/>',

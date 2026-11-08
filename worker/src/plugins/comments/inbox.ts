@@ -1,13 +1,9 @@
-/** Activity is a comment or reply someone else created; status changes and my
- *  own writes never count. A published comment doc satisfies this shape. */
 export interface ThreadEntry {
   createdAt: string;
   createdByEmail?: unknown;
   deleted?: unknown;
 }
 
-/** One per (site, person): when that person last opened each top-level comment.
- *  '' is an explicit mark-unread, which holds until they open the thread again. */
 export interface SeenState {
   user: string;
   seen: Record<string, string>;
@@ -16,7 +12,6 @@ export interface SeenState {
 const identity = (email: unknown): string =>
   typeof email === 'string' ? email.trim().toLowerCase() : '';
 
-/** The id of a person's seen doc, so a reader can fetch theirs directly. */
 export const seenDocId = (email: string): string => identity(email);
 
 export function lastActivityByOthers(

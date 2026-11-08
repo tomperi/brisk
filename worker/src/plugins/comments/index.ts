@@ -51,8 +51,6 @@ function reactionArg(raw: string | undefined): Emoji | null {
   return emoji;
 }
 
-/** The comment or reply a reaction under `parentId` lands on: the thread head
- *  by default, else one of its live replies. */
 async function reactionTarget(
   store: DocStore,
   site: string,
@@ -72,8 +70,6 @@ async function reactionTarget(
   return to;
 }
 
-/** One record per person, emoji and target: its id is derived from them, so a
- *  repeat collides on the key and a removed reaction comes back instead. */
 async function reactionId(reactTo: string, emoji: Emoji, email: string): Promise<string> {
   const key = new TextEncoder().encode(`${reactTo}\n${emoji}\n${email.trim().toLowerCase()}`);
   const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', key));
@@ -124,7 +120,6 @@ async function create(ctx: PluginActionCtx, args: Record<string, string>): Promi
   return doc;
 }
 
-/** Adding a reaction I already left is a no-op; adding one I removed revives it. */
 async function addReaction(
   ctx: PluginActionCtx,
   store: DocStore,
@@ -251,10 +246,6 @@ async function softDelete(ctx: PluginActionCtx, args: Record<string, string>): P
   return doc;
 }
 
-/** Sets the caller's seen stamp on one thread: a timestamp, or '' for an
- *  explicit unread. The doc lives under a fixed per-person id, so racing first
- *  writes collide on the key instead of forking two docs; a lost create or CAS
- *  re-reads. */
 async function writeSeen(
   ctx: PluginActionCtx,
   args: Record<string, string>,
@@ -326,7 +317,6 @@ async function list(ctx: PluginActionCtx, args: Record<string, string>): Promise
   }));
 }
 
-/** Every thread in the newest 500 records, newest first, numbered as the widget numbers them. */
 async function siteThreads(store: DocStore, site: string): Promise<Thread[]> {
   const docs = await store.list(site, COMMENTS, { limit: 500, sort: '-created' });
   return buildThreads({ drafts: [], docs, seen: {}, me: '' });

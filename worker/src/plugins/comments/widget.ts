@@ -3,12 +3,7 @@
  * brisk.db via the plugin's server actions, which stamp the author and append
  * an audit event. Reads use the SDK when the page loads /brisk.js and fall
  * back to the same fetch the write path uses when it doesn't — only realtime
- * needs the SDK (without it the data refreshes after each of our own actions).
- *
- * State lives in a few plain values (drafts, published docs, my seen stamps,
- * PanelState); render() derives the Thread model from them and redraws the
- * pins, panel, and popover. Look: the category's comments sidebar, system type,
- * one Brisk-blue accent, light and dark. */
+ * needs the SDK (without it the data refreshes after each of our own actions). */
 import {
   anchorFields,
   anchorLines,
@@ -84,7 +79,6 @@ type Brisk = {
   const clean = (s: string, n: number) => (s || '').replace(/\s+/g, ' ').trim().slice(0, n);
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 
-  // ---- state ----------------------------------------------------------------
   const loadDrafts = (): Draft[] => {
     try {
       return JSON.parse(recall('drafts') || '[]') as Draft[];
@@ -105,23 +99,18 @@ type Brisk = {
     filter: parseFilter(recall('filter')),
     expanded: null,
   };
-  /** The thread whose Delete (or a draft's Discard) waits for a second click. */
   let armed: string | null = null;
-  /** The thread shown in the popover, when the panel is closed. */
   let popThread: { id: string; since: string | undefined } | null = null;
-  /** Unsent reply and draft-edit text, by data-keep key, so a re-render keeps it. */
   const buffers = new Map<string, string>();
 
   let published: StoredDoc[] = [];
   let me = { email: '', name: '' };
-  /** My seen doc as the server last reported it, and my stamps still in flight. */
   let serverSeen: Record<string, string> = {};
   const pendingSeen = new Map<string, string>();
   let seenReady = false;
   let threads: Thread[] = [];
   const threadById = (id: string | undefined) => threads.find((t) => t.id === id);
 
-  // ---- data -----------------------------------------------------------------
   const refreshPublished = async () => {
     if (sdk) {
       published = await sdk.db.collection(COLLECTION).list({ limit: 500, sort: '-created' });
@@ -171,8 +160,6 @@ type Brisk = {
     return ((await res.json()) as { result: StoredDoc }).result;
   };
 
-  // Unread needs both who I am and what I have seen; until both land nothing
-  // shows as unread, so the page doesn't flash every pin blue on load.
   void fetch('/api/me')
     .then((r) => (r.ok ? (r.json() as Promise<{ email?: string; name?: string }>) : null))
     .then(async (who) => {
@@ -190,7 +177,6 @@ type Brisk = {
     })
     .catch((err: unknown) => console.warn('[comments] unread state unavailable:', err));
 
-  /** Stamps a thread read (an ISO time) or explicitly unread (''), shown at once. */
   async function writeSeen(id: string, stamp: string) {
     const t = threadById(id);
     if (!t || t.kind === 'draft' || !seenReady) return;
@@ -240,14 +226,12 @@ type Brisk = {
       .slice(0, 2)
       .map((c) => `.${c}`)
       .join('')}`;
-  /** What a comment or reaction stores about the element it lands on. */
   const elementFields = (el: Element) => ({
     label: nameOf(el),
     textSnippet: clean(el.textContent ?? '', 140),
     html: clean(el.outerHTML, 300),
   });
   const HEADING = 'h1, h2, h3, h4, h5, h6, [role="heading"]';
-  /** Its accessible name where it has one, else its first heading, else its tag. */
   const nameOf = (el: Element) => {
     const text = (e: Element | null) => (e as HTMLElement | null)?.innerText ?? e?.textContent;
     const ownText = el.matches(`${HEADING}, button, a[href], label, summary, legend`);
@@ -493,7 +477,6 @@ type Brisk = {
       elementAt(el, e.clientX, e.clientY);
     startCompose(hit, e.clientX, e.clientY);
   };
-  /** The Comment control: a selection made first gets its comment at once. */
   const pickOrQuote = () => {
     const range = picking ? null : liveRange();
     const end = range && caretAfter(range);
@@ -502,7 +485,6 @@ type Brisk = {
     else setPick(!picking);
   };
 
-  // ---- quick bar: Comment / React by a page selection, and the emoji row ----
   type Bar =
     | { kind: 'closed' }
     | { kind: 'selection'; range: Range; step: 'actions' | 'emoji' }
@@ -517,8 +499,6 @@ type Brisk = {
     bar = { kind: 'closed' };
     qbar.classList.remove('in', 'show');
   }
-  /** Above the selection's last line, below it on touch (the OS callout sits
-   *  above), or under the Add reaction button. Closes once the words scroll away. */
   function placeBar() {
     if (bar.kind === 'closed') return;
     const box = bar.kind === 'target' ? bar.from : lastLine(bar.range);
@@ -526,6 +506,7 @@ type Brisk = {
     const w = qbar.offsetWidth;
     const h = qbar.offsetHeight;
     const right = innerWidth - (bar.kind === 'selection' && docked ? PANEL_W : 0);
+    // On touch the OS selection callout sits above the selection.
     const below = bar.kind === 'target' || coarse.matches || box.top - h - 8 < 8;
     const x = bar.kind === 'target' ? box.left - 4 : box.right - w / 2;
     const top = below
@@ -545,7 +526,6 @@ type Brisk = {
   }
 
   const EDITABLE = 'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
-  /** A page selection the bar may offer: real words, outside fields and the widget. */
   function barSelection(): Range | null {
     if (hidden || collapsed || picking) return null;
     const range = liveRange();
@@ -561,7 +541,6 @@ type Brisk = {
     a.compareBoundaryPoints(Range.END_TO_END, b) === 0;
   let pressing = false;
   let selTimer: ReturnType<typeof setTimeout> | undefined;
-  /** Debounced: a drag waits for mouseup, keyboard and touch selection for a pause. */
   function checkSelection() {
     clearTimeout(selTimer);
     selTimer = setTimeout(() => {
@@ -592,7 +571,6 @@ type Brisk = {
   }
 
   const reacting = new Set<string>();
-  /** 'add' from the emoji row leaves a reaction I already have; a chip toggles mine. */
   async function setReaction(threadId: string, to: string, emoji: Emoji, how: 'add' | 'toggle') {
     const t = threadById(threadId);
     const target = t?.id === to ? t : t?.replies.find((r) => r.id === to);
@@ -611,7 +589,6 @@ type Brisk = {
     }
   }
 
-  // ---- popover --------------------------------------------------------------
   function placePop(x: number, y: number) {
     const w = 360;
     const right = innerWidth - (docked ? PANEL_W : 0);
@@ -671,7 +648,6 @@ type Brisk = {
     return true;
   }
 
-  /** From comment mode, saving keeps picking; from the selection bar it is one comment. */
   function openCompose(
     { el, anchor, range }: Capture,
     x: number,
@@ -752,9 +728,6 @@ type Brisk = {
     render();
   }
 
-  // ---- keeping typed text across re-renders ---------------------------------
-  /** Re-renders replace the markup under the cursor; text, focus and scroll
-   *  survive through `buffers` and the data-keep keys. */
   function redraw(container: HTMLElement, html: string) {
     const list = container.querySelector('.list');
     const scroll = list?.scrollTop ?? 0;
@@ -778,7 +751,6 @@ type Brisk = {
     }
   }
 
-  // ---- actions ----------------------------------------------------------------
   async function sendReply(id: string) {
     const k = `reply:${id}`;
     const text = (buffers.get(k) ?? '').trim();
@@ -911,7 +883,6 @@ type Brisk = {
       },
     );
 
-  // ---- pins -----------------------------------------------------------------
   const findTarget = (selector: string): Element | null => {
     try {
       return selector ? document.querySelector(selector) : null;
@@ -950,7 +921,6 @@ type Brisk = {
     placement: Placement;
   }
   let slots = new Map<string, Slot>();
-  /** Its words (or its element) are gone from the page; it pins where it can. */
   const anchorLost = (id: string) => {
     const s = slots.get(id);
     const p = s?.placement.kind;
@@ -1029,8 +999,6 @@ type Brisk = {
     return c.range;
   }
 
-  /** Where the pin's tip goes: just past a quote's last word, the clicked spot,
-   *  or an element's top-right corner. */
   function place(t: Thread): Placement {
     const a = t.anchor;
     if (a.kind === 'page') return { kind: 'page' };
@@ -1065,7 +1033,6 @@ type Brisk = {
 
   const focusedId = () => popThread?.id ?? (panel.open ? panel.expanded?.id : undefined) ?? '';
 
-  /** Reuses each thread's pin across renders so only new pins animate in. */
   function renderPins() {
     const next = new Map<string, Slot>();
     for (const t of threads) {
@@ -1115,7 +1082,6 @@ type Brisk = {
     setTimeout(() => pin.classList.remove('flash'), 1900);
   };
 
-  /** Scrolls the page to a thread's spot when it is off screen, then flashes its pin. */
   function revealOnPage(t: Thread) {
     const s = slots.get(t.id);
     const target = t.anchor.kind === 'page' ? null : findTarget(t.anchor.selector);
@@ -1132,7 +1098,6 @@ type Brisk = {
     setTimeout(() => flash(t.id), off ? 450 : 0);
   }
 
-  // ---- highlights -----------------------------------------------------------
   let marks: { all: Highlight; focus: Highlight; sheet: CSSStyleSheet } | null = null;
   try {
     if (CSS.highlights && typeof Highlight === 'function') {
@@ -1186,7 +1151,6 @@ type Brisk = {
       else closePop();
     }
     updateBadges();
-    // A thread open in front of me stays read as replies arrive.
     for (const id of [popThread?.id, panel.open ? panel.expanded?.id : undefined]) {
       const t = threadById(id);
       if (t?.unread && !pendingSeen.has(t.id)) markRead(t.id);
@@ -1209,7 +1173,6 @@ type Brisk = {
     });
   };
 
-  // ---- panel ------------------------------------------------------------------
   function renderPanel() {
     const view = panelView(threads, panel, here);
     redraw(
@@ -1252,7 +1215,6 @@ type Brisk = {
     render();
   }
 
-  /** Opens a thread in place; the list keeps its position while it is open. */
   function expand(id: string) {
     const t = threadById(id);
     if (!t) return;
@@ -1273,9 +1235,6 @@ type Brisk = {
     render();
   };
 
-  // ---- docking ----------------------------------------------------------------
-  // The page gets a right margin on <html> the width of the panel, so it
-  // reflows beside it. Elements the page pins with position: fixed do not move.
   const wide = matchMedia(`(min-width: ${DOCK_MIN}px)`);
   let docked: { value: string; priority: string; hadStyle: boolean } | null = null;
   function applyDock() {
@@ -1299,7 +1258,6 @@ type Brisk = {
   }
   wide.addEventListener('change', applyDock);
 
-  // ---- menus ------------------------------------------------------------------
   let menuOpen: { items: () => MenuItem[]; head?: () => string } | null = null;
   let menuArmed = '';
   function closeMenu() {
@@ -1420,9 +1378,6 @@ type Brisk = {
     render();
   };
 
-  // ---- commands ---------------------------------------------------------------
-  // Every control in the widget names one of these in data-act; one delegated
-  // listener runs them, so the panel and popover markup stay plain strings.
   const idOf = (el: HTMLElement) => el.closest<HTMLElement>('[data-id]')?.dataset.id ?? '';
   const commands: Record<string, (el: HTMLElement) => void> = {
     pin: (el) => {
@@ -1538,7 +1493,6 @@ type Brisk = {
       applyHidden();
     },
   };
-  /** Menu commands that take a second click before they run. */
   const ARMED_IN_MENU = new Set(['discard-drafts']);
 
   root.addEventListener('click', (e) => {
@@ -1673,7 +1627,6 @@ type Brisk = {
   addEventListener('popstate', () => render());
 
   // ---- boot -----------------------------------------------------------------
-  // A row on another page navigates here with its id, to open once data lands.
   const goto = recall('goto');
   if (goto) localStorage.removeItem(key('goto'));
   panelEl.classList.toggle('open', panel.open);

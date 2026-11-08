@@ -1,9 +1,6 @@
 export const PANEL_W = 400;
-/** Below this the panel overlays the page instead of pushing it aside. */
 export const DOCK_MIN = 900;
 
-/* Pins and the pick box sit on the teammate's page, not on the panel, so they
- * keep the light tokens whatever the OS scheme: the dark block only redeclares :host. */
 export const WIDGET_CSS = `
 :host, #pins, .hi {
   --panel-w: ${PANEL_W}px;
@@ -87,7 +84,6 @@ textarea::placeholder { color: var(--fg-muted); }
   stroke-linecap: round; stroke-linejoin: round;
 }
 
-/* controls */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px;
   padding: 0 12px; border-radius: 6px; font-weight: 500; font-size: 13px; line-height: 1;
@@ -125,7 +121,6 @@ textarea::placeholder { color: var(--fg-muted); }
   background: var(--bg-muted); color: var(--fg-2); text-align: center; font-weight: 500;
 }
 
-/* pick-mode hover box */
 .hi {
   position: fixed; pointer-events: none; display: none; border-radius: 4px;
   border: 1.5px solid var(--accent); background: var(--hl-soft);
@@ -138,7 +133,6 @@ textarea::placeholder { color: var(--fg-muted); }
 }
 .hi.no-room-above .hl { bottom: auto; top: 2px; left: 2px; }
 
-/* pins: the tip (bottom-left corner) sits on the spot */
 .pin {
   --ring: 0 0 0 2px var(--bg);
   position: fixed; width: 22px; height: 22px; margin-top: -22px; pointer-events: auto;
@@ -163,7 +157,6 @@ textarea::placeholder { color: var(--fg-muted); }
 }
 .layer.collapsed #pins { display: none; }
 
-/* thread (panel row and popover share it) */
 .th { position: relative; padding: 14px 20px; border-bottom: 1px solid var(--line); cursor: pointer; }
 .th:hover { background: var(--bg-subtle); }
 .th.open { cursor: default; background: color-mix(in oklab, var(--accent-soft) 55%, var(--bg)); box-shadow: inset 0 0 0 1px var(--accent-line); }
@@ -244,7 +237,6 @@ textarea::placeholder { color: var(--fg-muted); }
   .th:not(.open):hover .tools, .th:not(.open):focus-within .tools { display: flex; }
 }
 
-/* panel */
 .panel {
   position: fixed; top: 0; right: 0; bottom: 0; width: min(var(--panel-w), 100vw); pointer-events: auto;
   display: flex; flex-direction: column; background: var(--bg); border-left: 1px solid var(--line);
@@ -305,7 +297,6 @@ textarea::placeholder { color: var(--fg-muted); }
 .empty .ring { width: 40px; height: 40px; border-radius: 20px; background: var(--bg-muted); display: grid; place-items: center; margin: 0 auto 12px; color: var(--fg-muted); }
 .empty strong { display: block; color: var(--fg); font-size: 13px; font-weight: 600; margin-bottom: 2px; }
 
-/* popover: compose, and a thread when the panel is closed */
 .pop {
   position: fixed; pointer-events: auto; width: 360px; max-height: min(520px, calc(100vh - 16px));
   overflow-y: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 8px;
@@ -329,7 +320,6 @@ textarea::placeholder { color: var(--fg-muted); }
 .pop.shake { animation: pop-shake 320ms var(--ease); }
 @keyframes pop-shake { 20% { translate: -6px 0; } 40% { translate: 5px 0; } 60% { translate: -3px 0; } 80% { translate: 2px 0; } }
 
-/* floating toolbar, and the bubble it minimizes into */
 .fab {
   position: fixed; right: 16px; bottom: 16px; display: flex; align-items: center; gap: 2px; padding: 4px;
   background: var(--bg); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow-pop);
@@ -357,7 +347,6 @@ textarea::placeholder { color: var(--fg-muted); }
 .layer.collapsed .nub { opacity: 1; transform: none; visibility: visible; pointer-events: auto; transition: transform 240ms var(--ease), opacity 160ms ease-out, visibility 0s; }
 .layer.collapsed .nub:active { transform: scale(0.96); }
 
-/* quick bar: Comment / React by a page selection, and the emoji row */
 .qbar {
   position: fixed; display: none; align-items: center; gap: 2px; padding: 4px; pointer-events: auto; z-index: 6;
   background: var(--bg); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow-pop);
@@ -374,7 +363,6 @@ textarea::placeholder { color: var(--fg-muted); }
 .emo:hover { background: var(--bg-muted); }
 .emo:active { transform: scale(0.9); }
 
-/* menu: right-click on the toolbar, the panel's More button, the status picker */
 .menu {
   position: fixed; min-width: 232px; padding: 4px; pointer-events: auto; background: var(--bg);
   border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow-pop); display: none;
@@ -419,8 +407,7 @@ textarea::placeholder { color: var(--fg-muted); }
 `;
 
 /** ::highlight() only styles ranges in the tree that owns their nodes, so this
- *  sheet is adopted by the document, not the shadow root. A mid-lightness blue
- *  reads on light and dark host pages alike, so it ignores the OS scheme. */
+ *  sheet is adopted by the document, not the shadow root. */
 export const HIGHLIGHT_CSS = `
 ::highlight(brisk-comment) {
   background-color: oklch(60% 0.17 262 / 0.14); text-decoration: underline 2px oklch(60% 0.17 262 / 0.6);

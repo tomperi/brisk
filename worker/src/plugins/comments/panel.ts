@@ -1,6 +1,3 @@
-/* HTML for the panel, its thread rows, and the menus, as pure functions of the
- * thread model. Every control names its command in data-act; widget.ts owns
- * the one delegated listener that runs them. */
 import type { Point, Quote } from './anchor';
 import { icon, type IconName } from './icons';
 import {
@@ -117,8 +114,6 @@ const TAG_WORDS: Record<string, string> = {
 };
 const TAG_TOKEN = /^([a-z][a-z0-9]*)(?:#([\w-]+))?((?:\.[\w-]+)*)$/;
 
-/** A stored `tag#id.class` label or a CSS selector, said in words ("Section “pricing card”");
- *  null for anything that is already a human name. */
 function tagInWords(token: string): string | null {
   const compact = token.replace(/\s*>\s*/g, '>');
   if (/\s/.test(compact)) return null;
@@ -133,8 +128,6 @@ function tagInWords(token: string): string | null {
   return ident ? `${word} “${ident}”` : word;
 }
 
-/** The first non-blank candidate, cut at its first line break and kept short.
- *  Candidates run best name first: aria-label, heading, tag label, text. */
 export function spotName(candidates: readonly (string | null | undefined)[]): string {
   for (const c of candidates) {
     const line = (c ?? '').split(/\r?\n/).find((l) => l.trim()) ?? '';
@@ -144,7 +137,6 @@ export function spotName(candidates: readonly (string | null | undefined)[]): st
   return '';
 }
 
-/** "Enterprise · top right": the element's name, never its live text. */
 function spotLine(t: Thread, lost: boolean): string {
   const a = t.anchor;
   if (a.kind === 'page') return `<p class="spot">${icon('page')}<span>Whole page</span></p>`;
@@ -163,14 +155,12 @@ const btn = (act: string, label: string, opts: { icon?: IconName; cls?: string }
 const ib = (act: string, label: string, name: IconName) =>
   `<button class="ib" data-act="${act}" aria-label="${label}" data-tip="${label}">${icon(name)}</button>`;
 
-/** The eight emoji as buttons; each runs `emoji` with its emoji in data-v. */
 export const emojiRowHtml = () =>
   REACTIONS.map(
     (e) =>
       `<button class="emo" data-act="emoji" data-v="${e}" aria-label="React with ${e}">${e}</button>`,
   ).join('');
 
-/** The bar that floats by a selection or an Add reaction button. */
 export const quickBarHtml = (step: 'actions' | 'emoji') =>
   step === 'emoji'
     ? emojiRowHtml()
@@ -179,7 +169,6 @@ export const quickBarHtml = (step: 'actions' | 'emoji') =>
 const sameEmail = (a: string, b: string) =>
   !!a && a.trim().toLowerCase() === b.trim().toLowerCase();
 
-/** Chips under a comment or reply; `to` is its id. Clicking one toggles mine. */
 function reactionsHtml(rs: readonly Reaction[], to: string, o: ThreadOpts, live: boolean): string {
   const chips = rs.map((r) => {
     const names = r.by
@@ -199,13 +188,11 @@ function reactionsHtml(rs: readonly Reaction[], to: string, o: ThreadOpts, live:
 
 export interface ThreadOpts {
   open: boolean;
-  /** Its Delete (or a draft's Discard) waits for a second click. */
   armed: boolean;
   since: string | undefined;
   lost: boolean;
   me: string;
   surface: 'panel' | 'pop';
-  /** The thread's page when it is not this one, else ''. */
   elsewhere: string;
 }
 
