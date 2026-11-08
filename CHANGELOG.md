@@ -78,6 +78,10 @@ releases are published to
 - **Comments** — the header of the ⋯ and right-click menus counts only published
   threads as open. It used to count your unpublished drafts too, so it said
   "2 open" on a page where nothing was published yet.
+- **Comments** — the widget no longer logs a 404 in the browser console the
+  first time you open a site. It read your unread state by asking for a
+  record that only exists once you have read a thread; it now lists the
+  read-state records and treats a missing one as nothing read yet.
 - The dashboard's drop-to-deploy name step shows the right address form (a
   subdomain or `/s/<name>/`) when the site URLs the server hands out use a
   different scheme from the page, as they can behind a TLS-terminating proxy.
