@@ -78,6 +78,10 @@ releases are published to
 
 - **Comments** — a half-typed comment no longer vanishes on a stray click: the
   popover shakes and keeps your text until you save or cancel.
+- **Comments** — a site shown in a frame on another page no longer brings its
+  own toolbar and panel, so a Brisk site that frames another one shows the
+  comments widget once. The widget runs only on the top page; open a framed
+  site on its own to comment on it.
 - **Comments** — the header of the ⋯ and right-click menus counts only published
   threads as open. It used to count your unpublished drafts too, so it said
   "2 open" on a page where nothing was published yet.
