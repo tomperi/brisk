@@ -203,6 +203,7 @@ type Brisk = {
   // ---- element anchoring (ported from html-grab) ---------------------------
   function cssPath(el: Element): string {
     if (el.id) return `#${CSS.escape(el.id)}`;
+    if (el === document.body) return 'body';
     const parts: string[] = [];
     let node: Element | null = el;
     while (node && node.nodeType === 1 && node !== document.body && parts.length < 6) {
@@ -448,7 +449,7 @@ type Brisk = {
 
   function quoteAt(range: Range, x: number, y: number): Capture | null {
     const scope = blockAncestor(range.commonAncestorContainer);
-    const selector = scope === document.body ? 'body' : scope ? cssPath(scope) : '';
+    const selector = scope ? cssPath(scope) : '';
     const scanned = scope && selector ? scopeText(scope) : null;
     if (!scope || !scanned) return null;
     const { nodes, flat } = scanned;
@@ -688,6 +689,10 @@ type Brisk = {
       return false;
     }
     popThread = null;
+    if (pendingRange) {
+      pendingRange = null;
+      paint();
+    }
     pop.innerHTML = html;
     pop.classList.add('show');
     placePop(x, y);
