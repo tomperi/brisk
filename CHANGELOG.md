@@ -19,6 +19,19 @@ releases are published to
 - **Skill** — the Brisk skill explains plugins and how an agent discovers the
   ones an instance has (`brisk plugin list`, `/api/plugins`) instead of
   assuming a registry, and how to act on teammates' comments.
+- **Comments** — select text before you click and the comment quotes those
+  exact words. The words are highlighted on the page (without changing its
+  markup) and found again after a redeploy; when they are gone, the comment
+  falls back to its element and the thread says the quote is no longer on the
+  page. A plain click pins the comment where you clicked, not the element's
+  corner. `export` and the widget's copy buttons print the quote with the text
+  around it, so an agent knows exactly which words a comment is about. In pick
+  mode, the element under the cursor shows its name.
+
+### Fixed
+
+- **Comments** — a half-typed comment no longer vanishes on a stray click: the
+  popover shakes and keeps your text until you save or cancel.
 
 ## [0.4.2] - 2026-08-30
 

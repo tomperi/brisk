@@ -1,6 +1,7 @@
 import { DocStore, type Doc } from '../../docs';
 import type { User } from '../../env';
 import { PLUGIN_COLLECTION_PREFIX, type Plugin, type PluginActionCtx } from '../types';
+import { ANCHOR_ARGS, anchorFields, anchorLines, anchorOfRecord, parseAnchor } from './anchor';
 
 export const COMMENTS = `${PLUGIN_COLLECTION_PREFIX}comments`;
 export const EVENTS = `${PLUGIN_COLLECTION_PREFIX}comments:events`;
@@ -36,11 +37,12 @@ async function create(ctx: PluginActionCtx, args: Record<string, string>): Promi
   const site = args.site;
   const text = args.text;
   if (!site || !text) throw new Error('site and text are required');
+  const anchor = parseAnchor(args);
   const by = authorOf(ctx.user);
   const doc = await new DocStore(ctx.platform.db).create(site, COMMENTS, {
     text,
     page: args.page ?? '',
-    selector: args.selector ?? '',
+    ...anchorFields(anchor),
     label: args.label ?? '',
     textSnippet: args.textSnippet ?? '',
     html: args.html ?? '',
@@ -174,7 +176,8 @@ async function show(ctx: PluginActionCtx, args: Record<string, string>): Promise
   const c = await requireComment(store, site, id);
   const all = await store.list(site, COMMENTS, { limit: 500, sort: 'created' });
   const replies = all.filter((r) => r.parentId === id);
-  const head = `[${statusOf(c)}] ${String(c.createdBy)} — ${String(c.text)}\n  page: ${String(c.page)}  selector: ${String(c.selector)}`;
+  const anchor = anchorLines(anchorOfRecord(c)).map((l) => `\n  ${l}`);
+  const head = `[${statusOf(c)}] ${String(c.createdBy)} — ${String(c.text)}\n  page: ${String(c.page)}${anchor.join('')}`;
   const body = replies.map((r) => `  ↳ ${String(r.createdBy)}: ${String(r.text)}`).join('\n');
   return replies.length ? `${head}\n${body}` : head;
 }
@@ -199,7 +202,7 @@ async function exportMd(ctx: PluginActionCtx, args: Record<string, string>): Pro
   for (const c of rows) {
     out += `\n## [${String(c.id)}] (${statusOf(c)}) ${String(c.text)}\n`;
     out += `- page: \`${String(c.page)}\`\n`;
-    if (c.selector) out += `- selector: \`${String(c.selector)}\`\n`;
+    for (const line of anchorLines(anchorOfRecord(c))) out += `${line}\n`;
     if (c.textSnippet) out += `- text: "${String(c.textSnippet)}"\n`;
     out += `- by: ${String(c.createdBy)}\n`;
   }
@@ -226,6 +229,7 @@ export const comments: Plugin = {
         { name: 'label' },
         { name: 'textSnippet' },
         { name: 'html' },
+        ...ANCHOR_ARGS.map((name) => ({ name })),
       ],
       render: 'json',
       handler: create,
