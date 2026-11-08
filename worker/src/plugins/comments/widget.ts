@@ -646,23 +646,24 @@ interface BdDoc {
       : SKIP_TEXT.has((n as Element).localName)
         ? NodeFilter.FILTER_REJECT
         : NodeFilter.FILTER_SKIP;
+  const BLOCK_TAGS = new Set(
+    'address article aside blockquote caption dd details dialog div dl dt fieldset figcaption figure footer form h1 h2 h3 h4 h5 h6 header hr li main nav ol p pre section summary table tbody td tfoot th thead tr ul'.split(
+      ' ',
+    ),
+  );
   /** Walks text nodes and `<br>` elements. */
   const textWalker = (root: Node) =>
     document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, textFilter);
 
-  /** Says, text node by text node, whether the page breaks the line before it. */
+  /** Says, text node by text node, whether the markup breaks the line before it.
+   *  Tags, not computed styles, so a quote reads the same at every width. */
   function lineBreaks() {
     const blocks = new Map<Element | null, Element | null>();
     const blockOf = (t: Text) => {
       const p = t.parentElement;
       if (!blocks.has(p)) {
         let el = p;
-        while (
-          el &&
-          el !== document.body &&
-          /^(inline|contents)/.test(getComputedStyle(el).display)
-        )
-          el = el.parentElement;
+        while (el && el !== document.body && !BLOCK_TAGS.has(el.localName)) el = el.parentElement;
         blocks.set(p, el);
       }
       return blocks.get(p)!;
