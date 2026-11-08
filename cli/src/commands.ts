@@ -26,6 +26,8 @@ export interface Flags {
   server?: string;
   profile?: string;
   username?: string;
+  label?: string;
+  scope?: string;
   force?: boolean;
   yes?: boolean;
 }
@@ -643,6 +645,110 @@ function renderResult(act: ActionManifest, result: unknown): void {
     return;
   }
   console.log(JSON.stringify(result, null, 2));
+}
+
+// ---- site tokens -------------------------------------------------------------
+
+interface SiteTokenInfo {
+  id: string;
+  label: string;
+  sites: string[];
+  scopes: string[];
+  disabled: boolean;
+  createdAt: string;
+  createdBy: string;
+  lastUsedAt: string | null;
+}
+
+const csv = (value: string | undefined): string[] =>
+  (value ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+/** Token management refuses site tokens; say so when BRISK_TOKEN is one. */
+async function tokenApi<T>(conn: Connection, route: string, init?: RequestInit): Promise<T> {
+  try {
+    return await api<T>(conn, route, init);
+  } catch (err) {
+    const code = err instanceof ApiError && (err.body as { code?: string } | null)?.code;
+    if (code === 'token-route') {
+      throw new Error(
+        'BRISK_TOKEN is a site token; managing tokens needs your personal login. ' +
+          'Unset BRISK_TOKEN and use your `brisk login` profile.',
+      );
+    }
+    throw err;
+  }
+}
+
+export async function tokenCreate(flags: Flags): Promise<void> {
+  const sites = csv(flags.site);
+  const scopes = csv(flags.scope);
+  if (!flags.label || !sites.length || !scopes.length) {
+    throw new Error(
+      'usage: brisk token create --label <text> --site <a,b> --scope <read,write,update,delete>',
+    );
+  }
+  const conn = resolveConnection(flags, process.cwd());
+  const { token, secret } = await tokenApi<{ token: SiteTokenInfo; secret: string }>(
+    conn,
+    '/api/tokens',
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ label: flags.label, sites, scopes }),
+    },
+  );
+  // Piped (`… | gh secret set BRISK_TOKEN`), stdout carries the secret alone.
+  if (!process.stdout.isTTY) {
+    process.stdout.write(`${secret}\n`);
+    console.error(`created ${token.id} (${token.label})`);
+    return;
+  }
+  console.log(`${green('✓')} token ${bold(token.id)} created ${dim(`(${token.label})`)}`);
+  console.log(`  sites   ${token.sites.join(', ')}`);
+  console.log(`  scopes  ${token.scopes.join(', ')}`);
+  console.log(`\n  ${secret}  ${yellow('← shown once, copy it now')}\n`);
+  console.log(dim(`use it with: BRISK_SERVER=${conn.server} BRISK_TOKEN=<secret> brisk deploy`));
+}
+
+export async function tokenList(flags: Flags): Promise<void> {
+  const conn = resolveConnection(flags, process.cwd());
+  const { tokens } = await tokenApi<{ tokens: SiteTokenInfo[] }>(conn, '/api/tokens');
+  if (!tokens.length) {
+    console.log(
+      `No site tokens yet. ${dim('Try: brisk token create --label ci --site my-site --scope write,update')}`,
+    );
+    return;
+  }
+  printTable(
+    ['id', 'label', 'sites', 'scopes', 'status', 'last used'],
+    tokens.map((t) => ({
+      id: t.id,
+      label: t.label,
+      sites: t.sites.join(','),
+      scopes: t.scopes.join(','),
+      status: t.disabled ? 'disabled' : 'enabled',
+      'last used': t.lastUsedAt ? timeAgo(t.lastUsedAt) : 'never',
+    })),
+  );
+}
+
+export async function tokenSetDisabled(id: string, disabled: boolean, flags: Flags): Promise<void> {
+  const conn = resolveConnection(flags, process.cwd());
+  const token = await tokenApi<SiteTokenInfo>(conn, `/api/tokens/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ disabled }),
+  });
+  console.log(`${green('✓')} ${bold(token.id)} ${disabled ? 'disabled' : 'enabled'}`);
+}
+
+export async function tokenDelete(id: string, flags: Flags): Promise<void> {
+  const conn = resolveConnection(flags, process.cwd());
+  await tokenApi(conn, `/api/tokens/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  console.log(`${green('✓')} ${bold(id)} deleted`);
 }
 
 function printTable(columns: string[], rows: Record<string, unknown>[]): void {

@@ -178,7 +178,8 @@ export async function api<T>(conn: Connection, route: string, init: RequestInit 
     } catch {
       /* not json */
     }
-    if (res.status === 401) {
+    // A rejected site token says why (disabled, unknown); keep that message.
+    if (res.status === 401 && (!message || message === 'unauthenticated')) {
       message = `unauthenticated — run: brisk login ${conn.server}`;
     }
     throw new ApiError(

@@ -48,7 +48,10 @@ it before deploying:
 
 - **A real instance:** `brisk login brisk.example.com` once — it opens the
   browser, finishes login, stores a profile. Deploys are attributed to you.
-- **CI / non-interactive:** set `BRISK_SERVER` and `BRISK_TOKEN`.
+- **CI / non-interactive:** set `BRISK_SERVER` and `BRISK_TOKEN`. For the
+  token, create a site token limited to the site:
+  `brisk token create --label "<repo> ci" --site <site> --scope write,update | gh secret set BRISK_TOKEN`
+  (piped, it prints only the secret). It needs your personal `brisk login`.
 - **Local dev:** default is `http://localhost:8787` (run `wrangler dev` in the
   Brisk repo's `worker/`).
 

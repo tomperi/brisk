@@ -21,6 +21,13 @@ ${bold('Accounts')}
   brisk profile use <name>     switch the active profile
   brisk profile set-username <name>  set your deploy identity on the active profile
 
+${bold('Site tokens')} ${dim('(long-lived, limited to named sites and scopes, for CI)')}
+  brisk token create --label <text> --site <a,b> --scope <read,write,update,delete>
+                               prints the secret once; piped, it prints only the secret
+  brisk token list             all site tokens on the instance
+  brisk token disable <id>     stop a token working (enable <id> turns it back on)
+  brisk token delete <id>      remove a token for good
+
 ${bold('Plugins')}
   brisk plugin list                    installed plugins on the instance
   brisk plugin <id> --help             a plugin's actions (loaded from the server)
@@ -49,7 +56,14 @@ async function main(): Promise<void> {
   // any leading global flags to find the command — and let commands.plugin do
   // its own lenient parsing. Leading --server/--profile pass through to it.
   const raw = process.argv.slice(2);
-  const valueFlags = new Set(['--server', '--profile', '--site', '--username']);
+  const valueFlags = new Set([
+    '--server',
+    '--profile',
+    '--site',
+    '--username',
+    '--label',
+    '--scope',
+  ]);
   let pi = 0;
   while (pi < raw.length && raw[pi]!.startsWith('-')) {
     pi += valueFlags.has(raw[pi]!) ? 2 : 1;
@@ -64,6 +78,8 @@ async function main(): Promise<void> {
       server: { type: 'string' },
       profile: { type: 'string' },
       username: { type: 'string' },
+      label: { type: 'string' },
+      scope: { type: 'string' },
       force: { type: 'boolean', short: 'f' },
       yes: { type: 'boolean', short: 'y' },
       help: { type: 'boolean', short: 'h' },
@@ -82,6 +98,8 @@ async function main(): Promise<void> {
     server: values.server,
     profile: values.profile,
     username: values.username,
+    label: values.label,
+    scope: values.scope,
     force: Boolean(values.force),
     yes: Boolean(values.yes),
   };
@@ -116,6 +134,19 @@ async function main(): Promise<void> {
       throw new Error(
         'usage: brisk profile use <name> | brisk profile set-username <name> | brisk profiles',
       );
+    case 'token':
+    case 'tokens': {
+      const [sub = 'list', id] = command === 'tokens' ? ['list'] : args;
+      if (sub === 'create') return commands.tokenCreate(flags);
+      if (sub === 'list' || sub === 'ls') return commands.tokenList(flags);
+      if ((sub === 'disable' || sub === 'enable') && id) {
+        return commands.tokenSetDisabled(id, sub === 'disable', flags);
+      }
+      if (sub === 'delete' && id) return commands.tokenDelete(id, flags);
+      throw new Error(
+        'usage: brisk token create | list | disable <id> | enable <id> | delete <id>',
+      );
+    }
     default:
       console.log(`${yellow('unknown command:')} ${command}\n\n${HELP}`);
       process.exitCode = 1;

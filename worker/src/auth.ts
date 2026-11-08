@@ -4,6 +4,7 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { sign, verify } from 'hono/jwt';
 import type { AppEnv, Env, User } from './env';
 import { siteFromHost } from './sites';
+import { findTokenBySecret, TOKEN_PREFIX, tokenUser, touchToken, type SiteToken } from './tokens';
 
 const SESSION_COOKIE = 'brisk_session';
 const STATE_COOKIE = 'brisk_oauth_state';
@@ -233,28 +234,51 @@ const utf8ToB64 = (s: string): string => btoa(String.fromCharCode(...new TextEnc
 const b64ToUtf8 = (s: string): string =>
   new TextDecoder().decode(Uint8Array.from(atob(s), (ch) => ch.charCodeAt(0)));
 
+type BearerResult =
+  | { user: User; credential: 'cli' | 'deploy-token' }
+  | { user: User; credential: 'site-token'; siteToken: SiteToken }
+  | { rejected: string };
+
 /**
- * Two kinds of bearer: a personal token from `brisk login` (a JWT carrying
- * the user's identity, so deploys are attributed to a real person), or the
- * instance-wide DEPLOY_TOKEN meant for CI.
+ * Three kinds of bearer: a personal token from `brisk login` (a JWT carrying
+ * the user's identity, so deploys are attributed to a real person), a site
+ * token limited to named sites and scopes, or the instance-wide DEPLOY_TOKEN.
+ * A site token that is unknown or disabled is rejected outright, never treated
+ * as anonymous.
  */
-async function userFromBearer(c: Context<AppEnv>, token: string): Promise<User | null> {
+async function fromBearer(c: Context<AppEnv>, token: string): Promise<BearerResult | null> {
+  const deployToken = async () =>
+    c.env.DEPLOY_TOKEN && (await tokenMatches(token, c.env.DEPLOY_TOKEN))
+      ? {
+          user: { email: 'ci@brisk', name: 'CI (deploy token)' },
+          credential: 'deploy-token' as const,
+        }
+      : null;
+
+  if (token.startsWith(TOKEN_PREFIX)) {
+    const siteToken = await findTokenBySecret(c.var.platform.db, token);
+    if (siteToken?.disabled) return { rejected: `site token ${siteToken.id} is disabled` };
+    if (siteToken) {
+      touchToken(c, siteToken);
+      return { user: tokenUser(siteToken), credential: 'site-token', siteToken };
+    }
+    // An operator may have picked a DEPLOY_TOKEN with the same prefix.
+    return (await deployToken()) ?? { rejected: 'invalid site token' };
+  }
   try {
     const payload = await verify(token, c.env.SESSION_SECRET!, 'HS256');
     if (payload.kind === 'cli') {
-      return {
+      const user = {
         email: String(payload.email),
         name: String(payload.name),
         picture: payload.picture as string | undefined,
       };
+      return { user, credential: 'cli' };
     }
   } catch {
     /* not a personal token — fall through to the CI token */
   }
-  if (c.env.DEPLOY_TOKEN && (await tokenMatches(token, c.env.DEPLOY_TOKEN))) {
-    return { email: 'ci@brisk', name: 'CI (deploy token)' };
-  }
-  return null;
+  return deployToken();
 }
 
 const CLI_CSRF_COOKIE = 'brisk_cli_csrf';
@@ -295,7 +319,7 @@ function consentPage(email: string, action: string, csrf: string): string {
 }
 
 /**
- * GET half of `brisk login`. A bearer caller (CI token or an existing CLI
+ * GET half of `brisk login`. A bearer caller (DEPLOY_TOKEN or an existing CLI
  * token) can't be CSRF'd — browsers never attach an Authorization header
  * cross-site — so it mints directly. A browser cookie session is the CSRF-able
  * case, so it gets a consent page whose POST carries a CSRF token; a forged
@@ -309,7 +333,9 @@ export function cliConsent(): MiddlewareHandler<AppEnv> {
       callback.searchParams.set('open', '1'); // this instance needs no token
       return c.redirect(callback.toString());
     }
-    if (c.req.header('authorization')?.startsWith('Bearer ')) {
+    // Judge the credential auth() resolved, not the header: a junk bearer falls
+    // back to the session cookie, which must still get the consent page.
+    if (c.var.credential === 'cli' || c.var.credential === 'deploy-token') {
       return mintCliToken(c, callback);
     }
     const csrf = crypto.randomUUID();
@@ -384,6 +410,7 @@ export function auth(): MiddlewareHandler<AppEnv> {
       // silent.
       if (mode === 'none' && !local) warnOpenPublicOnce(host);
       c.set('user', devUser());
+      c.set('credential', 'dev');
       return next();
     }
     if (!c.env.SESSION_SECRET) {
@@ -392,9 +419,12 @@ export function auth(): MiddlewareHandler<AppEnv> {
 
     const bearer = c.req.header('authorization');
     if (bearer?.startsWith('Bearer ')) {
-      const user = await userFromBearer(c, bearer.slice(7));
-      if (user) {
-        c.set('user', user);
+      const result = await fromBearer(c, bearer.slice(7));
+      if (result && 'rejected' in result) return c.json({ error: result.rejected }, 401);
+      if (result) {
+        c.set('user', result.user);
+        c.set('credential', result.credential);
+        if (result.credential === 'site-token') c.set('siteToken', result.siteToken);
         return next();
       }
     }
@@ -402,6 +432,7 @@ export function auth(): MiddlewareHandler<AppEnv> {
     const user = await readSession(c);
     if (user) {
       c.set('user', user);
+      c.set('credential', 'session');
       return next();
     }
 
@@ -410,6 +441,7 @@ export function auth(): MiddlewareHandler<AppEnv> {
       (c.env.VISIBILITY === 'public' && visitorAllowed(c.req.method, new URL(c.req.url).pathname))
     ) {
       c.set('user', VISITOR);
+      c.set('credential', 'visitor');
       return next();
     }
 

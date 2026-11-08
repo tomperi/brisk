@@ -44,3 +44,7 @@ then run as `node cli/dist/cli.js …`.
   else 409s with `code: 'owned'`; the CLI then prompts on a TTY, or errors and
   tells you to `--force`/`BRISK_FORCE=1` when non-interactive (agents/CI never
   hang on stdin). It labels sites, never gates reads or other writes.
+- **`brisk token create` writes only the secret to stdout when piped**, and
+  the details to stderr, so `… | gh secret set BRISK_TOKEN` works. Keep it so.
+  `--site` and `--scope` are comma-separated there (`--site` stays one string
+  for `deploy`).

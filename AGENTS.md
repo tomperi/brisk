@@ -74,4 +74,6 @@ default answer is no — show how the existing pieces cover it. The trust model
 it. The one carve-out is the deploy `owner`: a self-asserted, spoofable label
 and overwrite footgun-guard, never access control — it gates only the
 deploy-over-someone-else 409 (bypass with `--force`); reads and every other
-write stay open to every authenticated teammate.
+write stay open to every authenticated teammate. Site tokens (`worker/src/tokens.ts`)
+are the other: they limit a machine credential to named sites and CRUD scopes,
+never a teammate — any member can create, disable or delete any token.

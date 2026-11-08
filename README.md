@@ -200,17 +200,58 @@ instance — so you can't expose one silently.
 | `AUTH`           | `VISIBILITY`        | Viewing sites                      | Deploys + APIs (db / ai / files / realtime) |
 | ---------------- | ------------------- | ---------------------------------- | ------------------------------------------- |
 | `none` (default) | —                   | everyone                           | everyone, as the dev identity               |
-| `google`         | `private` (default) | members only                       | members + CI token                          |
-| `google`         | `public`            | **anyone**, read-only, edge-cached | members + CI token                          |
+| `google`         | `private` (default) | members only                       | members + CI tokens                         |
+| `google`         | `public`            | **anyone**, read-only, edge-cached | members + CI tokens                         |
 
 `/llms.txt` is the one page every instance serves without a login — it holds
 only this repo's docs, and the agents it is for can't complete OAuth.
 
-Members are whoever passes `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS`. Three
+Members are whoever passes `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS`. Four
 credentials exist: the browser session cookie (7 days, covers every site
 subdomain), the personal CLI token from `brisk login` (90 days, attributed to
-you), and the optional `DEPLOY_TOKEN` secret (CI, attributed as `ci@brisk`;
-leave it unset and that path simply doesn't exist).
+you), site tokens (below), and the optional `DEPLOY_TOKEN` secret (CI,
+attributed as `ci@brisk`, full member access; leave it unset and that path
+simply doesn't exist).
+
+#### Site tokens (CI for one site)
+
+A site token is a long-lived bearer token whose own requests work only on the
+sites it names, with the scopes it names. Prefer it to `DEPLOY_TOKEN` for CI,
+but know its limit: a token with `write` or `update` can ship JavaScript, and
+that JavaScript runs as every member who opens the site. A leaked deploy token
+is contained only as far as your teammates don't visit the site it changed.
+Only `read`-only tokens are fully contained.
+
+```sh
+brisk token create --label "handbook ci" --site handbook --scope write,update \
+  | gh secret set BRISK_TOKEN          # piped, it prints only the secret
+brisk token list                       # id, sites, scopes, status, last used
+brisk token disable tok_1a2b3c4d5e6f   # `enable <id>` turns it back on
+brisk token delete tok_1a2b3c4d5e6f
+```
+
+| Scope    | Allows                                               |
+| -------- | ---------------------------------------------------- |
+| `read`   | view the site, its files and raw source, read its db |
+| `write`  | the first deploy of a site, db inserts, file uploads |
+| `update` | redeploy over the live site, db edits                |
+| `delete` | delete the site, db deletes                          |
+
+Scopes are coarse on purpose: `delete` removes the whole site, not only db
+docs, and `write` + `delete` together can replace a site like `update` can. A
+token binds to site _names_, so after a site is deleted a `write` token can
+claim the name again.
+
+A CI job that deploys on every merge needs `write,update`. A token can never
+reach anything else: other sites, the site list, AI, realtime, plugins, token
+management, or `brisk login`. Deploys show the token's label as the deployer.
+Only the CLI can create or re-enable a token, with your personal login: every
+site is also served from the dashboard's origin (`/s/<site>/`), so a page could
+otherwise use a viewer's session to read a new secret or revive a token you
+just disabled. The `/tokens` page lists tokens, disables and deletes them, and
+gives you the CLI command for the rest. Site tokens need `AUTH=google`; on an
+open instance every request is already a full member. Bearer values that start
+with `brisk_` are site tokens; a `DEPLOY_TOKEN` with that prefix still works.
 
 ### AI
 
@@ -342,6 +383,9 @@ brisk pull <site> [dir]         # download any site's source to remix it
 brisk login [server]            # log in to an instance, creates a profile
 brisk whoami                    # who you are, where
 brisk profiles                  # list profiles; `brisk profile use <name>` switches
+
+brisk token create …            # a CI token for named sites + scopes (see Site tokens)
+brisk token list                # disable / enable / delete <id> manage them
 ```
 
 Profiles work like AWS profiles: one per Brisk instance you use, stored in
@@ -350,7 +394,8 @@ browser, finishes the instance's Google login, and stores a personal token —
 deploys are then attributed to _you_. Every command takes `--profile <name>`
 (or `BRISK_PROFILE`); a repo can pin its instance with `server` in
 `brisk.json` and the CLI picks the matching profile automatically. For CI,
-skip profiles entirely: `BRISK_SERVER` + `BRISK_TOKEN`.
+skip profiles entirely: `BRISK_SERVER` + `BRISK_TOKEN`, with a
+[site token](#site-tokens-ci-for-one-site) as the token.
 
 `brisk init` also drops an `AGENTS.md` so coding agents immediately know the
 SDK — "make me a lunch-voting site" works out of the box. For an agent to know
@@ -457,8 +502,10 @@ brisk.example.com ─────┘    │
    is just a site named `home` (the built-in dashboard, until someone deploys
    over it).
 2. The **auth middleware** resolves a user: dev identity (`AUTH=none`),
-   session cookie, or CLI bearer token. Unauthenticated browsers bounce to
-   Google; APIs get a 401.
+   session cookie, or a bearer token (personal CLI token, site token, or
+   `DEPLOY_TOKEN`). Unauthenticated browsers bounce to Google; APIs get a 401.
+   A site token then passes a deny-by-default gate that admits only the
+   routes and sites its scopes name.
 3. Static requests look up the site's live deploy pointer (cached ~5s per
    isolate) and stream the file from R2, resolving `/about` → `about.html`
    and directory indexes. A site whose deploy is a single HTML page — one
@@ -475,6 +522,7 @@ brisk.example.com ─────┘    │
 | D1 `sites`                        | one row per site: live-deploy pointer, size, who deployed last                                                  |
 | D1 `deploys`                      | one row per published version: version number, size, who; pruned to the live version unless `DEPLOY_HISTORY=on` |
 | D1 `docs`                         | the document store: `(site, collection, id) → JSON`                                                             |
+| D1 `tokens`                       | site tokens: SHA-256 of the secret, label, sites, scopes, disabled flag, last use                               |
 | Durable Object `SiteRoom(<site>)` | websocket fan-out: db events, channel messages, presence                                                        |
 
 Nothing else persists. Deleting a site removes its row, docs, deploys, and
@@ -488,7 +536,9 @@ Stolen proudly from Quick:
   demos waiting to happen with the existing pieces.
 - **No permissions.** No site owners. Want to update a site? Overwrite it.
   Want a subdomain? Take it. Internal trust makes "should we add a
-  leaderboard?" a _hell yes_ instead of a security review.
+  leaderboard?" a _hell yes_ instead of a security review. (Site tokens limit
+  a _machine's_ secret, not a teammate: any member can create, disable or
+  delete any of them.)
 - **The constraints are the point.** No custom backends, no cron jobs, no
   build steps. A folder of files, a URL, and six APIs.
 

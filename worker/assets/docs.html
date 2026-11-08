@@ -116,6 +116,13 @@ brisk pull some-site   # download any site's source to remix it</code></pre>
         <code>BRISK_PROFILE</code> picks one; <code>brisk whoami</code> tells you where you are). CI
         skips profiles: <code>BRISK_SERVER</code> + <code>BRISK_TOKEN</code>.
       </p>
+      <p>
+        For CI, use a <a href="/tokens">site token</a>: it never expires, and it works only on the
+        sites and scopes (<code>read</code>, <code>write</code>, <code>update</code>,
+        <code>delete</code>) it names. A deploy on every merge needs <code>write,update</code>:
+      </p>
+      <pre><code>brisk token create --label "handbook ci" --site handbook --scope write,update \
+  | gh secret set BRISK_TOKEN</code></pre>
 
       <h2 id="sdk"><a href="#sdk">The SDK</a></h2>
       <p>Every site, deployed or not, can load the SDK from its own origin:</p>

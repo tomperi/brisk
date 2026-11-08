@@ -10,6 +10,15 @@ releases are published to
 
 ### Added
 
+- **Site tokens** — long-lived bearer tokens for CI, limited to named sites and
+  the scopes `read`, `write` (first deploy, db inserts, uploads), `update`
+  (redeploy, db edits) and `delete`. `brisk token create` prints the secret
+  once; piped, it prints only the secret, so it goes straight into
+  `gh secret set`. `brisk token list`, `disable`, `enable` and `delete` and the
+  new `/tokens` page manage them. A token can reach nothing outside its sites:
+  not the site list, AI, realtime, plugins, token management, or `brisk login`.
+  Only the CLI can create or re-enable one, with your personal login. Needs
+  `AUTH=google`.
 - **`/llms.txt`** — everything about Brisk as one text file for coding agents:
   the companion skill and how to install it, the `/docs` and `/host` pages, the
   architecture, and the changelog, generated from the repo at build time so it
@@ -32,6 +41,14 @@ releases are published to
 
 - **Comments** — a half-typed comment no longer vanishes on a stray click: the
   popover shakes and keeps your text until you save or cancel.
+
+### Fixed
+
+- **`brisk login`** — a browser session that sent any `Authorization` header,
+  even an invalid one, skipped the consent page and got a CLI token minted
+  directly. It now gets the consent page like any other session.
+- **Uploads on Node** — `/files/<site>/…` with an encoded `../` could read
+  another site's uploads on the filesystem and S3 stores. Such paths now 404.
 
 ## [0.4.2] - 2026-08-30
 
