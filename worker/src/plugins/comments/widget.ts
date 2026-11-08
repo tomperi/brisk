@@ -20,6 +20,7 @@ import { icon } from './icons';
 import { seenDocId } from './inbox';
 import {
   escapeHtml,
+  menuHead,
   menuHtml,
   panelHtml,
   quickBarHtml,
@@ -1382,11 +1383,7 @@ type Brisk = {
       { act: 'hide', label: 'Hide until Shift+C', icon: 'hide' },
     ];
   };
-  const commandHead = () => {
-    const open = threads.filter((t) => t.status === 'open').length;
-    const unread = threads.filter((t) => t.unread).length;
-    return `${SITE} · ${open} open · ${unread} unread · ${plural(drafts.length, 'draft')}`;
-  };
+  const commandHead = () => menuHead(SITE, threads);
   const statusItems = (): MenuItem[] => {
     const counts = panelView(threads, panel, here).filterCounts;
     return (['resolved', 'deleted'] as const).map((f) => ({

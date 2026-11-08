@@ -320,6 +320,14 @@ const hiddenUnreadHtml = (hidden: PanelView['hiddenUnread']) =>
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
+/** The ⋯ menu's header line. Drafts carry status `open` but are not on the server yet. */
+export function menuHead(site: string, threads: readonly Thread[]): string {
+  const posted = threads.filter((t) => t.kind === 'published');
+  const open = posted.filter((t) => t.status === 'open').length;
+  const unread = posted.filter((t) => t.unread).length;
+  return `${site} · ${open} open · ${unread} unread · ${plural(threads.length - posted.length, 'draft')}`;
+}
+
 function footerHtml(drafts: number): string {
   const copyAll = `<button class="btn sm ghost" data-act="copy-all" title="Copy every comment as Markdown for an agent">${icon('copy')}Copy all</button>`;
   if (!drafts) return `<div class="ft">${copyAll}</div>`;

@@ -75,6 +75,9 @@ releases are published to
 
 - **Comments** — a half-typed comment no longer vanishes on a stray click: the
   popover shakes and keeps your text until you save or cancel.
+- **Comments** — the header of the ⋯ and right-click menus counts only published
+  threads as open. It used to count your unpublished drafts too, so it said
+  "2 open" on a page where nothing was published yet.
 - The dashboard's drop-to-deploy name step shows the right address form (a
   subdomain or `/s/<name>/`) when the site URLs the server hands out use a
   different scheme from the page, as they can behind a TLS-terminating proxy.
