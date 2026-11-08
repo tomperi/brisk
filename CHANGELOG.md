@@ -27,6 +27,38 @@ releases are published to
   corner. `export` and the widget's copy buttons print the quote with the text
   around it, so an agent knows exactly which words a comment is about. In pick
   mode, the element under the cursor shows its name.
+- **Comments** — Brisk remembers, per person, which comment threads you have
+  read. `brisk plugin comments seen <site> <id>` marks one read for you and
+  `unseen` marks it unread again; a later reply from someone else makes it
+  unread too.
+- **Comments** — the panel shows each thread's replies and lets you reply,
+  resolve, reopen and delete without leaving it. Threads you haven't read carry
+  a dot and list first; opening one marks it read, and "Mark unread" keeps it
+  on your list, even on a thread only you have posted in. Switch between this
+  page and every page of the site; a thread on another page takes you there.
+  Your unpublished drafts list first under "Your drafts" whatever the filter,
+  and the panel's footer copies every comment as Markdown or, when you have
+  drafts, copies or publishes them all.
+- **Comments** — select text on the page and a small bar offers Comment or
+  React, with no need to enter comment mode first. React posts one of eight
+  emoji (👍 ❤️ 😂 🎉 👀 ✅ ❓ 🔥) on the selected words at once: its pin shows
+  the emoji, and it is a thread like any other, numbered, unread for others,
+  open to replies, resolve and delete.
+- **Comments** — react to any comment or reply with the same emoji. Chips
+  under the text count each emoji and name who left it; click one to add or
+  remove yours. `brisk plugin comments react <site> <id> <emoji>` does the same
+  from the CLI, and `export`, `show` and `list` print reactions, so an agent
+  sees a ✅ or a ❓ on its work. Reactions never make a thread unread.
+
+### Changed
+
+- **Comments** — the panel docks beside the page and pushes it aside instead of
+  covering it (on screens 900px and wider; narrower, it overlays). The widget
+  has a new look: system type, one blue accent, soft shadows, light and dark.
+- **Comments** — pins number once per site instead of per author, so no two
+  pins share a number. Published comments count 1, 2, 3 in the order they were
+  posted, on every page, and keep their number; your drafts come after them
+  and take their final number when you publish.
 
 ### Fixed
 

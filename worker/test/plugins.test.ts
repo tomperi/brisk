@@ -452,6 +452,8 @@ beforeAll(async () => {
     'xsite',
     'hsite',
     'qsite',
+    'seensite',
+    'rxsite',
   ]) {
     const form = new FormData();
     form.append('files', new File(['<h1>x</h1>'], 'index.html', { type: 'text/html' }));
@@ -621,6 +623,199 @@ describe('comments read actions', () => {
   });
 });
 
+describe('comments seen state', () => {
+  const SITE = 'seensite';
+  type Seen = { id: string; user: string; seen: Record<string, string> };
+  const readSeen = async (email: string) => {
+    const res = await cc(`/api/db/_plugin:comments:seen/${encodeURIComponent(email)}`, {
+      headers: { 'x-brisk-site': SITE },
+    });
+    return res.status === 404 ? null : res.json<Seen>();
+  };
+  const listSeen = async () =>
+    (
+      await (
+        await cc('/api/db/_plugin:comments:seen', { headers: { 'x-brisk-site': SITE } })
+      ).json<{ docs: Seen[] }>()
+    ).docs;
+  const comment = async () => String((await act('create', { site: SITE, text: 'x' })).result.id);
+  const as = (email: string, publish = vi.fn()) => ({
+    platform: buildCloudflarePlatform(env, createExecutionContext()),
+    user: { email, name: email },
+    publish,
+  });
+  const actAs = (email: string, name: 'seen' | 'unseen', id: string) =>
+    comments.actions![name]!.handler(as(email), { site: SITE, id }) as Promise<Seen>;
+
+  it('marks a comment seen for me, readable through the db route, and unseen again', async () => {
+    const id = await comment();
+    const { result } = await act('seen', { site: SITE, id });
+    expect(result).toMatchObject({ user: 'dev@localhost', seen: { [id]: expect.any(String) } });
+    expect((await readSeen('dev@localhost'))!.seen[id]).toBe((result as Seen).seen[id]);
+
+    await act('unseen', { site: SITE, id });
+    expect((await readSeen('dev@localhost'))!.seen[id]).toBe('');
+  });
+
+  it('records an explicit unread for a thread I never opened', async () => {
+    const id = await comment();
+    const doc = await actAs('fresh@example.com', 'unseen', id);
+    expect(doc.seen[id]).toBe('');
+    expect((await readSeen('fresh@example.com'))!.seen[id]).toBe('');
+  });
+
+  it('is idempotent and keeps one doc per person', async () => {
+    const id = await comment();
+    await actAs('idem@example.com', 'seen', id);
+    await actAs('idem@example.com', 'seen', id);
+    expect((await listSeen()).filter((d) => d.user === 'idem@example.com')).toHaveLength(1);
+
+    await actAs('idem@example.com', 'unseen', id);
+    const again = await actAs('idem@example.com', 'unseen', id);
+    expect(again.seen[id]).toBe('');
+    expect((await listSeen()).filter((d) => d.user === 'idem@example.com')).toHaveLength(1);
+  });
+
+  it('keeps each person to their own seen doc', async () => {
+    const id = await comment();
+    await actAs('ana@example.com', 'seen', id);
+    await actAs('bo@example.com', 'seen', id);
+    await actAs('bo@example.com', 'unseen', id);
+    expect((await readSeen('ana@example.com'))!.seen).toHaveProperty(id);
+    expect((await readSeen('bo@example.com'))!.seen[id]).toBe('');
+  });
+
+  it('stamps the session user, never a user named in the args', async () => {
+    const id = await comment();
+    await comments.actions!.seen!.handler(as('real@example.com'), {
+      site: SITE,
+      id,
+      user: 'forged@example.com',
+    });
+    expect(await readSeen('forged@example.com')).toBeNull();
+    expect((await readSeen('real@example.com'))!.seen).toHaveProperty(id);
+  });
+
+  it('rejects an id that is not a top-level comment on the site', async () => {
+    const id = await comment();
+    const { result: r } = await act('reply', { site: SITE, id, text: 'r' });
+    for (const bad of ['nope', String(r.id)]) {
+      const res = await cc('/api/plugins/comments/actions/seen', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ args: { site: SITE, id: bad } }),
+      });
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it('keeps both ids when one person marks two comments at once', async () => {
+    const [a, b, c] = [await comment(), await comment(), await comment()];
+    await Promise.all([a, b, c].map((id) => actAs('race@example.com', 'seen', id)));
+    expect(Object.keys((await readSeen('race@example.com'))!.seen).sort()).toEqual(
+      [a, b, c].sort(),
+    );
+  });
+
+  it("publishes the person's seen doc so their other tabs update", async () => {
+    const id = await comment();
+    const publish = vi.fn();
+    await comments.actions!.seen!.handler(as('pub@example.com', publish), { site: SITE, id });
+    expect(publish).toHaveBeenCalledWith(SITE, {
+      collection: '_plugin:comments:seen',
+      event: expect.stringMatching(/^(create|update)$/),
+      doc: expect.objectContaining({ user: 'pub@example.com', seen: { [id]: expect.any(String) } }),
+    });
+  });
+});
+
+describe('comment reactions', () => {
+  const SITE = 'rxsite';
+  const post = (name: string, args: Record<string, unknown>) =>
+    cc(`/api/plugins/comments/actions/${name}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ args: { site: SITE, ...args } }),
+    });
+  const thread = async () => {
+    const { result: head } = await act('create', { site: SITE, text: 'head' });
+    const { result: reply } = await act('reply', { site: SITE, id: String(head.id), text: 'r' });
+    return { head: String(head.id), reply: String(reply.id) };
+  };
+
+  it('stores a reaction on a comment and on a reply under the thread', async () => {
+    const { head, reply } = await thread();
+    const { result: onHead } = await act('react', { site: SITE, id: head, emoji: '👍' });
+    const { result: onReply } = await act('react', { site: SITE, id: reply, emoji: '🎉' });
+    expect(onHead).toMatchObject({ reaction: '👍', parentId: head, reactTo: head, text: '' });
+    expect(onReply).toMatchObject({ reaction: '🎉', parentId: head, reactTo: reply });
+  });
+
+  it('keeps one record per person, emoji and target, and revives a removed one', async () => {
+    const { head } = await thread();
+    const { result: first } = await act('react', { site: SITE, id: head, emoji: '👀' });
+    const { result: again } = await act('react', { site: SITE, id: head, emoji: '👀' });
+    expect(again.id).toBe(first.id);
+    await act('delete', { site: SITE, id: String(first.id) });
+    const { result: back } = await act('react', { site: SITE, id: head, emoji: '👀' });
+    expect(back).toMatchObject({ id: first.id, deleted: false });
+    const { result: other } = await act('react', { site: SITE, id: head, emoji: '🔥' });
+    expect(other.id).not.toBe(first.id);
+  });
+
+  it.each([
+    [{ reaction: '🙃', text: '' }, 'unknown reaction'],
+    [{ reaction: '👍', text: 'hi' }, 'no text'],
+    [{ text: '' }, 'text are required'],
+    [{ text: 'x', reactTo: 'abc' }, 'reactTo needs'],
+  ])('400s a bad reaction create %#', async (args, error) => {
+    const res = await post('create', args);
+    expect(res.status).toBe(400);
+    expect((await res.json<{ error: string }>()).error).toContain(error);
+  });
+
+  it('refuses a reactTo outside the thread and a reaction to a reaction', async () => {
+    const a = await thread();
+    const b = await thread();
+    const res = await post('create', {
+      text: '',
+      reaction: '👍',
+      parentId: a.head,
+      reactTo: b.reply,
+    });
+    expect((await res.json<{ error: string }>()).error).toContain('not a comment in thread');
+    const { result: r } = await act('react', { site: SITE, id: a.head, emoji: '❤️' });
+    const res2 = await post('react', { id: String(r.id), emoji: '👍' });
+    expect(res2.status).toBe(400);
+  });
+
+  it('exports and shows reactions under the comment and the reply, and page reactions with their quote', async () => {
+    const { head, reply } = await thread();
+    await act('react', { site: SITE, id: head, emoji: '✅' });
+    await act('react', { site: SITE, id: reply, emoji: '😂' });
+    const { result: onPage } = await act('create', {
+      site: SITE,
+      text: '',
+      reaction: '🔥',
+      selector: 'main > p',
+      quote: 'ships today',
+    });
+    const md = (await act('export', { site: SITE })).result as unknown as string;
+    const block = (id: string) => md.slice(md.indexOf(`[${id}]`)).split('\n## ')[0]!;
+    expect(block(head)).toContain('- reactions: ✅ ×1 (Dev)');
+    expect(block(head)).toContain('- reply (Dev): r\n  - reactions: 😂 ×1 (Dev)');
+    expect(block(String(onPage.id))).toContain('(open) 🔥 reaction');
+    expect(block(String(onPage.id))).toContain('- quote: "ships today"');
+    expect(md).not.toContain(
+      `[${String((await act('react', { site: SITE, id: head, emoji: '✅' })).result.id)}]`,
+    );
+
+    const shown = (await act('show', { site: SITE, id: head })).result as unknown as string;
+    expect(shown).toContain('reactions: ✅ ×1 (Dev)');
+    expect(shown).toContain('↳ Dev: r\n    reactions: 😂 ×1 (Dev)');
+  });
+});
+
 describe('comment anchors', () => {
   const post = (args: Record<string, unknown>) =>
     cc('/api/plugins/comments/actions/create', {
@@ -696,7 +891,7 @@ describe('comment anchors', () => {
     expect(block('spot one')).toContain('- spot: 82% from left, 12% from top of the element\n');
   });
 
-  it('keeps the first seven create args in place and appends the anchor fields', async () => {
+  it('keeps the first seven create args in place and appends the anchor fields, then reaction', async () => {
     const manifest = await (
       await cc('/api/plugins/comments')
     ).json<{
@@ -714,6 +909,7 @@ describe('comment anchors', () => {
       'quotePrefix',
       'quoteSuffix',
       'point',
+      'reaction',
     ]);
   });
 });
@@ -737,6 +933,13 @@ describe('DocStore optimistic concurrency', () => {
     const stale = await s.update('cas', 'c', doc.id, { v: 3 }, { ifUpdatedAt: doc.updatedAt });
     expect(stale).toBeNull();
     expect(await s.get('cas', 'c', doc.id)).toMatchObject({ v: 2 });
+  });
+
+  it('creates under a caller-chosen id exactly once', async () => {
+    const s = store();
+    expect(await s.create('cas', 'fixed', { v: 1 }, { id: 'only' })).toMatchObject({ id: 'only' });
+    await expect(s.create('cas', 'fixed', { v: 2 }, { id: 'only' })).rejects.toThrow();
+    expect(await s.get('cas', 'fixed', 'only')).toMatchObject({ v: 1 });
   });
 
   it('applies an update whose snapshot is current', async () => {

@@ -144,12 +144,18 @@ brisk plugin comments export my-site          # open feedback as markdown — re
 brisk plugin comments list   my-site          # the same, as a table
 brisk plugin comments reply  my-site <id> "fixed — sentence-cased the heading"
 brisk plugin comments resolve my-site <id>
+brisk plugin comments react   my-site <id> ✅   # 👍 ❤️ 😂 🎉 👀 ✅ ❓ 🔥
 ```
 
 A comment that quotes text exports `quote:`, `before:` and `after:` lines
 (JSON-quoted) — grep the source for the quote, and use the context when it
 occurs more than once. One without a quote may carry a `spot:` (where in the
 element the teammate clicked).
+
+Teammates also react with emoji. `export` prints them as `- reactions: ❓ ×2
+(Ana, Dev)` under the comment or reply they answer; a `(open) 👀 reaction`
+entry is an emoji left on the quoted words themselves, with no text. Treat a
+❓ or 👀 as a question to look at, and a ✅ or 👍 as agreement.
 
 Only published comments reach the server; a teammate's unpublished drafts stay
 in their browser, so an empty export means nothing was published yet.
