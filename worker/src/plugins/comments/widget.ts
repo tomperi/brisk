@@ -1015,7 +1015,6 @@ import {
       },
     );
 
-  /** Resolves a selector from its home's document. */
   const findTarget = (from: Document, selector: string): Element | null => {
     let el: Element | null = null;
     let doc: Document | null = from;

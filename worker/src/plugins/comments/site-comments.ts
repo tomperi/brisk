@@ -32,14 +32,12 @@ export interface SiteComments {
   drafts(): readonly Draft[];
   /** Without realtime, re-reads the list after the write so it shows. */
   act(name: Action, args: Record<string, string>): Promise<StoredDoc>;
-  /** Adds the draft, or replaces the one with its id. */
   saveDraft(d: Draft): void;
   dropDrafts(ids: readonly string[] | 'all'): void;
   /** Publishes a draft and drops it; null when no such draft is left. */
   publish(draftId: string): Promise<StoredDoc | null>;
   /** Shows the stamp at once and rolls it back if the write fails. '' = unread. */
   markSeen(threadId: string, stamp: string): Promise<void>;
-  /** Re-reads the published list and the read state. */
   refresh(): Promise<void>;
   /** The realtime feed. A change of source re-reads once; null = none. */
   listen(sdk: Brisk | null): void;
