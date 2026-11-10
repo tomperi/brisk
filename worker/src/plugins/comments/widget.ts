@@ -39,6 +39,7 @@ import {
   type Emoji,
   type Filter,
   type PanelState,
+  type RankOf,
   type Thread,
 } from './threads';
 
@@ -49,10 +50,6 @@ import {
   // A framed page is part of the page around it, so only the top page gets one.
   if (marker.__briskComments || window.self !== window.top) return;
   marker.__briskComments = true;
-
-  // The SDK is optional: without /brisk.js the widget reads over plain fetch
-  // and skips realtime — drafts, publishing, and published views all still work.
-  const sdk = (window as { brisk?: Brisk }).brisk ?? null;
 
   const recall = (k: string) => localStorage.getItem(storageKey(SITE, k));
   const remember = (k: string, v: string) => localStorage.setItem(storageKey(SITE, k), v);
@@ -94,7 +91,7 @@ import {
   };
   let threads: Thread[] = [];
   const threadById = (id: string | undefined) => threads.find((t) => t.id === id);
-  const allDrafts = () => [...sites.values()].flatMap((s) => s.drafts());
+  const allDrafts = () => shown.sites.flatMap((site) => on({ site }).drafts());
   const draftById = (id: string | undefined) => allDrafts().find((d) => d.id === id);
 
   async function writeSeen(id: string, stamp: string) {
@@ -115,7 +112,8 @@ import {
 
   // ---- same-origin frames ---------------------------------------------------
   // The widget runs only on the top page, so it reaches into same-origin frames
-  // itself. A selector names the frames on the way: `#pane-a >>> main > p`.
+  // itself. A selector starts at the comment's own page and names the frames
+  // without comments of their own on the way: `#pane-a >>> main > p`.
   // Page nodes can come from a frame's realm: test nodeType, never instanceof.
   const FRAME_SEP = ' >>> ';
   const frameDoc = (el: Element): Document | null =>
@@ -175,6 +173,67 @@ import {
       }
     return out;
   };
+  // ---- homes: the pages that own comments ------------------------------------
+  // The top page, and every same-origin frame whose page carries its own
+  // comments tag. A comment is saved on the site and page of its home.
+  type Win = Window & { brisk?: Brisk };
+  interface Home {
+    readonly site: string;
+    /** pathname + search: what a comment's `page` stores. */
+    readonly page: string;
+    readonly path: string;
+    readonly doc: Document;
+    readonly win: Win;
+  }
+  /** Read live, never cached: the tag sits at the end of the body, so a frame
+   *  still parsing has none yet. */
+  const tagSite = (doc: Document): string | null =>
+    doc.querySelector<HTMLScriptElement>('script[data-brisk-plugin="comments"]')?.dataset
+      .briskSite || null;
+  const homeAt = (doc: Document, site: string): Home => {
+    const win = doc.defaultView as Win;
+    const { pathname, search } = win.location;
+    return { site, page: pathname + search, path: pathname, doc, win };
+  };
+  const homeOf = (doc: Document): Home => {
+    for (let d: Document | undefined = doc; d && d !== document; ) {
+      const site = tagSite(d);
+      if (site) return homeAt(d, site);
+      d = d.defaultView?.frameElement?.ownerDocument;
+    }
+    return homeAt(document, SITE);
+  };
+
+  interface View {
+    /** The top page first, then the framed homes; the index is the rank. */
+    readonly homes: readonly Home[];
+    readonly sites: readonly string[];
+    /** Changes when a home appears, leaves, reloads or changes page. */
+    readonly key: string;
+  }
+  const docIds = new WeakMap<Document, number>();
+  let docCount = 0;
+  const docId = (d: Document) => docIds.get(d) ?? (docIds.set(d, ++docCount), docCount);
+  const view = (): View => {
+    const homes = pageDocs().flatMap((d) => {
+      const site = d === document ? SITE : tagSite(d);
+      return site ? [homeAt(d, site)] : [];
+    });
+    return {
+      homes,
+      sites: [...new Set(homes.map((h) => h.site))],
+      key: homes.map((h) => `${docId(h.doc)} ${h.site} ${h.page}`).join('\n'),
+    };
+  };
+  let shown: View = { homes: [], sites: [], key: '' };
+  // Page identity includes the query string — ?tab=billing is a different page
+  // to comment on. Comments saved before this (or via the CLI) may carry a bare
+  // pathname, so those still match anywhere on the path.
+  const shows = (h: Home, t: Pick<Thread, 'site' | 'page'>) =>
+    h.site === t.site && (t.page === h.page || t.page === h.path);
+  const homesOf = (t: Pick<Thread, 'site' | 'page'>) => shown.homes.filter((h) => shows(h, t));
+  const rankOf: RankOf = (t) => shown.homes.findIndex((h) => shows(h, t));
+
   /** The innermost focused element, through same-origin frames. */
   const deepActive = (): Element | null => {
     let el = document.activeElement;
@@ -185,8 +244,9 @@ import {
   // ---- element anchoring (ported from html-grab) ---------------------------
   function cssPath(el: Element): string {
     const own = localPath(el);
-    const frame = el.ownerDocument.defaultView?.frameElement;
-    if (!frame || !own) return own;
+    const doc = el.ownerDocument;
+    const frame = doc.defaultView?.frameElement;
+    if (!frame || !own || tagSite(doc)) return own;
     const outer = cssPath(frame);
     return outer && outer + FRAME_SEP + own;
   }
@@ -290,12 +350,6 @@ import {
     toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1800);
   };
 
-  // Page identity includes the query string — ?tab=billing is a different page
-  // to comment on. Comments saved before this (or via the CLI) may carry a bare
-  // pathname, so those still match anywhere on the path.
-  const pageId = () => location.pathname + location.search;
-  const here = (page: string) => page === pageId() || page === location.pathname;
-
   // ---- pick mode ------------------------------------------------------------
   let picking = false;
   const setPick = (on: boolean) => {
@@ -312,6 +366,8 @@ import {
     let el = document.elementFromPoint(x, y);
     if (!el || el === host || host.contains(el)) return null;
     for (let d = frameDoc(el); d; d = frameDoc(el)) {
+      // Its tag, and so its owner, is not known until the page has parsed.
+      if (d.readyState === 'loading') break;
       const o = originOf(d);
       const inner = d.elementFromPoint(x - o.x, y - o.y);
       if (!inner) break;
@@ -343,6 +399,8 @@ import {
     el: Element;
     anchor: Anchor;
     range: Range | null;
+    /** Taken at capture: where the comment will be saved. */
+    home: Home;
   }
 
   const SKIP_TEXT = new Set(['script', 'style', 'noscript', 'template']);
@@ -463,6 +521,7 @@ import {
       el: scope,
       anchor: { kind: 'text', selector, quote, point: fractionIn(scope, x, y) },
       range: range.cloneRange(),
+      home: homeOf(scope.ownerDocument),
     };
   }
   const elementAt = (el: Element, x: number, y: number): Capture => {
@@ -470,7 +529,7 @@ import {
     const anchor: Anchor = selector
       ? { kind: 'element', selector, point: fractionIn(el, x, y) }
       : { kind: 'page' };
-    return { el, anchor, range: null };
+    return { el, anchor, range: null, home: homeOf(el.ownerDocument) };
   };
 
   function caretAfter(range: Range): XY | null {
@@ -617,10 +676,10 @@ import {
     if (!hit) return toast('Could not quote that selection');
     unselect(range);
     try {
-      await on({ site: SITE }).act('create', {
+      await on(hit.home).act('create', {
         text: '',
         reaction: emoji,
-        page: pageId(),
+        page: hit.home.page,
         ...anchorFields(hit.anchor),
         ...elementFields(hit.el),
       });
@@ -712,7 +771,7 @@ import {
   }
 
   function openCompose(
-    { el, anchor, range }: Capture,
+    { el, anchor, range, home }: Capture,
     x: number,
     y: number,
     after: 'keep-picking' | 'done',
@@ -740,10 +799,10 @@ import {
         ta.focus();
         return;
       }
-      on({ site: SITE }).saveDraft({
+      on(home).saveDraft({
         id: `d-${Date.now().toString(36)}-${Math.floor(performance.now())}`,
         text,
-        page: pageId(),
+        page: home.page,
         ...anchorFields(anchor),
         ...elementFields(el),
         dataAttrs: clean(
@@ -779,7 +838,8 @@ import {
     lost: anchorLost(t.id),
     me: me.email,
     surface,
-    elsewhere: here(t.page) ? '' : t.page,
+    elsewhere: rankOf(t) >= 0 ? '' : t.page,
+    site: t.site === SITE ? '' : t.site,
   });
 
   function openThreadPop(t: Thread, at: DOMRect) {
@@ -908,20 +968,34 @@ import {
 
   // ---- markdown export ------------------------------------------------------
   function draftsMarkdown(): string {
-    let out = `# comment drafts on ${SITE}\n`;
-    for (const d of on({ site: SITE }).drafts()) {
-      out += `\n## ${d.text}\n- page: \`${d.page}\`\n`;
-      for (const line of anchorLines(anchorOfRecord(d))) out += `${line}\n`;
-      if (d.textSnippet) out += `- text: "${d.textSnippet}"\n`;
-      if (d.dataAttrs) out += `- data: \`${d.dataAttrs}\`\n`;
+    const parts: string[] = [];
+    for (const site of shown.sites) {
+      const drafts = on({ site }).drafts();
+      if (!drafts.length) continue;
+      let out = `# comment drafts on ${site}\n`;
+      for (const d of drafts) {
+        out += `\n## ${d.text}\n- page: \`${d.page}\`\n`;
+        for (const line of anchorLines(anchorOfRecord(d))) out += `${line}\n`;
+        if (d.textSnippet) out += `- text: "${d.textSnippet}"\n`;
+        if (d.dataAttrs) out += `- data: \`${d.dataAttrs}\`\n`;
+      }
+      parts.push(out);
     }
-    return out;
+    return parts.join('\n');
   }
 
-  /** The whole log, drafts and published, with replies and reactions. The
-   *  widget twin of `brisk plugin comments export`. */
+  /** The whole log, drafts and published, with replies and reactions. One
+   *  section per site in view, each the twin of `brisk plugin comments export`. */
   const commentsMarkdown = () =>
-    `# comments on ${SITE}\n${threads.map((t) => `\n${threadMarkdown(t)}\n`).join('')}`;
+    shown.sites
+      .map(
+        (site) =>
+          `# comments on ${site}\n${threads
+            .filter((t) => t.site === site)
+            .map((t) => `\n${threadMarkdown(t)}\n`)
+            .join('')}`,
+      )
+      .join('\n');
 
   // Clipboard writes reject on denied permission or an insecure context — fall
   // back to downloading the file so the export is never silently lost.
@@ -941,9 +1015,10 @@ import {
       },
     );
 
-  const findTarget = (selector: string): Element | null => {
+  /** Resolves a selector from its home's document. */
+  const findTarget = (from: Document, selector: string): Element | null => {
     let el: Element | null = null;
-    let doc: Document | null = document;
+    let doc: Document | null = from;
     try {
       for (const part of selector.split(FRAME_SEP)) {
         el = doc?.querySelector(part) ?? null;
@@ -974,7 +1049,7 @@ import {
   };
 
   type Placement =
-    | { kind: 'page' }
+    | { kind: 'page'; at: XY }
     | { kind: 'detached' }
     | { kind: 'hidden' }
     | { kind: 'text'; range: Range; at: XY }
@@ -1070,14 +1145,32 @@ import {
     return c.range;
   }
 
+  const PAGE_CORNER = { x: 12, y: 34 };
+  /** A framed page's whole-page comments pin at the frame's corner and hide with it. */
+  function pageCorner(h: Home): Placement {
+    if (h.doc === document) return { kind: 'page', at: PAGE_CORNER };
+    const o = originOf(h.doc);
+    const at = { x: o.x + PAGE_CORNER.x, y: o.y + PAGE_CORNER.y };
+    return seenThrough(h.doc, at) ? { kind: 'page', at } : { kind: 'hidden' };
+  }
+  /** A page can be on screen more than once (two tabs, one hidden): the first
+   *  mount that shows the target wins. */
   function place(t: Thread): Placement {
-    const a = t.anchor;
-    if (a.kind === 'page') return { kind: 'page' };
-    const el = findTarget(a.selector);
-    if (!el) {
-      textCache.delete(t.id);
-      return { kind: 'detached' };
+    let resolved = false;
+    for (const h of homesOf(t)) {
+      const p = placeIn(t, h);
+      if (p.kind !== 'hidden' && p.kind !== 'detached') return p;
+      resolved ||= p.kind === 'hidden';
     }
+    if (resolved || !homesOf(t).length) return { kind: 'hidden' };
+    textCache.delete(t.id);
+    return { kind: 'detached' };
+  }
+  function placeIn(t: Thread, h: Home): Placement {
+    const a = t.anchor;
+    if (a.kind === 'page') return pageCorner(h);
+    const el = findTarget(h.doc, a.selector);
+    if (!el) return { kind: 'detached' };
     if (!onScreen(el)) return { kind: 'hidden' };
     const seen = (at: XY) => seenThrough(el.ownerDocument, at);
     if (a.kind === 'text') {
@@ -1097,7 +1190,7 @@ import {
   const applyPin = (pin: HTMLElement, p: Placement) => {
     pin.classList.toggle('detached', p.kind === 'detached');
     pin.style.display = p.kind === 'hidden' ? 'none' : '';
-    const at = p.kind === 'text' || p.kind === 'element' ? p.at : { x: 12, y: 34 };
+    const at = p.kind === 'hidden' || p.kind === 'detached' ? PAGE_CORNER : p.at;
     pin.style.left = `${at.x}px`;
     pin.style.top = `${at.y}px`;
   };
@@ -1107,7 +1200,7 @@ import {
   function renderPins() {
     const next = new Map<string, Slot>();
     for (const t of threads) {
-      if (!here(t.page) || !pinShown(t, panel.filter)) continue;
+      if (rankOf(t) < 0 || !pinShown(t, panel.filter)) continue;
       let s = slots.get(t.id);
       if (!s) {
         const pin = document.createElement('button');
@@ -1128,7 +1221,7 @@ import {
         .filter(Boolean)
         .join(' ');
       pin.textContent = t.reaction ?? String(t.num);
-      pin.title = `#${t.num} · ${t.author}${t.reaction ? ` reacted ${t.reaction}` : ` · ${clean(t.text, 60)}`}`;
+      pin.title = `${t.site === SITE ? '' : `${t.site} `}#${t.num} · ${t.author}${t.reaction ? ` reacted ${t.reaction}` : ` · ${clean(t.text, 60)}`}`;
       const kind = t.reaction ? `reaction ${t.reaction}` : 'comment';
       pin.setAttribute(
         'aria-label',
@@ -1153,9 +1246,15 @@ import {
     setTimeout(() => pin.classList.remove('flash'), 1900);
   };
 
+  const targetOf = (t: Thread): Element | null => {
+    const a = t.anchor;
+    if (a.kind === 'page') return null;
+    const found = homesOf(t).flatMap((h) => findTarget(h.doc, a.selector) ?? []);
+    return found.find(onScreen) ?? found[0] ?? null;
+  };
   function revealOnPage(t: Thread) {
     const s = slots.get(t.id);
-    const target = t.anchor.kind === 'page' ? null : findTarget(t.anchor.selector);
+    const target = targetOf(t);
     const box =
       s?.placement.kind === 'text'
         ? shift(s.placement.range.getBoundingClientRect(), docFor(s.placement.range.startContainer))
@@ -1226,7 +1325,9 @@ import {
 
   // ---- render -----------------------------------------------------------------
   function render() {
-    threads = on({ site: SITE }).threads();
+    shown = view();
+    syncSites(shown);
+    threads = shown.sites.flatMap((site) => on({ site }).threads());
     if (panel.expanded && !threadById(panel.expanded.id)) panel.expanded = null;
     renderPins();
     paint();
@@ -1243,24 +1344,43 @@ import {
     }
   }
 
-  /** Scroll/resize path: move the existing pins, coalesced to one rAF. */
+  let inView = new Set<string>();
+  /** Gives each site in view its SiteComments, with realtime from the first page
+   *  of that site that loaded /brisk.js. */
+  function syncSites(v: View) {
+    for (const site of v.sites) {
+      const known = sites.has(site);
+      const s = on({ site });
+      const sdk = v.homes.find((h) => h.site === site && h.win.brisk)?.win.brisk ?? null;
+      // Back in view after its frame left: catch up. A new realtime source re-reads by itself.
+      if (known && !inView.has(site) && !sdk) void s.refresh();
+      s.listen(sdk);
+    }
+    for (const site of inView) if (!v.sites.includes(site)) sites.get(site)?.listen(null);
+    inView = new Set(v.sites);
+  }
+
+  /** Scroll/resize path: move the existing pins, coalesced to one rAF. A changed
+   *  view (a frame came, went or navigated) renders instead. */
   let repositionQueued = false;
   const scheduleReposition = () => {
     if (repositionQueued) return;
     repositionQueued = true;
     requestAnimationFrame(() => {
       repositionQueued = false;
-      for (const s of slots.values()) {
-        s.placement = place(s.thread);
-        applyPin(s.pin, s.placement);
-      }
+      if (view().key !== shown.key) render();
+      else
+        for (const s of slots.values()) {
+          s.placement = place(s.thread);
+          applyPin(s.pin, s.placement);
+        }
       if (bar.kind === 'selection') placeBar();
       paint();
     });
   };
 
   function renderPanel() {
-    const view = panelView(threads, panel, here);
+    const view = panelView(threads, panel, rankOf);
     redraw(
       panelEl,
       panelHtml(view, panel, {
@@ -1305,7 +1425,7 @@ import {
     const t = threadById(id);
     if (!t) return;
     if (t.kind === 'published' && !matches(t, panel.filter, null)) setFilter(t.status);
-    if (panel.scope === 'page' && !here(t.page)) {
+    if (panel.scope === 'page' && rankOf(t) < 0) {
       panel.scope = 'site';
       remember('scope', 'site');
     }
@@ -1409,9 +1529,9 @@ import {
       { act: 'hide', label: 'Hide until Shift+C', icon: 'hide' },
     ];
   };
-  const commandHead = () => menuHead(SITE, threads);
+  const commandHead = () => menuHead(shown.sites.join(' + '), threads);
   const statusItems = (): MenuItem[] => {
-    const counts = panelView(threads, panel, here).filterCounts;
+    const counts = panelView(threads, panel, rankOf).filterCounts;
     return (['resolved', 'deleted'] as const).map((f) => ({
       act: 'filter',
       v: f,
@@ -1426,7 +1546,7 @@ import {
   // Minimize collapses to a small bubble that's always visible — click it to
   // reopen. Shift+C fully hides everything (bubble included) for clean shots.
   function updateBadges() {
-    const unread = threads.filter((t) => t.unread && here(t.page)).length;
+    const unread = threads.filter((t) => t.unread && rankOf(t) >= 0).length;
     badge.hidden = unread === 0;
     badge.textContent = String(unread);
     nub.classList.toggle('has', unread > 0);
@@ -1471,8 +1591,9 @@ import {
     expand: (el) => {
       const t = threadById(idOf(el));
       if (!t) return;
-      if (t.page && !here(t.page)) {
-        remember('goto', t.id);
+      if (t.page && rankOf(t) < 0) {
+        // The widget on that page reads it under its own site.
+        localStorage.setItem(storageKey(t.site, 'goto'), t.id);
         location.assign(t.page);
         return;
       }
@@ -1530,7 +1651,7 @@ import {
     'copy-drafts': () => void clip(`comment-drafts-${SITE}.md`, draftsMarkdown()),
     'publish-all': () => void publishAll(),
     'discard-drafts': () => {
-      for (const s of sites.values()) s.dropDrafts('all');
+      for (const site of shown.sites) on({ site }).dropDrafts('all');
       render();
       toast('Drafts discarded');
     },
@@ -1699,6 +1820,8 @@ import {
       doc.addEventListener('mousedown', onClickAway, false);
       // A frame's load event does not bubble, but a capture listener sees it.
       doc.addEventListener('load', onFrameLoad, true);
+      // History-routed navigation changes the page identity — re-filter the pins.
+      win.addEventListener('popstate', onHistory);
       // Reposition pins on scroll; the popover stays put (it's fixed) so a
       // scrolling textarea can't dismiss it.
       win.addEventListener('scroll', scheduleReposition, true);
@@ -1720,23 +1843,22 @@ import {
     const t = e.target as Element;
     if (t.nodeType !== Node.ELEMENT_NODE || !frameDoc(t)) return;
     wire();
-    scheduleReposition();
+    render();
+  }
+  function onHistory() {
+    render();
   }
   wire();
-  // History-routed navigation changes the page identity — re-filter the pins.
-  addEventListener('popstate', () => render());
 
   // ---- boot -----------------------------------------------------------------
   const goto = recall('goto');
   if (goto) localStorage.removeItem(storageKey(SITE, 'goto'));
   panelEl.classList.toggle('open', panel.open);
   layer.classList.toggle('panel-open', panel.open);
-  const topSite = on({ site: SITE });
-  topSite.listen(sdk);
   applyHidden();
   applyCollapsed();
   render();
-  void topSite.loaded.then(() => {
+  void on({ site: SITE }).loaded.then(() => {
     const t = threadById(goto ?? '');
     if (!t) return;
     if (!panel.open) setPanelOpen(true);

@@ -223,8 +223,10 @@ export const pinShown = (t: Thread, filter: Filter): boolean =>
   (filter === 'unread' || filter === 'open' ? t.status === 'open' : t.status === filter);
 
 export interface PageGroup {
+  site: string;
   page: string;
-  here: boolean;
+  /** Where the page is on screen: 0 the top page, 1+ a frame, -1 not shown. */
+  rank: number;
   threads: Thread[];
 }
 
@@ -236,13 +238,15 @@ export interface PanelView {
   hiddenUnread: { status: Status; count: number }[];
 }
 
+export type RankOf = (t: Pick<Thread, 'site' | 'page'>) => number;
+
 export function panelView(
   threads: readonly Thread[],
   state: Pick<PanelState, 'scope' | 'filter' | 'expanded'>,
-  isHere: (page: string) => boolean,
+  rankOf: RankOf,
 ): PanelView {
   const { scope, filter, expanded } = state;
-  const inScope = (t: Thread, s: Scope) => s === 'site' || isHere(t.page);
+  const inScope = (t: Thread, s: Scope) => s === 'site' || rankOf(t) >= 0;
   const posted = threads.filter((t) => t.kind === 'published');
   const count = (pred: (t: Thread) => boolean) => posted.filter(pred).length;
   const shown = posted
@@ -254,13 +258,15 @@ export function panelView(
     );
   const byPage = new Map<string, PageGroup>();
   for (const t of shown) {
-    const here = scope === 'page' || isHere(t.page);
-    const key = here ? '\0here' : t.page;
-    const group = byPage.get(key) ?? { page: here ? '' : t.page, here, threads: [] };
+    const rank = rankOf(t);
+    // By rank, so a bare-path comment and a ?query one on the same shown page share a group.
+    const key = rank >= 0 ? `rank:${rank}` : `${t.site}\n${t.page}`;
+    const group = byPage.get(key) ?? { site: t.site, page: t.page, rank, threads: [] };
     group.threads.push(t);
     byPage.set(key, group);
   }
-  const groups = [...byPage.values()].sort((a, b) => Number(b.here) - Number(a.here));
+  const order = (g: PageGroup) => (g.rank < 0 ? Number.MAX_SAFE_INTEGER : g.rank);
+  const groups = [...byPage.values()].sort((a, b) => order(a) - order(b));
   return {
     drafts: threads
       .filter((t) => t.kind === 'draft' && inScope(t, scope))

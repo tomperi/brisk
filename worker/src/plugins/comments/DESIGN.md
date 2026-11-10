@@ -200,7 +200,7 @@ A near-achromatic cool-gray UI with a single saturated blue that always means "t
 
 The panel is a fixed right column (400px, `min(400px, 100vw)`). At ≥900px it docks: the widget sets `margin-right: 400px !important` on `<html>` (restoring any prior inline value on close) so the page reflows beside it; below 900px it overlays. Toast and positioning math respect the docked width.
 
-Panel stack, top to bottom: 52px header (title, site tag, More, close) → action row (Comment + hint) → 40px scope tabs with counts → filter row (Unread / Open chips, Resolved menu at the right) → scrolling list with 32px sticky group headers → footer bar. The list opens with a "Your drafts" group (every draft in scope, whatever the filter; a draft on another page names its page) and then the published threads the filter lists, under a header named after the filter on This page. The footer always has a ghost "Copy all" (Markdown for an agent); with drafts it adds "N drafts", a ghost Copy, and a primary Publish all at the right edge. Rows pad 14px 20px; thread body, quote, input and actions indent 32px to align under the name past the 24px avatar. Popovers are 360px wide, max 520px tall. The floating toolbar sits 16px from the bottom-right and collapses into a 42px round bubble.
+Panel stack, top to bottom: 52px header (title, site tag, More, close) → action row (Comment + hint) → 40px scope tabs with counts → filter row (Unread / Open chips, Resolved menu at the right) → scrolling list with 32px sticky group headers → footer bar. The list opens with a "Your drafts" group (every draft in scope, whatever the filter; a draft on another page names its page) and then the published threads the filter lists, under a header named after the filter on This page. When framed pages on screen have comments of their own, each gets a header after This page, named after its file (and its site, when that differs from the page's). The footer always has a ghost "Copy all" (Markdown for an agent); with drafts it adds "N drafts", a ghost Copy, and a primary Publish all at the right edge. Rows pad 14px 20px; thread body, quote, input and actions indent 32px to align under the name past the 24px avatar. Popovers are 360px wide, max 520px tall. The floating toolbar sits 16px from the bottom-right and collapses into a 42px round bubble.
 
 Under `pointer: coarse` every control becomes a 40px target (buttons, chips, status, menu items, icon buttons, send); chips round to 20px. Hover-only row tools are gated by `hover: hover`.
 
@@ -246,7 +246,7 @@ Small, consistent radii: 6px on controls, 8px on popovers, menus, inputs and toa
 
 ### Thread row
 
-Avatar, name (600 unread / 500 read), time, `#n` thread number (matches its pin; one sequence per site, published threads first by creation, drafts after them), 8px unread dot. Quote as a highlighted snippet (soft blue fill, 2px blue underline) or a target-icon spot line for element comments. Text clamps to 3 lines closed. Open: expands in place with replies, input, and Resolve / Mark unread / Delete.
+Avatar, name (600 unread / 500 read), time, `#n` thread number (matches its pin; one sequence per site, published threads first by creation, drafts after them; a thread stored on another site than the page's, through a frame, reads `billing #3`), 8px unread dot. Quote as a highlighted snippet (soft blue fill, 2px blue underline) or a target-icon spot line for element comments. Text clamps to 3 lines closed. Open: expands in place with replies, input, and Resolve / Mark unread / Delete.
 
 ### Reactions
 

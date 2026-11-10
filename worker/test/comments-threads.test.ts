@@ -32,7 +32,7 @@ const draft = (id: string, minute: number, page = '/'): Draft => ({
   html: '',
   createdAt: at(minute),
 });
-const here = (page: string) => page === '/';
+const rankOf = (t: { page: string }) => (t.page === '/' ? 0 : -1);
 const threadsOf = (docs: StoredDoc[], seen: Record<string, string> = {}, drafts: Draft[] = []) =>
   buildThreads({ site: 's', drafts, docs, seen, me: ME });
 const ids = (view: ReturnType<typeof panelView>) =>
@@ -185,7 +185,7 @@ describe('panelView', () => {
   const state = { scope: 'page' as const, filter: 'open' as const, expanded: null };
 
   it('lists unread first, then newest', () => {
-    expect(ids(panelView(threadsOf(docs, seen), state, here))).toEqual([
+    expect(ids(panelView(threadsOf(docs, seen), state, rankOf))).toEqual([
       'mid-unread',
       'old-unread',
       'new-read',
@@ -193,27 +193,27 @@ describe('panelView', () => {
   });
 
   it('counts each scope under the filter and each filter under the scope', () => {
-    const view = panelView(threadsOf(docs, seen), state, here);
+    const view = panelView(threadsOf(docs, seen), state, rankOf);
     expect(view.scopeCounts).toEqual({ page: 3, site: 4 });
     expect(view.filterCounts).toEqual({ unread: 2, open: 3, resolved: 1, deleted: 0 });
   });
 
   it('groups All pages by page with this page first', () => {
-    const view = panelView(threadsOf(docs, seen), { ...state, scope: 'site' }, here);
-    expect(view.groups.map((g) => [g.page, g.here, g.threads.length])).toEqual([
-      ['', true, 3],
-      ['/pricing', false, 1],
+    const view = panelView(threadsOf(docs, seen), { ...state, scope: 'site' }, rankOf);
+    expect(view.groups.map((g) => [g.page, g.rank, g.threads.length])).toEqual([
+      ['/', 0, 3],
+      ['/pricing', -1, 1],
     ]);
   });
 
   it('lists drafts in scope under every filter and counts only published threads', () => {
     const threads = threadsOf(docs, seen, [draft('mine', 12), draft('there', 13, '/pricing')]);
     for (const filter of ['unread', 'open', 'resolved', 'deleted'] as const) {
-      expect(panelView(threads, { ...state, filter }, here).drafts.map((t) => t.id)).toEqual([
+      expect(panelView(threads, { ...state, filter }, rankOf).drafts.map((t) => t.id)).toEqual([
         'mine',
       ]);
     }
-    const site = panelView(threads, { ...state, scope: 'site' }, here);
+    const site = panelView(threads, { ...state, scope: 'site' }, rankOf);
     expect(site.drafts.map((t) => t.id)).toEqual(['mine', 'there']);
     expect(ids(site)).not.toContain('mine');
     expect(site.filterCounts.open).toBe(4);
@@ -223,22 +223,64 @@ describe('panelView', () => {
     const view = panelView(
       threadsOf([doc('a', ME, 0), doc('b', ME, 1, { page: '' })]),
       { ...state, scope: 'site' },
-      here,
+      rankOf,
     );
-    expect(view.groups.map((g) => [g.page, g.here])).toEqual([
-      ['', true],
-      ['', false],
+    expect(view.groups.map((g) => [g.page, g.rank])).toEqual([
+      ['/', 0],
+      ['', -1],
     ]);
+  });
+
+  it('groups by where each page is on screen: top, then frames in order, then other pages', () => {
+    const shown: Record<string, number> = {
+      'a /s/a/': 0,
+      'a /s/a/?tab=2': 0,
+      'b /s/b/x.html': 1,
+      'a /s/a/f.html': 2,
+    };
+    const of = (site: string, docs: StoredDoc[]) =>
+      buildThreads({ site, drafts: [], docs, seen: {}, me: ME });
+    const threads = [
+      ...of('a', [
+        doc('elsewhere', ME, 9, { page: '/s/a/other.html' }),
+        doc('frame-a', ME, 8, { page: '/s/a/f.html' }),
+        doc('top-query', ME, 7, { page: '/s/a/?tab=2' }),
+        doc('top-bare', ME, 6, { page: '/s/a/' }),
+      ]),
+      ...of('b', [
+        doc('frame-b', ME, 5, { page: '/s/b/x.html' }),
+        doc('b-elsewhere', ME, 4, { page: '/s/b/y.html' }),
+      ]),
+    ];
+    const view = panelView(
+      threads,
+      { ...state, scope: 'site' },
+      (t) => shown[`${t.site} ${t.page}`] ?? -1,
+    );
+    expect(view.groups.map((g) => [g.site, g.rank, g.threads.map((t) => t.id)])).toEqual([
+      ['a', 0, ['top-query', 'top-bare']],
+      ['b', 1, ['frame-b']],
+      ['a', 2, ['frame-a']],
+      ['a', -1, ['elsewhere']],
+      ['b', -1, ['b-elsewhere']],
+    ]);
+    expect(
+      panelView(threads, state, (t) => shown[`${t.site} ${t.page}`] ?? -1).scopeCounts,
+    ).toEqual({ page: 4, site: 6 });
   });
 
   it('keeps the open thread in Unread, in place, after opening marks it read', () => {
     const opened = { ...seen, 'old-unread': at(11) };
     const expanded: Expanded = { id: 'old-unread', since: undefined, wasUnread: true };
-    const view = panelView(threadsOf(docs, opened), { ...state, filter: 'unread', expanded }, here);
+    const view = panelView(
+      threadsOf(docs, opened),
+      { ...state, filter: 'unread', expanded },
+      rankOf,
+    );
     expect(ids(view)).toEqual(['mid-unread', 'old-unread']);
-    expect(ids(panelView(threadsOf(docs, opened), { ...state, filter: 'unread' }, here))).toEqual([
-      'mid-unread',
-    ]);
+    expect(ids(panelView(threadsOf(docs, opened), { ...state, filter: 'unread' }, rankOf))).toEqual(
+      ['mid-unread'],
+    );
   });
 
   it('shows a thread I marked unread in Unread even when only I posted', () => {
@@ -248,7 +290,7 @@ describe('panelView', () => {
         ...state,
         filter: 'unread',
       },
-      here,
+      rankOf,
     );
     expect(ids(view)).toEqual(['mine']);
   });
@@ -259,14 +301,14 @@ describe('panelView', () => {
       doc('reopened-talk', 'ana@example.com', 8, { resolved: true }),
     ];
     const threads = threadsOf(withUnreadResolved, seen);
-    expect(panelView(threads, state, here).hiddenUnread).toEqual([
+    expect(panelView(threads, state, rankOf).hiddenUnread).toEqual([
       { status: 'resolved', count: 1 },
     ]);
-    expect(panelView(threads, { ...state, filter: 'resolved' }, here).hiddenUnread).toEqual([
+    expect(panelView(threads, { ...state, filter: 'resolved' }, rankOf).hiddenUnread).toEqual([
       { status: 'open', count: 2 },
     ]);
-    expect(panelView(threads, { ...state, filter: 'unread' }, here).hiddenUnread).toEqual([]);
-    expect(panelView(threadsOf(docs, seen), state, here).hiddenUnread).toEqual([]);
+    expect(panelView(threads, { ...state, filter: 'unread' }, rankOf).hiddenUnread).toEqual([]);
+    expect(panelView(threadsOf(docs, seen), state, rankOf).hiddenUnread).toEqual([]);
   });
 });
 

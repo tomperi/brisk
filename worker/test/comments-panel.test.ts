@@ -28,6 +28,7 @@ const opts: ThreadOpts = {
   me: ME,
   surface: 'panel',
   elsewhere: '',
+  site: '',
 };
 const threadOf = (d: StoredDoc[], seen: Record<string, string> = {}) =>
   buildThreads({ site: 's', drafts: [], docs: d, seen, me: ME })[0]!;
@@ -166,7 +167,7 @@ describe('panelHtml', () => {
     });
     const state = { open: true, scope: 'page' as const, filter: 'open' as const, expanded: null };
     const html = panelHtml(
-      panelView(threads, state, () => true),
+      panelView(threads, state, () => 0),
       state,
       {
         site: 's',
@@ -198,7 +199,7 @@ describe('panelHtml', () => {
     });
     const state = { open: true, scope: 'page' as const, filter: 'unread' as const, expanded: null };
     return panelHtml(
-      panelView(threads, state, (p) => p === '/'),
+      panelView(threads, state, (t) => (t.page === '/' ? 0 : -1)),
       state,
       {
         site: 's',
@@ -224,6 +225,31 @@ describe('panelHtml', () => {
     expect(html).toContain('data-act="copy-all"');
     expect(html).not.toContain('data-act="publish-all"');
     expect(text(html)).not.toContain('Your drafts');
+  });
+
+  it('heads each framed page on This page, and marks a thread from another site', () => {
+    const of = (site: string, docs: StoredDoc[]) =>
+      buildThreads({ site, drafts: [], docs, seen: {}, me: ME });
+    const threads = [
+      ...of('s', [doc('top', 0), doc('tab', 1, { page: '/s/s/tab.html' })]),
+      ...of('b', [doc('other', 2, { page: '/s/b/x.html?v=2' })]),
+    ];
+    const ranks: Record<string, number> = { '/': 0, '/s/s/tab.html': 1, '/s/b/x.html?v=2': 2 };
+    const state = { open: true, scope: 'page' as const, filter: 'open' as const, expanded: null };
+    const html = panelHtml(
+      panelView(threads, state, (t) => ranks[t.page] ?? -1),
+      state,
+      {
+        site: 's',
+        picking: false,
+        drafts: 0,
+        thread: (t) => ({ ...opts, site: t.site === 's' ? '' : t.site }),
+      },
+    );
+    const heads = [...html.matchAll(/<div class="grp">.*?<span>(.*?)<\/span>/g)].map((m) => m[1]);
+    expect(heads).toEqual(['This page', 'tab.html', 'b · x.html?v=2']);
+    expect(text(html)).toContain('b #1');
+    expect(text(html)).not.toContain('s #1');
   });
 });
 

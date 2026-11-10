@@ -151,8 +151,9 @@ A comment that quotes text exports `quote:`, `before:` and `after:` lines
 (JSON-quoted) — grep the source for the quote, and use the context when it
 occurs more than once. One without a quote may carry a `spot:` (where in the
 element the teammate clicked). A `selector:` with `>>>` points into a
-same-origin iframe: the part before it finds the iframe, the part after it
-finds the element in the framed page's own source file.
+same-origin iframe that has no comments of its own: the part before it finds
+the iframe, the part after it finds the element in the framed page's own source
+file.
 
 Teammates also react with emoji. `export` prints them as `- reactions: ❓ ×2
 (Ana, Dev)` under the comment or reply they answer; a `(open) 👀 reaction`
