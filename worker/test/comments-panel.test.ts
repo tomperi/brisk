@@ -30,7 +30,7 @@ const opts: ThreadOpts = {
   elsewhere: '',
 };
 const threadOf = (d: StoredDoc[], seen: Record<string, string> = {}) =>
-  buildThreads({ drafts: [], docs: d, seen, me: ME })[0]!;
+  buildThreads({ site: 's', drafts: [], docs: d, seen, me: ME })[0]!;
 const text = (html: string) => html.replace(/<[^>]+>/g, '');
 
 describe('spotName', () => {
@@ -158,6 +158,7 @@ describe('reactions', () => {
 describe('panelHtml', () => {
   it('points to unread threads the active filter hides', () => {
     const threads = buildThreads({
+      site: 's',
       drafts: [],
       docs: [doc('open', 0), doc('done', 1, { resolved: true })],
       seen: { open: at(3) },
@@ -188,7 +189,13 @@ describe('panelHtml', () => {
     createdAt: at(9),
   });
   const render = (drafts: ReturnType<typeof draft>[], allDrafts = drafts.length) => {
-    const threads = buildThreads({ drafts, docs: [doc('seen', 0)], seen: { seen: at(5) }, me: ME });
+    const threads = buildThreads({
+      site: 's',
+      drafts,
+      docs: [doc('seen', 0)],
+      seen: { seen: at(5) },
+      me: ME,
+    });
     const state = { open: true, scope: 'page' as const, filter: 'unread' as const, expanded: null };
     return panelHtml(
       panelView(threads, state, (p) => p === '/'),
@@ -233,6 +240,7 @@ describe('menuHead', () => {
 
   it('counts drafts as drafts, never as open threads', () => {
     const threads = buildThreads({
+      site: 's',
       drafts: [draft('d1'), draft('d2')],
       docs: [],
       seen: {},
@@ -243,6 +251,7 @@ describe('menuHead', () => {
 
   it('counts the published threads that are open and unread', () => {
     const threads = buildThreads({
+      site: 's',
       drafts: [draft('d1')],
       docs: [doc('a', 0), doc('b', 1), doc('c', 2, { resolved: true })],
       seen: { b: at(5) },

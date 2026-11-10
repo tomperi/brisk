@@ -34,7 +34,7 @@ const draft = (id: string, minute: number, page = '/'): Draft => ({
 });
 const here = (page: string) => page === '/';
 const threadsOf = (docs: StoredDoc[], seen: Record<string, string> = {}, drafts: Draft[] = []) =>
-  buildThreads({ drafts, docs, seen, me: ME });
+  buildThreads({ site: 's', drafts, docs, seen, me: ME });
 const ids = (view: ReturnType<typeof panelView>) =>
   view.groups.flatMap((g) => g.threads.map((t) => t.id));
 
@@ -85,6 +85,25 @@ describe('buildThreads', () => {
       d1: 6,
       d2: 7,
     });
+  });
+
+  it('stamps every thread with its site and numbers each site from 1', () => {
+    const of = (site: string) =>
+      buildThreads({
+        site,
+        drafts: [draft(`${site}-d`, 9)],
+        docs: [doc(`${site}-a`, ME, 0), doc(`${site}-b`, ME, 1)],
+        seen: {},
+        me: ME,
+      }).map((t) => [t.id, t.site, t.num]);
+    expect([...of('a'), ...of('b')]).toEqual([
+      ['a-d', 'a', 3],
+      ['a-a', 'a', 1],
+      ['a-b', 'a', 2],
+      ['b-d', 'b', 3],
+      ['b-a', 'b', 1],
+      ['b-b', 'b', 2],
+    ]);
   });
 
   it('keeps a published number when a draft is published after it', () => {

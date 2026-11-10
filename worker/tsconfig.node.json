@@ -12,6 +12,7 @@
     "src/room.ts",
     "src/index.cf.ts",
     "src/platform/cloudflare",
-    "src/plugins/**/widget.ts"
+    "src/plugins/**/widget.ts",
+    "src/plugins/**/site-comments.ts"
   ]
 }

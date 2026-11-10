@@ -51,6 +51,8 @@ export interface Reply {
 
 export interface Thread {
   id: string;
+  /** The site that stores the thread: every write about it goes there. */
+  site: string;
   kind: 'draft' | 'published';
   page: string;
   anchor: Anchor;
@@ -68,6 +70,7 @@ export interface Thread {
   reactions: Reaction[];
   unread: boolean;
   seenAt: string | undefined;
+  /** 1..n within `site`, the number `brisk plugin comments export <site>` prints. */
   num: number;
 }
 
@@ -110,12 +113,13 @@ function groupReactions(docs: readonly StoredDoc[], me: string): Reaction[] {
 }
 
 export function buildThreads(input: {
+  site: string;
   drafts: readonly Draft[];
   docs: readonly StoredDoc[];
   seen: Readonly<Record<string, string>>;
   me: string;
 }): Thread[] {
-  const { drafts, docs, seen, me } = input;
+  const { site, drafts, docs, seen, me } = input;
   const children = new Map<string, StoredDoc[]>();
   for (const d of docs) {
     const parent = str(d.parentId);
@@ -124,6 +128,7 @@ export function buildThreads(input: {
   const threads: Thread[] = [
     ...drafts.map((d) => ({
       id: d.id,
+      site,
       kind: 'draft' as const,
       page: d.page,
       anchor: anchorOfRecord(d),
@@ -159,6 +164,7 @@ export function buildThreads(input: {
         const status = statusOf(d);
         return {
           id: d.id,
+          site,
           kind: 'published' as const,
           page: str(d.page),
           anchor: anchorOfRecord(d),

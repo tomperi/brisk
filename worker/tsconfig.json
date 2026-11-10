@@ -12,6 +12,7 @@
     "src/platform/node",
     "src/index.node.ts",
     "src/plugins/**/widget.ts",
+    "src/plugins/**/site-comments.ts",
     "test/**/*.node.test.ts",
     "vitest.node.config.ts"
   ]

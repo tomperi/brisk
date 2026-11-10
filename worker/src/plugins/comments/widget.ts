@@ -1,9 +1,7 @@
 /* Brisk comments widget. Injected into pages that enable the comments plugin.
  * Drafts live in localStorage (local-first); publishing promotes them to
  * brisk.db via the plugin's server actions, which stamp the author and append
- * an audit event. Reads use the SDK when the page loads /brisk.js and fall
- * back to the same fetch the write path uses when it doesn't — only realtime
- * needs the SDK (without it the data refreshes after each of our own actions). */
+ * an audit event. Each site's data lives in its SiteComments (site-comments.ts). */
 import {
   anchorFields,
   anchorLines,
@@ -17,7 +15,6 @@ import {
   type Quote,
 } from './anchor';
 import { icon } from './icons';
-import { seenDocId } from './inbox';
 import {
   escapeHtml,
   menuHead,
@@ -29,9 +26,9 @@ import {
   threadHtml,
   type MenuItem,
 } from './panel';
+import { siteComments, storageKey, type Brisk, type Me, type SiteComments } from './site-comments';
 import { DOCK_MIN, HIGHLIGHT_CSS, PANEL_W, WIDGET_CSS } from './styles';
 import {
-  buildThreads,
   matches,
   panelView,
   parseEmoji,
@@ -39,27 +36,11 @@ import {
   parseScope,
   pinShown,
   threadMarkdown,
-  type Draft,
   type Emoji,
   type Filter,
   type PanelState,
-  type StoredDoc,
   type Thread,
 } from './threads';
-
-type Handlers = {
-  onCreate?: (d: StoredDoc) => void;
-  onUpdate?: (d: StoredDoc) => void;
-  onDelete?: (id: string) => void;
-};
-type Brisk = {
-  db: {
-    collection(name: string): {
-      list(opts?: { limit?: number; sort?: string }): Promise<StoredDoc[]>;
-      subscribe(h: Handlers): () => void;
-    };
-  };
-};
 
 (() => {
   const tag = document.querySelector<HTMLScriptElement>('script[data-brisk-plugin="comments"]');
@@ -71,25 +52,12 @@ type Brisk = {
 
   // The SDK is optional: without /brisk.js the widget reads over plain fetch
   // and skips realtime — drafts, publishing, and published views all still work.
-  const sdk = (window as { brisk?: Brisk }).brisk;
+  const sdk = (window as { brisk?: Brisk }).brisk ?? null;
 
-  const COLLECTION = '_plugin:comments';
-  const SEEN = '_plugin:comments:seen';
-  const key = (k: string) => `brisk:comments:${SITE}:${k}`;
-  const recall = (k: string) => localStorage.getItem(key(k));
-  const remember = (k: string, v: string) => localStorage.setItem(key(k), v);
+  const recall = (k: string) => localStorage.getItem(storageKey(SITE, k));
+  const remember = (k: string, v: string) => localStorage.setItem(storageKey(SITE, k), v);
   const clean = (s: string, n: number) => (s || '').replace(/\s+/g, ' ').trim().slice(0, n);
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
-
-  const loadDrafts = (): Draft[] => {
-    try {
-      return JSON.parse(recall('drafts') || '[]') as Draft[];
-    } catch {
-      return [];
-    }
-  };
-  let drafts = loadDrafts();
-  const saveDrafts = () => remember('drafts', JSON.stringify(drafts));
 
   let hidden = recall('hidden') === '1';
   let collapsed = recall('collapsed') === '1';
@@ -105,100 +73,36 @@ type Brisk = {
   let popThread: { id: string; since: string | undefined } | null = null;
   const buffers = new Map<string, string>();
 
-  let published: StoredDoc[] = [];
-  let me = { email: '', name: '' };
-  let serverSeen: Record<string, string> = {};
-  const pendingSeen = new Map<string, string>();
-  let seenReady = false;
+  let me: Me = { email: '', name: '' };
+  const whoAmI: Promise<Me | null> = fetch('/api/me')
+    .then((r) => (r.ok ? (r.json() as Promise<{ email?: string; name?: string }>) : null))
+    .then((who) => {
+      if (!who?.email) throw new Error('/api/me refused');
+      return (me = { email: who.email, name: who.name ?? '' });
+    })
+    .catch((err: unknown) => {
+      console.warn('[comments] unread state unavailable:', err);
+      return null;
+    });
+
+  const sites = new Map<string, SiteComments>();
+  /** The SiteComments of the site that owns `x`; every read and write goes through it. */
+  const on = (x: { site: string }): SiteComments => {
+    let s = sites.get(x.site);
+    if (!s) sites.set(x.site, (s = siteComments(x.site, { me: whoAmI, changed: () => render() })));
+    return s;
+  };
   let threads: Thread[] = [];
   const threadById = (id: string | undefined) => threads.find((t) => t.id === id);
-
-  const refreshPublished = async () => {
-    if (sdk) {
-      published = await sdk.db.collection(COLLECTION).list({ limit: 500, sort: '-created' });
-    } else {
-      const res = await fetch(`/api/db/${COLLECTION}?limit=500&sort=-created`, {
-        headers: { 'x-brisk-site': SITE },
-      });
-      if (!res.ok) return;
-      published = ((await res.json()) as { docs: StoredDoc[] }).docs;
-    }
-    render();
-  };
-
-  const myDocId = () => seenDocId(me.email);
-  /** A list, not `GET /:id`: until you first read a thread you have no doc, and
-   *  that 404 lands in the console. Past one full page, ask for the doc by id. */
-  const readMySeen = async (): Promise<StoredDoc | undefined> => {
-    const headers = { 'x-brisk-site': SITE };
-    const res = await fetch(`/api/db/${SEEN}?limit=500`, { headers });
-    if (!res.ok) throw new Error(`seen state: ${res.status}`);
-    const { docs } = (await res.json()) as { docs: StoredDoc[] };
-    const mine = docs.find((d) => d.id === myDocId());
-    if (mine || docs.length < 500) return mine;
-    const one = await fetch(`/api/db/${SEEN}/${encodeURIComponent(myDocId())}`, { headers });
-    if (!one.ok && one.status !== 404) throw new Error(`seen state: ${one.status}`);
-    return one.ok ? ((await one.json()) as StoredDoc) : undefined;
-  };
-  const applySeen = (doc: StoredDoc) => {
-    if (doc.id !== myDocId()) return;
-    serverSeen = { ...(doc.seen as Record<string, string> | undefined) };
-    render();
-  };
-  if (sdk) {
-    sdk.db.collection(COLLECTION).subscribe({
-      onCreate: (d) => {
-        published = [d, ...published.filter((p) => p.id !== d.id)];
-        render();
-      },
-      onUpdate: (d) => {
-        published = published.map((p) => (p.id === d.id ? d : p));
-        render();
-      },
-      onDelete: (id) => {
-        published = published.filter((p) => p.id !== id);
-        render();
-      },
-    });
-    sdk.db.collection(SEEN).subscribe({ onCreate: applySeen, onUpdate: applySeen });
-  }
-
-  const action = async (name: string, args: Record<string, string>): Promise<StoredDoc> => {
-    const res = await fetch(`/api/plugins/comments/actions/${name}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ args: { site: SITE, ...args } }),
-    });
-    if (!res.ok) throw new Error(`${name} failed: ${res.status}`);
-    // With realtime unavailable, our own mutations won't push back — re-read.
-    if (!sdk && name !== 'seen' && name !== 'unseen') void refreshPublished();
-    return ((await res.json()) as { result: StoredDoc }).result;
-  };
-
-  void fetch('/api/me')
-    .then((r) => (r.ok ? (r.json() as Promise<{ email?: string; name?: string }>) : null))
-    .then(async (who) => {
-      if (!who?.email) throw new Error('/api/me refused');
-      me = { email: who.email, name: who.name ?? '' };
-      serverSeen = { ...((await readMySeen())?.seen as Record<string, string> | undefined) };
-      seenReady = true;
-      render();
-    })
-    .catch((err: unknown) => console.warn('[comments] unread state unavailable:', err));
+  const allDrafts = () => [...sites.values()].flatMap((s) => s.drafts());
+  const draftById = (id: string | undefined) => allDrafts().find((d) => d.id === id);
 
   async function writeSeen(id: string, stamp: string) {
     const t = threadById(id);
-    if (!t || t.kind === 'draft' || !seenReady) return;
-    if (pendingSeen.get(id) === stamp) return;
-    pendingSeen.set(id, stamp);
-    render();
+    if (!t || t.kind === 'draft') return;
     try {
-      const doc = await action(stamp ? 'seen' : 'unseen', { id });
-      if (pendingSeen.get(id) === stamp) pendingSeen.delete(id);
-      applySeen(doc);
+      await on(t).markSeen(id, stamp);
     } catch {
-      if (pendingSeen.get(id) === stamp) pendingSeen.delete(id);
-      render();
       toast(stamp ? 'Could not mark it read' : 'Could not mark it unread');
     }
   }
@@ -713,7 +617,7 @@ type Brisk = {
     if (!hit) return toast('Could not quote that selection');
     unselect(range);
     try {
-      await action('create', {
+      await on({ site: SITE }).act('create', {
         text: '',
         reaction: emoji,
         page: pageId(),
@@ -735,8 +639,8 @@ type Brisk = {
     if ((mine && how === 'add') || reacting.has(k)) return;
     reacting.add(k);
     try {
-      if (mine) await action('delete', { id: mine });
-      else await action('react', { id: to, emoji });
+      if (mine) await on(t).act('delete', { id: mine });
+      else await on(t).act('react', { id: to, emoji });
     } catch {
       toast(mine ? 'Could not remove the reaction' : 'Could not add the reaction');
     } finally {
@@ -836,7 +740,7 @@ type Brisk = {
         ta.focus();
         return;
       }
-      drafts.push({
+      on({ site: SITE }).saveDraft({
         id: `d-${Date.now().toString(36)}-${Math.floor(performance.now())}`,
         text,
         page: pageId(),
@@ -851,7 +755,6 @@ type Brisk = {
         ),
         createdAt: new Date().toISOString(),
       });
-      saveDrafts();
       closePop();
       render();
       if (after === 'done') {
@@ -897,7 +800,7 @@ type Brisk = {
     const newList = container.querySelector('.list');
     if (newList) newList.scrollTop = scroll;
     for (const ta of container.querySelectorAll<HTMLTextAreaElement>('textarea[data-keep]')) {
-      const draft = drafts.find((d) => d.id === ta.dataset.draft);
+      const draft = draftById(ta.dataset.draft);
       if (draft) ta.defaultValue = draft.text;
       ta.value = buffers.get(ta.dataset.keep!) ?? draft?.text ?? '';
       const send = ta.parentElement?.querySelector<HTMLButtonElement>('.send');
@@ -913,9 +816,10 @@ type Brisk = {
   async function sendReply(id: string) {
     const k = `reply:${id}`;
     const text = (buffers.get(k) ?? '').trim();
-    if (!text) return;
+    const t = threadById(id);
+    if (!text || !t) return;
     try {
-      await action('reply', { id, text });
+      await on(t).act('reply', { id, text });
       buffers.delete(k);
       render();
     } catch {
@@ -924,8 +828,10 @@ type Brisk = {
   }
 
   async function setStatus(id: string, to: 'resolve' | 'reopen') {
+    const t = threadById(id);
+    if (!t) return;
     try {
-      await action(to, { id });
+      await on(t).act(to, { id });
       if (to === 'resolve' && panel.expanded?.id === id) panel.expanded = null;
       toast(to === 'resolve' ? 'Resolved' : 'Reopened');
       render();
@@ -934,10 +840,11 @@ type Brisk = {
     }
   }
 
-  async function deleteThread(id: string) {
+  async function deleteThread(t: Thread) {
+    const { id } = t;
     armed = null;
     try {
-      await action('delete', { id });
+      await on(t).act('delete', { id });
       if (panel.expanded?.id === id) panel.expanded = null;
       if (popThread?.id === id) closePop();
       toast('Deleted');
@@ -948,9 +855,9 @@ type Brisk = {
     }
   }
 
-  function discardDraft(id: string) {
-    drafts = drafts.filter((d) => d.id !== id);
-    saveDrafts();
+  function discardDraft(t: Thread) {
+    const { id } = t;
+    on(t).dropDrafts([id]);
     buffers.delete(`draft:${id}`);
     armed = null;
     if (panel.expanded?.id === id) panel.expanded = null;
@@ -960,31 +867,23 @@ type Brisk = {
   }
 
   function saveDraftEdit(id: string): boolean {
-    const d = drafts.find((x) => x.id === id);
+    const t = threadById(id);
+    const d = t && draftById(id);
     const text = buffers.get(`draft:${id}`)?.trim();
-    if (!d || text === undefined) return !!d;
+    if (!t || !d || text === undefined) return !!d;
     if (!text) return false;
-    d.text = text;
-    saveDrafts();
+    on(t).saveDraft({ ...d, text });
     buffers.delete(`draft:${id}`);
     return true;
   }
 
   async function publishDraft(id: string): Promise<boolean> {
     if (!saveDraftEdit(id)) return false;
-    const d = drafts.find((x) => x.id === id);
-    if (!d) return true; // already gone — nothing left to publish
+    const t = threadById(id);
+    if (!t) return true; // already gone — nothing left to publish
     try {
-      const doc = await action('create', {
-        text: d.text,
-        page: d.page,
-        ...anchorFields(anchorOfRecord(d)),
-        label: d.label,
-        textSnippet: d.textSnippet,
-        html: d.html,
-      });
-      drafts = drafts.filter((x) => x.id !== id);
-      saveDrafts();
+      const doc = await on(t).publish(id);
+      if (!doc) return true;
       if (panel.expanded?.id === id)
         panel.expanded = { id: doc.id, since: undefined, wasUnread: false };
       if (popThread?.id === id) closePop();
@@ -999,7 +898,7 @@ type Brisk = {
   async function publishAll(): Promise<void> {
     let ok = 0,
       failed = 0;
-    for (const d of [...drafts]) (await publishDraft(d.id)) ? ok++ : failed++;
+    for (const d of allDrafts()) (await publishDraft(d.id)) ? ok++ : failed++;
     toast(
       failed
         ? `Published ${ok} of ${ok + failed}. The failed drafts are kept.`
@@ -1010,7 +909,7 @@ type Brisk = {
   // ---- markdown export ------------------------------------------------------
   function draftsMarkdown(): string {
     let out = `# comment drafts on ${SITE}\n`;
-    for (const d of drafts) {
+    for (const d of on({ site: SITE }).drafts()) {
       out += `\n## ${d.text}\n- page: \`${d.page}\`\n`;
       for (const line of anchorLines(anchorOfRecord(d))) out += `${line}\n`;
       if (d.textSnippet) out += `- text: "${d.textSnippet}"\n`;
@@ -1327,9 +1226,7 @@ type Brisk = {
 
   // ---- render -----------------------------------------------------------------
   function render() {
-    const seen = { ...serverSeen, ...Object.fromEntries(pendingSeen) };
-    threads = buildThreads({ drafts, docs: published, seen, me: me.email });
-    if (!seenReady) for (const t of threads) t.unread = false;
+    threads = on({ site: SITE }).threads();
     if (panel.expanded && !threadById(panel.expanded.id)) panel.expanded = null;
     renderPins();
     paint();
@@ -1342,7 +1239,7 @@ type Brisk = {
     updateBadges();
     for (const id of [popThread?.id, panel.open ? panel.expanded?.id : undefined]) {
       const t = threadById(id);
-      if (t?.unread && !pendingSeen.has(t.id)) markRead(t.id);
+      if (t?.unread) markRead(t.id);
     }
   }
 
@@ -1369,7 +1266,7 @@ type Brisk = {
       panelHtml(view, panel, {
         site: SITE,
         picking,
-        drafts: drafts.length,
+        drafts: allDrafts().length,
         thread: (t) => threadOpts(t, 'panel'),
       }),
     );
@@ -1479,7 +1376,7 @@ type Brisk = {
 
   const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
   const commandItems = (fromPanel: boolean) => (): MenuItem[] => {
-    const n = drafts.length;
+    const n = allDrafts().length;
     return [
       ...(fromPanel
         ? []
@@ -1615,8 +1512,8 @@ type Brisk = {
     },
     'confirm-delete': (el) => {
       const t = threadById(idOf(el));
-      if (t?.kind === 'draft') discardDraft(t.id);
-      else if (t) void deleteThread(t.id);
+      if (t?.kind === 'draft') discardDraft(t);
+      else if (t) void deleteThread(t);
     },
     reply: (el) => void sendReply(idOf(el)),
     publish: (el) => {
@@ -1633,8 +1530,7 @@ type Brisk = {
     'copy-drafts': () => void clip(`comment-drafts-${SITE}.md`, draftsMarkdown()),
     'publish-all': () => void publishAll(),
     'discard-drafts': () => {
-      drafts = [];
-      saveDrafts();
+      for (const s of sites.values()) s.dropDrafts('all');
       render();
       toast('Drafts discarded');
     },
@@ -1832,13 +1728,15 @@ type Brisk = {
 
   // ---- boot -----------------------------------------------------------------
   const goto = recall('goto');
-  if (goto) localStorage.removeItem(key('goto'));
+  if (goto) localStorage.removeItem(storageKey(SITE, 'goto'));
   panelEl.classList.toggle('open', panel.open);
   layer.classList.toggle('panel-open', panel.open);
+  const topSite = on({ site: SITE });
+  topSite.listen(sdk);
   applyHidden();
   applyCollapsed();
   render();
-  void refreshPublished().then(() => {
+  void topSite.loaded.then(() => {
     const t = threadById(goto ?? '');
     if (!t) return;
     if (!panel.open) setPanelOpen(true);
