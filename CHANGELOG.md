@@ -80,8 +80,11 @@ releases are published to
   popover shakes and keeps your text until you save or cancel.
 - **Comments** — a site shown in a frame on another page no longer brings its
   own toolbar and panel, so a Brisk site that frames another one shows the
-  comments widget once. The widget runs only on the top page; open a framed
-  site on its own to comment on it.
+  comments widget once. The widget runs only on the top page.
+- **Comments** — you can comment on content inside a same-origin frame, such as
+  a page that shows each tab in an iframe. Before, only the top page outside
+  the frames took comments, and Esc did not leave comment mode after you
+  clicked into a frame.
 - **Comments** — the header of the ⋯ and right-click menus counts only published
   threads as open. It used to count your unpublished drafts too, so it said
   "2 open" on a page where nothing was published yet.

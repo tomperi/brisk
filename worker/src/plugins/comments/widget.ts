@@ -209,13 +209,90 @@ type Brisk = {
     void writeSeen(id, '');
   };
 
+  // ---- same-origin frames ---------------------------------------------------
+  // The widget runs only on the top page, so it reaches into same-origin frames
+  // itself. A selector names the frames on the way: `#pane-a >>> main > p`.
+  // Page nodes can come from a frame's realm: test nodeType, never instanceof.
+  const FRAME_SEP = ' >>> ';
+  const frameDoc = (el: Element): Document | null =>
+    el.localName === 'iframe' || el.localName === 'frame'
+      ? (el as HTMLIFrameElement).contentDocument
+      : null;
+  const docFor = (n: Node): Document => n.ownerDocument ?? (n as Document);
+  const styleOf = (el: Element) => (el.ownerDocument.defaultView ?? window).getComputedStyle(el);
+  const framesOf = function* (doc: Document) {
+    for (let f = doc.defaultView?.frameElement; f; f = f.ownerDocument.defaultView?.frameElement)
+      yield f;
+  };
+  /** Where a document's viewport starts in the top page's viewport. */
+  const originOf = (doc: Document): XY => {
+    const o = { x: 0, y: 0 };
+    for (const f of framesOf(doc)) {
+      const r = f.getBoundingClientRect();
+      const s = styleOf(f);
+      o.x += r.left + f.clientLeft + parseFloat(s.paddingLeft);
+      o.y += r.top + f.clientTop + parseFloat(s.paddingTop);
+    }
+    return o;
+  };
+  const shift = (r: DOMRect, doc: Document): DOMRect => {
+    if (doc === document) return r;
+    const o = originOf(doc);
+    return new DOMRect(r.x + o.x, r.y + o.y, r.width, r.height);
+  };
+  const boxOf = (el: Element) => shift(el.getBoundingClientRect(), el.ownerDocument);
+  const boxesOf = (r: Range) =>
+    [...r.getClientRects()].map((b) => shift(b, docFor(r.startContainer)));
+  /** A mouse event's position in the top page's viewport. */
+  const pointOf = (e: MouseEvent): XY => {
+    const doc = e.view?.document;
+    const o = doc && doc !== document ? originOf(doc) : { x: 0, y: 0 };
+    return { x: e.clientX + o.x, y: e.clientY + o.y };
+  };
+  /** False when a frame around `doc` is hidden or scrolls `at` out of its box. */
+  const seenThrough = (doc: Document, at: XY): boolean => {
+    for (const f of framesOf(doc)) {
+      if (!onScreen(f)) return false;
+      const r = boxOf(f);
+      const left = r.left + f.clientLeft;
+      const top = r.top + f.clientTop;
+      if (at.x < left || at.x > left + f.clientWidth || at.y < top || at.y > top + f.clientHeight)
+        return false;
+    }
+    return true;
+  };
+  /** The top page and every same-origin frame inside it. */
+  const pageDocs = (): Document[] => {
+    const out = [document];
+    for (let i = 0; i < out.length; i++)
+      for (const f of out[i]!.querySelectorAll('iframe, frame')) {
+        const d = frameDoc(f);
+        if (d?.documentElement) out.push(d);
+      }
+    return out;
+  };
+  /** The innermost focused element, through same-origin frames. */
+  const deepActive = (): Element | null => {
+    let el = document.activeElement;
+    for (let d = el && frameDoc(el); d?.activeElement; d = frameDoc(el!)) el = d.activeElement;
+    return el;
+  };
+
   // ---- element anchoring (ported from html-grab) ---------------------------
   function cssPath(el: Element): string {
+    const own = localPath(el);
+    const frame = el.ownerDocument.defaultView?.frameElement;
+    if (!frame || !own) return own;
+    const outer = cssPath(frame);
+    return outer && outer + FRAME_SEP + own;
+  }
+  function localPath(el: Element): string {
     if (el.id) return `#${CSS.escape(el.id)}`;
-    if (el === document.body) return 'body';
+    const body = el.ownerDocument.body;
+    if (el === body) return 'body';
     const parts: string[] = [];
     let node: Element | null = el;
-    while (node && node.nodeType === 1 && node !== document.body && parts.length < 6) {
+    while (node && node.nodeType === 1 && node !== body && parts.length < 6) {
       if (node.id) {
         parts.unshift(`#${CSS.escape(node.id)}`);
         break;
@@ -327,18 +404,25 @@ type Brisk = {
     b.setAttribute('data-tip', on ? 'Cancel (Esc)' : 'New comment');
     if (panel.open) renderPanel();
   };
-  const elAt = (x: number, y: number): Element | null => {
-    const el = document.elementFromPoint(x, y);
-    return !el || el === host || host.contains(el) ? null : el;
+  const elAt = ({ x, y }: XY): Element | null => {
+    let el = document.elementFromPoint(x, y);
+    if (!el || el === host || host.contains(el)) return null;
+    for (let d = frameDoc(el); d; d = frameDoc(el)) {
+      const o = originOf(d);
+      const inner = d.elementFromPoint(x - o.x, y - o.y);
+      if (!inner) break;
+      el = inner;
+    }
+    return el;
   };
   const onMove = (e: MouseEvent) => {
     if (!picking) return;
-    const el = elAt(e.clientX, e.clientY);
+    const el = elAt(pointOf(e));
     if (!el) {
       hi.style.display = 'none';
       return;
     }
-    const r = el.getBoundingClientRect();
+    const r = boxOf(el);
     Object.assign(hi.style, {
       display: 'block',
       left: `${r.left}px`,
@@ -371,7 +455,7 @@ type Brisk = {
   );
   /** Walks text nodes and `<br>` elements. */
   const textWalker = (root: Node) =>
-    document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, textFilter);
+    docFor(root).createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, textFilter);
 
   /** Says, text node by text node, whether the markup breaks the line before it.
    *  Tags, not computed styles, so a quote reads the same at every width. */
@@ -381,7 +465,8 @@ type Brisk = {
       const p = t.parentElement;
       if (!blocks.has(p)) {
         let el = p;
-        while (el && el !== document.body && !BLOCK_TAGS.has(el.localName)) el = el.parentElement;
+        while (el && el !== t.ownerDocument.body && !BLOCK_TAGS.has(el.localName))
+          el = el.parentElement;
         blocks.set(p, el);
       }
       return blocks.get(p)!;
@@ -426,16 +511,18 @@ type Brisk = {
     };
   }
 
-  const liveRange = (): Range | null => {
-    const sel = document.getSelection();
+  /** The selection in `doc`, else in the document that has focus. */
+  const liveRange = (doc?: Document | null): Range | null => {
+    const sel = (doc ?? deepActive()?.ownerDocument ?? document).getSelection();
     if (!sel || !sel.rangeCount || sel.isCollapsed) return null;
     const r = sel.getRangeAt(0);
     return host.contains(r.startContainer) || host.contains(r.endContainer) ? null : r;
   };
+  const unselect = (r: Range) => docFor(r.startContainer).getSelection()?.removeAllRanges();
 
   const blockAncestor = (node: Node): Element | null => {
-    let el = node instanceof Element ? node : node.parentElement;
-    while (el && el !== document.body && /^(inline|contents)$/.test(getComputedStyle(el).display))
+    let el = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+    while (el && el !== el.ownerDocument.body && /^(inline|contents)$/.test(styleOf(el).display))
       el = el.parentElement;
     return el;
   };
@@ -443,14 +530,14 @@ type Brisk = {
   function flatAt(nodes: Text[], flat: FlatText, container: Node, offset: number): number {
     const k = nodes.indexOf(container as Text);
     if (k >= 0) return flat.toFlat(k, offset);
-    const probe = document.createRange();
+    const probe = docFor(container).createRange();
     probe.setStart(container, offset);
     const next = nodes.findIndex((t) => probe.comparePoint(t, 0) >= 0);
     return next >= 0 ? flat.toFlat(next, 0) : flat.text.length;
   }
 
   const fractionIn = (el: Element, x: number, y: number) => {
-    const r = el.getBoundingClientRect();
+    const r = boxOf(el);
     if (!r.width || !r.height) return null;
     const f = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 1e4) / 1e4;
     return { x: f((x - r.left) / r.width), y: f((y - r.top) / r.height) };
@@ -485,8 +572,12 @@ type Brisk = {
   function caretAfter(range: Range): XY | null {
     const end = range.cloneRange();
     end.collapse(false);
-    const caret = end.getClientRects()[0];
-    const r = caret?.height ? caret : [...range.getClientRects()].filter((b) => b.height).pop();
+    const caret = boxesOf(end)[0];
+    const r = caret?.height
+      ? caret
+      : boxesOf(range)
+          .filter((b) => b.height)
+          .pop();
     return r ? { x: r.right, y: r.top } : null;
   }
 
@@ -504,16 +595,19 @@ type Brisk = {
     pressing = true;
     swallowClick = false;
     snapshot =
-      picking && !e.composedPath().includes(host) ? (liveRange()?.cloneRange() ?? null) : null;
+      picking && !e.composedPath().includes(host)
+        ? (liveRange(e.view?.document)?.cloneRange() ?? null)
+        : null;
   };
   const onUp = (e: MouseEvent) => {
     pressing = false;
     checkSelection();
     if (!picking) return;
-    const el = elAt(e.clientX, e.clientY);
-    const range = liveRange();
-    const hit = el && range?.intersectsNode(el) ? quoteAt(range, e.clientX, e.clientY) : null;
-    if (hit && startCompose(hit, e.clientX, e.clientY)) swallowClick = true;
+    const at = pointOf(e);
+    const el = elAt(at);
+    const range = liveRange(el?.ownerDocument);
+    const hit = el && range?.intersectsNode(el) ? quoteAt(range, at.x, at.y) : null;
+    if (hit && startCompose(hit, at.x, at.y)) swallowClick = true;
   };
   const onClick = (e: MouseEvent) => {
     if (swallowClick) {
@@ -523,16 +617,16 @@ type Brisk = {
       return;
     }
     if (!picking) return;
-    const el = elAt(e.clientX, e.clientY);
+    const at = pointOf(e);
+    const el = elAt(at);
     if (!el) return;
     e.preventDefault();
     e.stopPropagation();
-    const range = liveRange() ?? snapshot;
+    const range = liveRange(el.ownerDocument) ?? snapshot;
     snapshot = null;
     const hit =
-      (range?.intersectsNode(el) && quoteAt(range, e.clientX, e.clientY)) ||
-      elementAt(el, e.clientX, e.clientY);
-    startCompose(hit, e.clientX, e.clientY);
+      (range?.intersectsNode(el) && quoteAt(range, at.x, at.y)) || elementAt(el, at.x, at.y);
+    startCompose(hit, at.x, at.y);
   };
   const pickOrQuote = () => {
     const range = picking ? null : liveRange();
@@ -549,7 +643,9 @@ type Brisk = {
   let bar: Bar = { kind: 'closed' };
   const coarse = matchMedia('(pointer: coarse)');
   const lastLine = (r: Range) =>
-    [...r.getClientRects()].filter((b) => b.width || b.height).pop() ?? null;
+    boxesOf(r)
+      .filter((b) => b.width || b.height)
+      .pop() ?? null;
 
   function closeBar() {
     if (bar.kind === 'closed') return;
@@ -587,10 +683,12 @@ type Brisk = {
     if (hidden || collapsed || picking) return null;
     const range = liveRange();
     if (!range || !range.toString().trim()) return null;
-    const active = document.activeElement as HTMLElement | null;
+    const active = deepActive() as HTMLElement | null;
     if (active?.matches(EDITABLE) || active?.isContentEditable) return null;
     const node = range.commonAncestorContainer;
-    const el = (node instanceof Element ? node : node.parentElement) as HTMLElement | null;
+    const el = (
+      node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement
+    ) as HTMLElement | null;
     return !el || el.closest(EDITABLE) || el.isContentEditable ? null : range;
   }
   const sameRange = (a: Range, b: Range) =>
@@ -613,7 +711,7 @@ type Brisk = {
     const end = caretAfter(range);
     const hit = end && quoteAt(range, end.x, end.y);
     if (!hit) return toast('Could not quote that selection');
-    document.getSelection()?.removeAllRanges();
+    unselect(range);
     try {
       await action('create', {
         text: '',
@@ -725,7 +823,7 @@ type Brisk = {
     );
     if (!opened) return false;
     if (range) {
-      document.getSelection()?.removeAllRanges();
+      unselect(range);
       pendingRange = range;
       paint();
     }
@@ -945,11 +1043,17 @@ type Brisk = {
     );
 
   const findTarget = (selector: string): Element | null => {
+    let el: Element | null = null;
+    let doc: Document | null = document;
     try {
-      return selector ? document.querySelector(selector) : null;
+      for (const part of selector.split(FRAME_SEP)) {
+        el = doc?.querySelector(part) ?? null;
+        doc = el && frameDoc(el);
+      }
     } catch {
       return null; // invalid selector
     }
+    return el;
   };
   /** A hidden element keeps its box: a deck stacks every slide at inset:0 and
    *  hides all but one with visibility/opacity, so its comments would otherwise
@@ -1061,7 +1165,7 @@ type Brisk = {
     if (!hit) return null;
     const s = flat.toRaw(hit.start, 'start');
     const e = flat.toRaw(hit.end, 'end');
-    c.range = document.createRange();
+    c.range = scope.ownerDocument.createRange();
     c.range.setStart(nodes[s.chunk]!, s.offset);
     c.range.setEnd(nodes[e.chunk]!, e.offset);
     return c.range;
@@ -1076,20 +1180,20 @@ type Brisk = {
       return { kind: 'detached' };
     }
     if (!onScreen(el)) return { kind: 'hidden' };
+    const seen = (at: XY) => seenThrough(el.ownerDocument, at);
     if (a.kind === 'text') {
       const range = quoteRange(t.id, el, a.quote);
       if (range) {
         const end = caretAfter(range);
-        return end
-          ? { kind: 'text', range, at: { x: end.x - 4, y: end.y + 3 } }
-          : { kind: 'hidden' };
+        const at = end && { x: end.x - 4, y: end.y + 3 };
+        return at && seen(at) ? { kind: 'text', range, at } : { kind: 'hidden' };
       }
     }
-    const r = el.getBoundingClientRect();
+    const r = boxOf(el);
     const at = a.point
       ? { x: r.left + a.point.x * r.width, y: r.top + a.point.y * r.height }
       : { x: r.right - 11, y: r.top + 11 };
-    return { kind: 'element', at };
+    return seen(at) ? { kind: 'element', at } : { kind: 'hidden' };
   }
   const applyPin = (pin: HTMLElement, p: Placement) => {
     pin.classList.toggle('detached', p.kind === 'detached');
@@ -1155,8 +1259,8 @@ type Brisk = {
     const target = t.anchor.kind === 'page' ? null : findTarget(t.anchor.selector);
     const box =
       s?.placement.kind === 'text'
-        ? s.placement.range.getBoundingClientRect()
-        : target?.getBoundingClientRect();
+        ? shift(s.placement.range.getBoundingClientRect(), docFor(s.placement.range.startContainer))
+        : target && boxOf(target);
     const off = box && (box.bottom < 0 || box.top > innerHeight);
     if (off && target)
       target.scrollIntoView({
@@ -1166,41 +1270,58 @@ type Brisk = {
     setTimeout(() => flash(t.id), off ? 450 : 0);
   }
 
-  let marks: { all: Highlight; focus: Highlight; sheet: CSSStyleSheet } | null = null;
-  try {
-    if (CSS.highlights && typeof Highlight === 'function') {
-      const sheet = new CSSStyleSheet();
-      sheet.replaceSync(HIGHLIGHT_CSS);
-      marks = { all: new Highlight(), focus: new Highlight(), sheet };
+  type Marks = { all: Highlight; focus: Highlight; sheet: CSSStyleSheet };
+  /** Highlights and their sheet belong to one window, so each frame gets its own. */
+  const markSets = new WeakMap<Document, Marks | null>();
+  function marksIn(doc: Document): Marks | null {
+    if (markSets.has(doc)) return markSets.get(doc)!;
+    let m: Marks | null = null;
+    try {
+      const w = doc.defaultView as (Window & typeof globalThis) | null;
+      if (w?.CSS.highlights && typeof w.Highlight === 'function') {
+        const sheet = new w.CSSStyleSheet();
+        sheet.replaceSync(HIGHLIGHT_CSS);
+        m = { all: new w.Highlight(), focus: new w.Highlight(), sheet };
+      }
+    } catch (err) {
+      console.warn('[comments] highlights unavailable:', err);
     }
-  } catch (err) {
-    console.warn('[comments] highlights unavailable:', err);
+    markSets.set(doc, m);
+    return m;
   }
   let pendingRange: Range | null = null;
 
   function paint() {
-    if (!marks) return;
-    try {
-      const { all, focus, sheet } = marks;
-      // A page may replace these wholesale; put ours back.
-      if (!document.adoptedStyleSheets.includes(sheet))
-        document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
-      if (CSS.highlights.get('brisk-comment') !== all) CSS.highlights.set('brisk-comment', all);
-      if (CSS.highlights.get('brisk-comment-focus') !== focus)
-        CSS.highlights.set('brisk-comment-focus', focus);
-      all.clear();
-      focus.clear();
-      if (hidden || collapsed) return;
-      if (pendingRange) focus.add(pendingRange);
-      if (pinsHidden) return;
-      const focused = focusedId();
-      for (const s of slots.values()) {
-        if (s.placement.kind !== 'text' || s.thread.status !== 'open') continue;
-        (s.thread.id === focused ? focus : all).add(s.placement.range);
+    const live = new Map<Document, Marks>();
+    for (const doc of pageDocs()) {
+      const m = marksIn(doc);
+      if (!m) continue;
+      try {
+        const { all, focus, sheet } = m;
+        const highlights = (doc.defaultView as Window & typeof globalThis).CSS.highlights;
+        // A page may replace these wholesale; put ours back.
+        if (!doc.adoptedStyleSheets.includes(sheet))
+          doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, sheet];
+        if (highlights.get('brisk-comment') !== all) highlights.set('brisk-comment', all);
+        if (highlights.get('brisk-comment-focus') !== focus)
+          highlights.set('brisk-comment-focus', focus);
+        all.clear();
+        focus.clear();
+        live.set(doc, m);
+      } catch (err) {
+        markSets.set(doc, null);
+        console.warn('[comments] highlights disabled:', err);
       }
-    } catch (err) {
-      marks = null;
-      console.warn('[comments] highlights disabled:', err);
+    }
+    const add = (r: Range, which: 'all' | 'focus') =>
+      live.get(docFor(r.startContainer))?.[which].add(r);
+    if (hidden || collapsed) return;
+    if (pendingRange) add(pendingRange, 'focus');
+    if (pinsHidden) return;
+    const focused = focusedId();
+    for (const s of slots.values()) {
+      if (s.placement.kind !== 'text' || s.thread.status !== 'open') continue;
+      add(s.placement.range, s.thread.id === focused ? 'focus' : 'all');
     }
   }
 
@@ -1642,32 +1763,17 @@ type Brisk = {
     }
   };
 
-  document.addEventListener('mousemove', onMove, true);
-  document.addEventListener('mousedown', onDown, true);
-  document.addEventListener('mouseup', onUp, true);
-  document.addEventListener('click', onClick, true);
-  document.addEventListener('keydown', onKey, true);
   const onClickAway = () => {
     if (popHasUnsavedText()) nudge();
     else if (pop.classList.contains('show')) closePop();
     closeMenu();
     closeBar();
   };
-  document.addEventListener('selectionchange', checkSelection);
   for (const scroller of [panelEl, pop])
     scroller.addEventListener('scroll', () => bar.kind === 'target' && closeBar(), true);
-  document.addEventListener('mousedown', onClickAway, false);
-  // Reposition pins on scroll; the popover stays put (it's fixed) so a scrolling
-  // textarea can't dismiss it.
-  addEventListener('scroll', scheduleReposition, true);
-  addEventListener('resize', scheduleReposition, true);
-  // A cross-fade leaves the incoming element at opacity 0 for the length of its
-  // transition, long after the class flip — re-place when the motion lands too.
-  addEventListener('transitionend', scheduleReposition, true);
-  addEventListener('animationend', scheduleReposition, true);
   // Slides, tabs and accordions swap what's on screen with a class or style
   // flip and fire no event of their own — watch the markup so pins follow.
-  new MutationObserver((records) => {
+  const markup = new MutationObserver((records) => {
     let move = false;
     for (const r of records) {
       if (r.type !== 'characterData') move = true;
@@ -1680,13 +1786,47 @@ type Brisk = {
       }
     }
     if (move) scheduleReposition();
-  }).observe(document.documentElement, {
-    subtree: true,
-    childList: true,
-    characterData: true,
-    attributes: true,
-    attributeFilter: ['class', 'style', 'hidden', 'aria-hidden', 'open'],
   });
+  const wired = new WeakSet<Document>();
+  /** Listens on the top page and on every same-origin frame not yet wired. */
+  function wire() {
+    for (const doc of pageDocs()) {
+      const win = doc.defaultView;
+      if (!win || wired.has(doc)) continue;
+      wired.add(doc);
+      doc.addEventListener('mousemove', onMove, true);
+      doc.addEventListener('mousedown', onDown, true);
+      doc.addEventListener('mouseup', onUp, true);
+      doc.addEventListener('click', onClick, true);
+      doc.addEventListener('keydown', onKey, true);
+      doc.addEventListener('selectionchange', checkSelection);
+      doc.addEventListener('mousedown', onClickAway, false);
+      // A frame's load event does not bubble, but a capture listener sees it.
+      doc.addEventListener('load', onFrameLoad, true);
+      // Reposition pins on scroll; the popover stays put (it's fixed) so a
+      // scrolling textarea can't dismiss it.
+      win.addEventListener('scroll', scheduleReposition, true);
+      win.addEventListener('resize', scheduleReposition, true);
+      // A cross-fade leaves the incoming element at opacity 0 for the length of
+      // its transition, long after the class flip — re-place when it lands too.
+      win.addEventListener('transitionend', scheduleReposition, true);
+      win.addEventListener('animationend', scheduleReposition, true);
+      markup.observe(doc.documentElement, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+        attributes: true,
+        attributeFilter: ['class', 'style', 'hidden', 'aria-hidden', 'open'],
+      });
+    }
+  }
+  function onFrameLoad(e: Event) {
+    const t = e.target as Element;
+    if (t.nodeType !== Node.ELEMENT_NODE || !frameDoc(t)) return;
+    wire();
+    scheduleReposition();
+  }
+  wire();
   // History-routed navigation changes the page identity — re-filter the pins.
   addEventListener('popstate', () => render());
 
