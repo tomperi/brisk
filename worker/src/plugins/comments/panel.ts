@@ -5,6 +5,7 @@ import {
   newReplyCount,
   REACTIONS,
   type Filter,
+  type PageGroup,
   type Reaction,
   type PanelState,
   type PanelView,
@@ -194,6 +195,8 @@ export interface ThreadOpts {
   me: string;
   surface: 'panel' | 'pop';
   elsewhere: string;
+  /** The thread's site when it is not the top page's, else ''. Numbers are per site. */
+  site: string;
 }
 
 function quickTools(t: Thread): string {
@@ -279,7 +282,7 @@ export function threadHtml(t: Thread, o: ThreadOpts): string {
     o.surface === 'panel' && !o.open
       ? ` data-act="expand" tabindex="0" role="button" aria-expanded="false" aria-label="${escapeHtml(`${t.unread ? 'Unread. ' : ''}${t.author}${t.reaction ? ` reacted ${t.reaction}` : `: ${ellipsis(t.text, 80)}`}`)}"`
       : '';
-  const head = `<div class="row"${toggle}>${avatar(t.author || t.email, t.email, t.kind === 'draft')}<span class="nm" title="${escapeHtml(t.email)}">${escapeHtml(t.author || t.email)}</span>${statusTag(t)}${timeHtml(t.createdAt)}<span class="num">#${t.num}</span>${t.unread ? '<span class="dot" role="img" aria-label="Unread"></span>' : ''}</div>`;
+  const head = `<div class="row"${toggle}>${avatar(t.author || t.email, t.email, t.kind === 'draft')}<span class="nm" title="${escapeHtml(t.email)}">${escapeHtml(t.author || t.email)}</span>${statusTag(t)}${timeHtml(t.createdAt)}<span class="num">${o.site ? `${escapeHtml(o.site)} ` : ''}#${t.num}</span>${t.unread ? '<span class="dot" role="img" aria-label="Unread"></span>' : ''}</div>`;
   const said = t.reaction
     ? `<div class="rxq"><span class="rxe" role="img" aria-label="Reacted ${t.reaction}">${t.reaction}</span>${anchorHtml(t, o.lost, o.open)}</div>`
     : anchorHtml(t, o.lost, o.open) +
@@ -334,6 +337,21 @@ function footerHtml(drafts: number): string {
   return `<div class="ft">${copyAll}<span class="ft-n">${plural(drafts, 'draft')}</span>${btn('copy-drafts', 'Copy', { cls: 'ghost' })}${btn('publish-all', 'Publish all', { cls: 'pri', icon: 'publish' })}</div>`;
 }
 
+const pageName = (page: string) => {
+  const path = page.split('?')[0]!;
+  return path.endsWith('/') ? page : page.slice(path.lastIndexOf('/') + 1);
+};
+
+function groupHead(g: PageGroup, site: string): string {
+  const where = g.site === site ? '' : `${g.site} · `;
+  const label = (text: string) =>
+    `<div class="grp">${icon('page')}<span>${escapeHtml(text)}</span></div>`;
+  if (g.rank === 0) return label('This page');
+  if (g.rank > 0) return label(where + pageName(g.page));
+  if (!g.page) return label('No page');
+  return `<button class="grp" data-act="goto-page" data-v="${escapeHtml(g.page)}" data-site="${escapeHtml(g.site)}" title="Go to ${escapeHtml(g.page)}">${icon('page')}<span>${escapeHtml(where + g.page)}</span>${icon('arrow')}</button>`;
+}
+
 export function panelHtml(
   view: PanelView,
   state: PanelState,
@@ -348,19 +366,15 @@ export function panelHtml(
   const drafts = view.drafts.length
     ? `<div class="grp">${icon('comment')}<span>Your drafts</span><span class="n">${view.drafts.length}</span></div>${view.drafts.map((t) => threadHtml(t, ctx.thread(t))).join('')}`
     : '';
+  const headed = state.scope === 'site' || view.groups.length > 1;
   const list = view.groups.length
     ? view.groups
         .map((g) => {
-          const head =
-            state.scope === 'page'
-              ? drafts
-                ? `<div class="grp"><span>${FILTER_LABEL[state.filter]}</span></div>`
-                : ''
-              : g.here
-                ? `<div class="grp">${icon('page')}<span>This page</span></div>`
-                : g.page
-                  ? `<button class="grp" data-act="goto-page" data-v="${escapeHtml(g.page)}" title="Go to ${escapeHtml(g.page)}">${icon('page')}<span>${escapeHtml(g.page)}</span>${icon('arrow')}</button>`
-                  : `<div class="grp">${icon('page')}<span>No page</span></div>`;
+          const head = headed
+            ? groupHead(g, ctx.site)
+            : drafts
+              ? `<div class="grp"><span>${FILTER_LABEL[state.filter]}</span></div>`
+              : '';
           return head + g.threads.map((t) => threadHtml(t, ctx.thread(t))).join('');
         })
         .join('')

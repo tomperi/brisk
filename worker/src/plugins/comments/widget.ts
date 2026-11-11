@@ -1,9 +1,7 @@
 /* Brisk comments widget. Injected into pages that enable the comments plugin.
  * Drafts live in localStorage (local-first); publishing promotes them to
  * brisk.db via the plugin's server actions, which stamp the author and append
- * an audit event. Reads use the SDK when the page loads /brisk.js and fall
- * back to the same fetch the write path uses when it doesn't — only realtime
- * needs the SDK (without it the data refreshes after each of our own actions). */
+ * an audit event. Each site's data lives in its SiteComments (site-comments.ts). */
 import {
   anchorFields,
   anchorLines,
@@ -17,7 +15,6 @@ import {
   type Quote,
 } from './anchor';
 import { icon } from './icons';
-import { seenDocId } from './inbox';
 import {
   escapeHtml,
   menuHead,
@@ -29,37 +26,24 @@ import {
   threadHtml,
   type MenuItem,
 } from './panel';
+import { siteComments, storageKey, type Brisk, type Me, type SiteComments } from './site-comments';
 import { DOCK_MIN, HIGHLIGHT_CSS, PANEL_W, WIDGET_CSS } from './styles';
 import {
-  buildThreads,
+  canonicalPath,
   matches,
+  pageHref,
   panelView,
   parseEmoji,
   parseFilter,
   parseScope,
   pinShown,
   threadMarkdown,
-  type Draft,
   type Emoji,
   type Filter,
   type PanelState,
-  type StoredDoc,
+  type RankOf,
   type Thread,
 } from './threads';
-
-type Handlers = {
-  onCreate?: (d: StoredDoc) => void;
-  onUpdate?: (d: StoredDoc) => void;
-  onDelete?: (id: string) => void;
-};
-type Brisk = {
-  db: {
-    collection(name: string): {
-      list(opts?: { limit?: number; sort?: string }): Promise<StoredDoc[]>;
-      subscribe(h: Handlers): () => void;
-    };
-  };
-};
 
 (() => {
   const tag = document.querySelector<HTMLScriptElement>('script[data-brisk-plugin="comments"]');
@@ -69,27 +53,10 @@ type Brisk = {
   if (marker.__briskComments || window.self !== window.top) return;
   marker.__briskComments = true;
 
-  // The SDK is optional: without /brisk.js the widget reads over plain fetch
-  // and skips realtime — drafts, publishing, and published views all still work.
-  const sdk = (window as { brisk?: Brisk }).brisk;
-
-  const COLLECTION = '_plugin:comments';
-  const SEEN = '_plugin:comments:seen';
-  const key = (k: string) => `brisk:comments:${SITE}:${k}`;
-  const recall = (k: string) => localStorage.getItem(key(k));
-  const remember = (k: string, v: string) => localStorage.setItem(key(k), v);
+  const recall = (k: string) => localStorage.getItem(storageKey(SITE, k));
+  const remember = (k: string, v: string) => localStorage.setItem(storageKey(SITE, k), v);
   const clean = (s: string, n: number) => (s || '').replace(/\s+/g, ' ').trim().slice(0, n);
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
-
-  const loadDrafts = (): Draft[] => {
-    try {
-      return JSON.parse(recall('drafts') || '[]') as Draft[];
-    } catch {
-      return [];
-    }
-  };
-  let drafts = loadDrafts();
-  const saveDrafts = () => remember('drafts', JSON.stringify(drafts));
 
   let hidden = recall('hidden') === '1';
   let collapsed = recall('collapsed') === '1';
@@ -105,100 +72,36 @@ type Brisk = {
   let popThread: { id: string; since: string | undefined } | null = null;
   const buffers = new Map<string, string>();
 
-  let published: StoredDoc[] = [];
-  let me = { email: '', name: '' };
-  let serverSeen: Record<string, string> = {};
-  const pendingSeen = new Map<string, string>();
-  let seenReady = false;
+  let me: Me = { email: '', name: '' };
+  const whoAmI: Promise<Me | null> = fetch('/api/me')
+    .then((r) => (r.ok ? (r.json() as Promise<{ email?: string; name?: string }>) : null))
+    .then((who) => {
+      if (!who?.email) throw new Error('/api/me refused');
+      return (me = { email: who.email, name: who.name ?? '' });
+    })
+    .catch((err: unknown) => {
+      console.warn('[comments] unread state unavailable:', err);
+      return null;
+    });
+
+  const sites = new Map<string, SiteComments>();
+  /** The SiteComments of the site that owns `x`; every read and write goes through it. */
+  const on = (x: { site: string }): SiteComments => {
+    let s = sites.get(x.site);
+    if (!s) sites.set(x.site, (s = siteComments(x.site, { me: whoAmI, changed: () => render() })));
+    return s;
+  };
   let threads: Thread[] = [];
   const threadById = (id: string | undefined) => threads.find((t) => t.id === id);
-
-  const refreshPublished = async () => {
-    if (sdk) {
-      published = await sdk.db.collection(COLLECTION).list({ limit: 500, sort: '-created' });
-    } else {
-      const res = await fetch(`/api/db/${COLLECTION}?limit=500&sort=-created`, {
-        headers: { 'x-brisk-site': SITE },
-      });
-      if (!res.ok) return;
-      published = ((await res.json()) as { docs: StoredDoc[] }).docs;
-    }
-    render();
-  };
-
-  const myDocId = () => seenDocId(me.email);
-  /** A list, not `GET /:id`: until you first read a thread you have no doc, and
-   *  that 404 lands in the console. Past one full page, ask for the doc by id. */
-  const readMySeen = async (): Promise<StoredDoc | undefined> => {
-    const headers = { 'x-brisk-site': SITE };
-    const res = await fetch(`/api/db/${SEEN}?limit=500`, { headers });
-    if (!res.ok) throw new Error(`seen state: ${res.status}`);
-    const { docs } = (await res.json()) as { docs: StoredDoc[] };
-    const mine = docs.find((d) => d.id === myDocId());
-    if (mine || docs.length < 500) return mine;
-    const one = await fetch(`/api/db/${SEEN}/${encodeURIComponent(myDocId())}`, { headers });
-    if (!one.ok && one.status !== 404) throw new Error(`seen state: ${one.status}`);
-    return one.ok ? ((await one.json()) as StoredDoc) : undefined;
-  };
-  const applySeen = (doc: StoredDoc) => {
-    if (doc.id !== myDocId()) return;
-    serverSeen = { ...(doc.seen as Record<string, string> | undefined) };
-    render();
-  };
-  if (sdk) {
-    sdk.db.collection(COLLECTION).subscribe({
-      onCreate: (d) => {
-        published = [d, ...published.filter((p) => p.id !== d.id)];
-        render();
-      },
-      onUpdate: (d) => {
-        published = published.map((p) => (p.id === d.id ? d : p));
-        render();
-      },
-      onDelete: (id) => {
-        published = published.filter((p) => p.id !== id);
-        render();
-      },
-    });
-    sdk.db.collection(SEEN).subscribe({ onCreate: applySeen, onUpdate: applySeen });
-  }
-
-  const action = async (name: string, args: Record<string, string>): Promise<StoredDoc> => {
-    const res = await fetch(`/api/plugins/comments/actions/${name}`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ args: { site: SITE, ...args } }),
-    });
-    if (!res.ok) throw new Error(`${name} failed: ${res.status}`);
-    // With realtime unavailable, our own mutations won't push back — re-read.
-    if (!sdk && name !== 'seen' && name !== 'unseen') void refreshPublished();
-    return ((await res.json()) as { result: StoredDoc }).result;
-  };
-
-  void fetch('/api/me')
-    .then((r) => (r.ok ? (r.json() as Promise<{ email?: string; name?: string }>) : null))
-    .then(async (who) => {
-      if (!who?.email) throw new Error('/api/me refused');
-      me = { email: who.email, name: who.name ?? '' };
-      serverSeen = { ...((await readMySeen())?.seen as Record<string, string> | undefined) };
-      seenReady = true;
-      render();
-    })
-    .catch((err: unknown) => console.warn('[comments] unread state unavailable:', err));
+  const allDrafts = () => shown.sites.flatMap((site) => on({ site }).drafts());
+  const draftById = (id: string | undefined) => allDrafts().find((d) => d.id === id);
 
   async function writeSeen(id: string, stamp: string) {
     const t = threadById(id);
-    if (!t || t.kind === 'draft' || !seenReady) return;
-    if (pendingSeen.get(id) === stamp) return;
-    pendingSeen.set(id, stamp);
-    render();
+    if (!t || t.kind === 'draft') return;
     try {
-      const doc = await action(stamp ? 'seen' : 'unseen', { id });
-      if (pendingSeen.get(id) === stamp) pendingSeen.delete(id);
-      applySeen(doc);
+      await on(t).markSeen(id, stamp);
     } catch {
-      if (pendingSeen.get(id) === stamp) pendingSeen.delete(id);
-      render();
       toast(stamp ? 'Could not mark it read' : 'Could not mark it unread');
     }
   }
@@ -209,13 +112,155 @@ type Brisk = {
     void writeSeen(id, '');
   };
 
+  // ---- same-origin frames ---------------------------------------------------
+  // The widget runs only on the top page, so it reaches into same-origin frames
+  // itself. A selector starts at the comment's own page and names the frames
+  // without comments of their own on the way: `#pane-a >>> main > p`.
+  // Page nodes can come from a frame's realm: test nodeType, never instanceof.
+  const FRAME_SEP = ' >>> ';
+  const frameDoc = (el: Element): Document | null =>
+    el.localName === 'iframe' || el.localName === 'frame'
+      ? (el as HTMLIFrameElement).contentDocument
+      : null;
+  const docFor = (n: Node): Document => n.ownerDocument ?? (n as Document);
+  const styleOf = (el: Element) => (el.ownerDocument.defaultView ?? window).getComputedStyle(el);
+  const framesOf = function* (doc: Document) {
+    for (let f = doc.defaultView?.frameElement; f; f = f.ownerDocument.defaultView?.frameElement)
+      yield f;
+  };
+  /** Where a document's viewport starts in the top page's viewport. */
+  const originOf = (doc: Document): XY => {
+    const o = { x: 0, y: 0 };
+    for (const f of framesOf(doc)) {
+      const r = f.getBoundingClientRect();
+      const s = styleOf(f);
+      o.x += r.left + f.clientLeft + parseFloat(s.paddingLeft);
+      o.y += r.top + f.clientTop + parseFloat(s.paddingTop);
+    }
+    return o;
+  };
+  const shift = (r: DOMRect, doc: Document): DOMRect => {
+    if (doc === document) return r;
+    const o = originOf(doc);
+    return new DOMRect(r.x + o.x, r.y + o.y, r.width, r.height);
+  };
+  const boxOf = (el: Element) => shift(el.getBoundingClientRect(), el.ownerDocument);
+  const mid = (r: DOMRect): XY => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+  const boxesOf = (r: Range) =>
+    [...r.getClientRects()].map((b) => shift(b, docFor(r.startContainer)));
+  /** A mouse event's position in the top page's viewport. */
+  const pointOf = (e: MouseEvent): XY => {
+    const doc = e.view?.document;
+    const o = doc && doc !== document ? originOf(doc) : { x: 0, y: 0 };
+    return { x: e.clientX + o.x, y: e.clientY + o.y };
+  };
+  /** False when a frame around `doc` is hidden or scrolls `at` out of its box. */
+  const seenThrough = (doc: Document, at: XY): boolean => {
+    for (const f of framesOf(doc)) {
+      if (!onScreen(f)) return false;
+      const r = boxOf(f);
+      const left = r.left + f.clientLeft;
+      const top = r.top + f.clientTop;
+      if (at.x < left || at.x > left + f.clientWidth || at.y < top || at.y > top + f.clientHeight)
+        return false;
+    }
+    return true;
+  };
+  /** The top page and every same-origin frame inside it. */
+  const pageDocs = (): Document[] => {
+    const out = [document];
+    for (let i = 0; i < out.length; i++)
+      for (const f of out[i]!.querySelectorAll('iframe, frame')) {
+        const d = frameDoc(f);
+        if (d?.documentElement) out.push(d);
+      }
+    return out;
+  };
+  // ---- homes: the pages that own comments ------------------------------------
+  // The top page, and every same-origin frame whose page carries its own
+  // comments tag. A comment is saved on the site and page of its home.
+  type Win = Window & { brisk?: Brisk };
+  interface Home {
+    readonly site: string;
+    /** pathname + search: what a comment's `page` stores. */
+    readonly page: string;
+    readonly path: string;
+    readonly doc: Document;
+    readonly win: Win;
+  }
+  /** Read live, never cached: the tag sits at the end of the body, so a frame
+   *  still parsing has none yet. */
+  const tagSite = (doc: Document): string | null =>
+    doc.querySelector<HTMLScriptElement>('script[data-brisk-plugin="comments"]')?.dataset
+      .briskSite || null;
+  const topWhere = () => ({ site: SITE, hostname: location.hostname, pathname: location.pathname });
+  const homeAt = (doc: Document, site: string): Home => {
+    const win = doc.defaultView as Win;
+    const path = canonicalPath(win.location.pathname, site, topWhere());
+    return { site, page: path + win.location.search, path, doc, win };
+  };
+  const homeOf = (doc: Document): Home => {
+    for (let d: Document | undefined = doc; d && d !== document; ) {
+      const site = tagSite(d);
+      if (site) return homeAt(d, site);
+      d = d.defaultView?.frameElement?.ownerDocument;
+    }
+    return homeAt(document, SITE);
+  };
+
+  interface View {
+    /** The top page first, then the framed homes; the index is the rank. */
+    readonly homes: readonly Home[];
+    readonly sites: readonly string[];
+    /** Changes when a home appears, leaves, reloads or changes page. */
+    readonly key: string;
+  }
+  const docIds = new WeakMap<Document, number>();
+  let docCount = 0;
+  const docId = (d: Document) => docIds.get(d) ?? (docIds.set(d, ++docCount), docCount);
+  const view = (): View => {
+    const homes = pageDocs().flatMap((d) => {
+      const site = d === document ? SITE : tagSite(d);
+      return site ? [homeAt(d, site)] : [];
+    });
+    return {
+      homes,
+      sites: [...new Set(homes.map((h) => h.site))],
+      key: homes.map((h) => `${docId(h.doc)} ${h.site} ${h.page}`).join('\n'),
+    };
+  };
+  let shown: View = { homes: [], sites: [], key: '' };
+  // Page identity includes the query string — ?tab=billing is a different page
+  // to comment on. Comments saved before this (or via the CLI) may carry a bare
+  // pathname, so those still match anywhere on the path.
+  const shows = (h: Home, t: Pick<Thread, 'site' | 'page'>) =>
+    h.site === t.site && (t.page === h.page || t.page === h.path);
+  const homesOf = (t: Pick<Thread, 'site' | 'page'>) => shown.homes.filter((h) => shows(h, t));
+  const rankOf: RankOf = (t) => shown.homes.findIndex((h) => shows(h, t));
+
+  /** The innermost focused element, through same-origin frames. */
+  const deepActive = (): Element | null => {
+    let el = document.activeElement;
+    for (let d = el && frameDoc(el); d?.activeElement; d = frameDoc(el!)) el = d.activeElement;
+    return el;
+  };
+
   // ---- element anchoring (ported from html-grab) ---------------------------
   function cssPath(el: Element): string {
+    const own = localPath(el);
+    const doc = el.ownerDocument;
+    const frame = doc.defaultView?.frameElement;
+    if (!frame || !own || tagSite(doc)) return own;
+    const outer = cssPath(frame);
+    return outer && outer + FRAME_SEP + own;
+  }
+  function localPath(el: Element): string {
     if (el.id) return `#${CSS.escape(el.id)}`;
-    if (el === document.body) return 'body';
+    const body = el.ownerDocument.body;
+    if (el === body) return 'body';
     const parts: string[] = [];
     let node: Element | null = el;
-    while (node && node.nodeType === 1 && node !== document.body && parts.length < 6) {
+    while (node && node.nodeType === 1 && node !== body && parts.length < 6) {
       if (node.id) {
         parts.unshift(`#${CSS.escape(node.id)}`);
         break;
@@ -309,36 +354,42 @@ type Brisk = {
     toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1800);
   };
 
-  // Page identity includes the query string — ?tab=billing is a different page
-  // to comment on. Comments saved before this (or via the CLI) may carry a bare
-  // pathname, so those still match anywhere on the path.
-  const pageId = () => location.pathname + location.search;
-  const here = (page: string) => page === pageId() || page === location.pathname;
-
   // ---- pick mode ------------------------------------------------------------
   let picking = false;
   const setPick = (on: boolean) => {
     picking = on;
     snapshot = null;
-    if (on) closeBar();
+    if (on) {
+      wire();
+      closeBar();
+    }
     hi.style.display = 'none';
     const b = fab.querySelector<HTMLElement>('[data-act="pick"]')!;
     b.classList.toggle('on', on);
     b.setAttribute('data-tip', on ? 'Cancel (Esc)' : 'New comment');
     if (panel.open) renderPanel();
   };
-  const elAt = (x: number, y: number): Element | null => {
-    const el = document.elementFromPoint(x, y);
-    return !el || el === host || host.contains(el) ? null : el;
+  const elAt = ({ x, y }: XY): Element | null => {
+    let el = document.elementFromPoint(x, y);
+    if (!el || el === host || host.contains(el)) return null;
+    for (let d = frameDoc(el); d; d = frameDoc(el)) {
+      // Its tag, and so its owner, is not known until the page has parsed.
+      if (d.readyState === 'loading') break;
+      const o = originOf(d);
+      const inner = d.elementFromPoint(x - o.x, y - o.y);
+      if (!inner) break;
+      el = inner;
+    }
+    return el;
   };
   const onMove = (e: MouseEvent) => {
     if (!picking) return;
-    const el = elAt(e.clientX, e.clientY);
+    const el = elAt(pointOf(e));
     if (!el) {
       hi.style.display = 'none';
       return;
     }
-    const r = el.getBoundingClientRect();
+    const r = boxOf(el);
     Object.assign(hi.style, {
       display: 'block',
       left: `${r.left}px`,
@@ -355,6 +406,8 @@ type Brisk = {
     el: Element;
     anchor: Anchor;
     range: Range | null;
+    /** Taken at capture: where the comment will be saved. */
+    home: Home;
   }
 
   const SKIP_TEXT = new Set(['script', 'style', 'noscript', 'template']);
@@ -371,7 +424,7 @@ type Brisk = {
   );
   /** Walks text nodes and `<br>` elements. */
   const textWalker = (root: Node) =>
-    document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, textFilter);
+    docFor(root).createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, textFilter);
 
   /** Says, text node by text node, whether the markup breaks the line before it.
    *  Tags, not computed styles, so a quote reads the same at every width. */
@@ -381,7 +434,8 @@ type Brisk = {
       const p = t.parentElement;
       if (!blocks.has(p)) {
         let el = p;
-        while (el && el !== document.body && !BLOCK_TAGS.has(el.localName)) el = el.parentElement;
+        while (el && el !== t.ownerDocument.body && !BLOCK_TAGS.has(el.localName))
+          el = el.parentElement;
         blocks.set(p, el);
       }
       return blocks.get(p)!;
@@ -426,16 +480,18 @@ type Brisk = {
     };
   }
 
-  const liveRange = (): Range | null => {
-    const sel = document.getSelection();
+  /** The selection in `doc`, else in the document that has focus. */
+  const liveRange = (doc?: Document | null): Range | null => {
+    const sel = (doc ?? deepActive()?.ownerDocument ?? document).getSelection();
     if (!sel || !sel.rangeCount || sel.isCollapsed) return null;
     const r = sel.getRangeAt(0);
     return host.contains(r.startContainer) || host.contains(r.endContainer) ? null : r;
   };
+  const unselect = (r: Range) => docFor(r.startContainer).getSelection()?.removeAllRanges();
 
   const blockAncestor = (node: Node): Element | null => {
-    let el = node instanceof Element ? node : node.parentElement;
-    while (el && el !== document.body && /^(inline|contents)$/.test(getComputedStyle(el).display))
+    let el = node.nodeType === Node.ELEMENT_NODE ? (node as Element) : node.parentElement;
+    while (el && el !== el.ownerDocument.body && /^(inline|contents)$/.test(styleOf(el).display))
       el = el.parentElement;
     return el;
   };
@@ -443,14 +499,14 @@ type Brisk = {
   function flatAt(nodes: Text[], flat: FlatText, container: Node, offset: number): number {
     const k = nodes.indexOf(container as Text);
     if (k >= 0) return flat.toFlat(k, offset);
-    const probe = document.createRange();
+    const probe = docFor(container).createRange();
     probe.setStart(container, offset);
     const next = nodes.findIndex((t) => probe.comparePoint(t, 0) >= 0);
     return next >= 0 ? flat.toFlat(next, 0) : flat.text.length;
   }
 
   const fractionIn = (el: Element, x: number, y: number) => {
-    const r = el.getBoundingClientRect();
+    const r = boxOf(el);
     if (!r.width || !r.height) return null;
     const f = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 1e4) / 1e4;
     return { x: f((x - r.left) / r.width), y: f((y - r.top) / r.height) };
@@ -472,6 +528,7 @@ type Brisk = {
       el: scope,
       anchor: { kind: 'text', selector, quote, point: fractionIn(scope, x, y) },
       range: range.cloneRange(),
+      home: homeOf(scope.ownerDocument),
     };
   }
   const elementAt = (el: Element, x: number, y: number): Capture => {
@@ -479,14 +536,18 @@ type Brisk = {
     const anchor: Anchor = selector
       ? { kind: 'element', selector, point: fractionIn(el, x, y) }
       : { kind: 'page' };
-    return { el, anchor, range: null };
+    return { el, anchor, range: null, home: homeOf(el.ownerDocument) };
   };
 
   function caretAfter(range: Range): XY | null {
     const end = range.cloneRange();
     end.collapse(false);
-    const caret = end.getClientRects()[0];
-    const r = caret?.height ? caret : [...range.getClientRects()].filter((b) => b.height).pop();
+    const caret = boxesOf(end)[0];
+    const r = caret?.height
+      ? caret
+      : boxesOf(range)
+          .filter((b) => b.height)
+          .pop();
     return r ? { x: r.right, y: r.top } : null;
   }
 
@@ -504,16 +565,19 @@ type Brisk = {
     pressing = true;
     swallowClick = false;
     snapshot =
-      picking && !e.composedPath().includes(host) ? (liveRange()?.cloneRange() ?? null) : null;
+      picking && !e.composedPath().includes(host)
+        ? (liveRange(e.view?.document)?.cloneRange() ?? null)
+        : null;
   };
   const onUp = (e: MouseEvent) => {
     pressing = false;
     checkSelection();
     if (!picking) return;
-    const el = elAt(e.clientX, e.clientY);
-    const range = liveRange();
-    const hit = el && range?.intersectsNode(el) ? quoteAt(range, e.clientX, e.clientY) : null;
-    if (hit && startCompose(hit, e.clientX, e.clientY)) swallowClick = true;
+    const at = pointOf(e);
+    const el = elAt(at);
+    const range = liveRange(el?.ownerDocument);
+    const hit = el && range?.intersectsNode(el) ? quoteAt(range, at.x, at.y) : null;
+    if (hit && startCompose(hit, at.x, at.y)) swallowClick = true;
   };
   const onClick = (e: MouseEvent) => {
     if (swallowClick) {
@@ -523,16 +587,16 @@ type Brisk = {
       return;
     }
     if (!picking) return;
-    const el = elAt(e.clientX, e.clientY);
+    const at = pointOf(e);
+    const el = elAt(at);
     if (!el) return;
     e.preventDefault();
     e.stopPropagation();
-    const range = liveRange() ?? snapshot;
+    const range = liveRange(el.ownerDocument) ?? snapshot;
     snapshot = null;
     const hit =
-      (range?.intersectsNode(el) && quoteAt(range, e.clientX, e.clientY)) ||
-      elementAt(el, e.clientX, e.clientY);
-    startCompose(hit, e.clientX, e.clientY);
+      (range?.intersectsNode(el) && quoteAt(range, at.x, at.y)) || elementAt(el, at.x, at.y);
+    startCompose(hit, at.x, at.y);
   };
   const pickOrQuote = () => {
     const range = picking ? null : liveRange();
@@ -549,7 +613,9 @@ type Brisk = {
   let bar: Bar = { kind: 'closed' };
   const coarse = matchMedia('(pointer: coarse)');
   const lastLine = (r: Range) =>
-    [...r.getClientRects()].filter((b) => b.width || b.height).pop() ?? null;
+    boxesOf(r)
+      .filter((b) => b.width || b.height)
+      .pop() ?? null;
 
   function closeBar() {
     if (bar.kind === 'closed') return;
@@ -559,7 +625,13 @@ type Brisk = {
   function placeBar() {
     if (bar.kind === 'closed') return;
     const box = bar.kind === 'target' ? bar.from : lastLine(bar.range);
-    if (!box || box.bottom < 0 || box.top > innerHeight) return closeBar();
+    if (
+      !box ||
+      box.bottom < 0 ||
+      box.top > innerHeight ||
+      (bar.kind === 'selection' && !seenThrough(docFor(bar.range.startContainer), mid(box)))
+    )
+      return closeBar();
     const w = qbar.offsetWidth;
     const h = qbar.offsetHeight;
     const right = innerWidth - (bar.kind === 'selection' && docked ? PANEL_W : 0);
@@ -587,13 +659,16 @@ type Brisk = {
     if (hidden || collapsed || picking) return null;
     const range = liveRange();
     if (!range || !range.toString().trim()) return null;
-    const active = document.activeElement as HTMLElement | null;
+    const active = deepActive() as HTMLElement | null;
     if (active?.matches(EDITABLE) || active?.isContentEditable) return null;
     const node = range.commonAncestorContainer;
-    const el = (node instanceof Element ? node : node.parentElement) as HTMLElement | null;
+    const el = (
+      node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement
+    ) as HTMLElement | null;
     return !el || el.closest(EDITABLE) || el.isContentEditable ? null : range;
   }
   const sameRange = (a: Range, b: Range) =>
+    docFor(a.startContainer) === docFor(b.startContainer) &&
     a.compareBoundaryPoints(Range.START_TO_START, b) === 0 &&
     a.compareBoundaryPoints(Range.END_TO_END, b) === 0;
   let pressing = false;
@@ -613,12 +688,12 @@ type Brisk = {
     const end = caretAfter(range);
     const hit = end && quoteAt(range, end.x, end.y);
     if (!hit) return toast('Could not quote that selection');
-    document.getSelection()?.removeAllRanges();
+    unselect(range);
     try {
-      await action('create', {
+      await on(hit.home).act('create', {
         text: '',
         reaction: emoji,
-        page: pageId(),
+        page: hit.home.page,
         ...anchorFields(hit.anchor),
         ...elementFields(hit.el),
       });
@@ -637,8 +712,8 @@ type Brisk = {
     if ((mine && how === 'add') || reacting.has(k)) return;
     reacting.add(k);
     try {
-      if (mine) await action('delete', { id: mine });
-      else await action('react', { id: to, emoji });
+      if (mine) await on(t).act('delete', { id: mine });
+      else await on(t).act('react', { id: to, emoji });
     } catch {
       toast(mine ? 'Could not remove the reaction' : 'Could not add the reaction');
     } finally {
@@ -710,7 +785,7 @@ type Brisk = {
   }
 
   function openCompose(
-    { el, anchor, range }: Capture,
+    { el, anchor, range, home }: Capture,
     x: number,
     y: number,
     after: 'keep-picking' | 'done',
@@ -725,7 +800,7 @@ type Brisk = {
     );
     if (!opened) return false;
     if (range) {
-      document.getSelection()?.removeAllRanges();
+      unselect(range);
       pendingRange = range;
       paint();
     }
@@ -738,10 +813,10 @@ type Brisk = {
         ta.focus();
         return;
       }
-      drafts.push({
+      on(home).saveDraft({
         id: `d-${Date.now().toString(36)}-${Math.floor(performance.now())}`,
         text,
-        page: pageId(),
+        page: home.page,
         ...anchorFields(anchor),
         ...elementFields(el),
         dataAttrs: clean(
@@ -753,7 +828,6 @@ type Brisk = {
         ),
         createdAt: new Date().toISOString(),
       });
-      saveDrafts();
       closePop();
       render();
       if (after === 'done') {
@@ -778,7 +852,8 @@ type Brisk = {
     lost: anchorLost(t.id),
     me: me.email,
     surface,
-    elsewhere: here(t.page) ? '' : t.page,
+    elsewhere: rankOf(t) >= 0 ? '' : t.page,
+    site: t.site === SITE ? '' : t.site,
   });
 
   function openThreadPop(t: Thread, at: DOMRect) {
@@ -799,7 +874,7 @@ type Brisk = {
     const newList = container.querySelector('.list');
     if (newList) newList.scrollTop = scroll;
     for (const ta of container.querySelectorAll<HTMLTextAreaElement>('textarea[data-keep]')) {
-      const draft = drafts.find((d) => d.id === ta.dataset.draft);
+      const draft = draftById(ta.dataset.draft);
       if (draft) ta.defaultValue = draft.text;
       ta.value = buffers.get(ta.dataset.keep!) ?? draft?.text ?? '';
       const send = ta.parentElement?.querySelector<HTMLButtonElement>('.send');
@@ -815,9 +890,10 @@ type Brisk = {
   async function sendReply(id: string) {
     const k = `reply:${id}`;
     const text = (buffers.get(k) ?? '').trim();
-    if (!text) return;
+    const t = threadById(id);
+    if (!text || !t) return;
     try {
-      await action('reply', { id, text });
+      await on(t).act('reply', { id, text });
       buffers.delete(k);
       render();
     } catch {
@@ -826,8 +902,10 @@ type Brisk = {
   }
 
   async function setStatus(id: string, to: 'resolve' | 'reopen') {
+    const t = threadById(id);
+    if (!t) return;
     try {
-      await action(to, { id });
+      await on(t).act(to, { id });
       if (to === 'resolve' && panel.expanded?.id === id) panel.expanded = null;
       toast(to === 'resolve' ? 'Resolved' : 'Reopened');
       render();
@@ -836,10 +914,11 @@ type Brisk = {
     }
   }
 
-  async function deleteThread(id: string) {
+  async function deleteThread(t: Thread) {
+    const { id } = t;
     armed = null;
     try {
-      await action('delete', { id });
+      await on(t).act('delete', { id });
       if (panel.expanded?.id === id) panel.expanded = null;
       if (popThread?.id === id) closePop();
       toast('Deleted');
@@ -850,9 +929,9 @@ type Brisk = {
     }
   }
 
-  function discardDraft(id: string) {
-    drafts = drafts.filter((d) => d.id !== id);
-    saveDrafts();
+  function discardDraft(t: Thread) {
+    const { id } = t;
+    on(t).dropDrafts([id]);
     buffers.delete(`draft:${id}`);
     armed = null;
     if (panel.expanded?.id === id) panel.expanded = null;
@@ -862,31 +941,23 @@ type Brisk = {
   }
 
   function saveDraftEdit(id: string): boolean {
-    const d = drafts.find((x) => x.id === id);
+    const t = threadById(id);
+    const d = t && draftById(id);
     const text = buffers.get(`draft:${id}`)?.trim();
-    if (!d || text === undefined) return !!d;
+    if (!t || !d || text === undefined) return !!d;
     if (!text) return false;
-    d.text = text;
-    saveDrafts();
+    on(t).saveDraft({ ...d, text });
     buffers.delete(`draft:${id}`);
     return true;
   }
 
   async function publishDraft(id: string): Promise<boolean> {
     if (!saveDraftEdit(id)) return false;
-    const d = drafts.find((x) => x.id === id);
-    if (!d) return true; // already gone — nothing left to publish
+    const t = threadById(id);
+    if (!t) return true; // already gone — nothing left to publish
     try {
-      const doc = await action('create', {
-        text: d.text,
-        page: d.page,
-        ...anchorFields(anchorOfRecord(d)),
-        label: d.label,
-        textSnippet: d.textSnippet,
-        html: d.html,
-      });
-      drafts = drafts.filter((x) => x.id !== id);
-      saveDrafts();
+      const doc = await on(t).publish(id);
+      if (!doc) return true;
       if (panel.expanded?.id === id)
         panel.expanded = { id: doc.id, since: undefined, wasUnread: false };
       if (popThread?.id === id) closePop();
@@ -901,7 +972,7 @@ type Brisk = {
   async function publishAll(): Promise<void> {
     let ok = 0,
       failed = 0;
-    for (const d of [...drafts]) (await publishDraft(d.id)) ? ok++ : failed++;
+    for (const d of allDrafts()) (await publishDraft(d.id)) ? ok++ : failed++;
     toast(
       failed
         ? `Published ${ok} of ${ok + failed}. The failed drafts are kept.`
@@ -911,20 +982,34 @@ type Brisk = {
 
   // ---- markdown export ------------------------------------------------------
   function draftsMarkdown(): string {
-    let out = `# comment drafts on ${SITE}\n`;
-    for (const d of drafts) {
-      out += `\n## ${d.text}\n- page: \`${d.page}\`\n`;
-      for (const line of anchorLines(anchorOfRecord(d))) out += `${line}\n`;
-      if (d.textSnippet) out += `- text: "${d.textSnippet}"\n`;
-      if (d.dataAttrs) out += `- data: \`${d.dataAttrs}\`\n`;
+    const parts: string[] = [];
+    for (const site of shown.sites) {
+      const drafts = on({ site }).drafts();
+      if (!drafts.length) continue;
+      let out = `# comment drafts on ${site}\n`;
+      for (const d of drafts) {
+        out += `\n## ${d.text}\n- page: \`${d.page}\`\n`;
+        for (const line of anchorLines(anchorOfRecord(d))) out += `${line}\n`;
+        if (d.textSnippet) out += `- text: "${d.textSnippet}"\n`;
+        if (d.dataAttrs) out += `- data: \`${d.dataAttrs}\`\n`;
+      }
+      parts.push(out);
     }
-    return out;
+    return parts.join('\n');
   }
 
-  /** The whole log, drafts and published, with replies and reactions. The
-   *  widget twin of `brisk plugin comments export`. */
+  /** The whole log, drafts and published, with replies and reactions. One
+   *  section per site in view, each the twin of `brisk plugin comments export`. */
   const commentsMarkdown = () =>
-    `# comments on ${SITE}\n${threads.map((t) => `\n${threadMarkdown(t)}\n`).join('')}`;
+    shown.sites
+      .map(
+        (site) =>
+          `# comments on ${site}\n${threads
+            .filter((t) => t.site === site)
+            .map((t) => `\n${threadMarkdown(t)}\n`)
+            .join('')}`,
+      )
+      .join('\n');
 
   // Clipboard writes reject on denied permission or an insecure context — fall
   // back to downloading the file so the export is never silently lost.
@@ -944,12 +1029,18 @@ type Brisk = {
       },
     );
 
-  const findTarget = (selector: string): Element | null => {
+  const findTarget = (from: Document, selector: string): Element | null => {
+    let el: Element | null = null;
+    let doc: Document | null = from;
     try {
-      return selector ? document.querySelector(selector) : null;
+      for (const part of selector.split(FRAME_SEP)) {
+        el = doc?.querySelector(part) ?? null;
+        doc = el && frameDoc(el);
+      }
     } catch {
       return null; // invalid selector
     }
+    return el;
   };
   /** A hidden element keeps its box: a deck stacks every slide at inset:0 and
    *  hides all but one with visibility/opacity, so its comments would otherwise
@@ -971,7 +1062,7 @@ type Brisk = {
   };
 
   type Placement =
-    | { kind: 'page' }
+    | { kind: 'page'; at: XY }
     | { kind: 'detached' }
     | { kind: 'hidden' }
     | { kind: 'text'; range: Range; at: XY }
@@ -1061,40 +1152,58 @@ type Brisk = {
     if (!hit) return null;
     const s = flat.toRaw(hit.start, 'start');
     const e = flat.toRaw(hit.end, 'end');
-    c.range = document.createRange();
+    c.range = scope.ownerDocument.createRange();
     c.range.setStart(nodes[s.chunk]!, s.offset);
     c.range.setEnd(nodes[e.chunk]!, e.offset);
     return c.range;
   }
 
+  const PAGE_CORNER = { x: 12, y: 34 };
+  /** A framed page's whole-page comments pin at the frame's corner and hide with it. */
+  function pageCorner(h: Home): Placement {
+    if (h.doc === document) return { kind: 'page', at: PAGE_CORNER };
+    const o = originOf(h.doc);
+    const at = { x: o.x + PAGE_CORNER.x, y: o.y + PAGE_CORNER.y };
+    return seenThrough(h.doc, at) ? { kind: 'page', at } : { kind: 'hidden' };
+  }
+  /** A page can be on screen more than once (two tabs, one hidden): the first
+   *  mount that shows the target wins. */
   function place(t: Thread): Placement {
-    const a = t.anchor;
-    if (a.kind === 'page') return { kind: 'page' };
-    const el = findTarget(a.selector);
-    if (!el) {
-      textCache.delete(t.id);
-      return { kind: 'detached' };
+    let resolved = false;
+    for (const h of homesOf(t)) {
+      const p = placeIn(t, h);
+      if (p.kind !== 'hidden' && p.kind !== 'detached') return p;
+      resolved ||= p.kind === 'hidden';
     }
+    if (resolved || !homesOf(t).length) return { kind: 'hidden' };
+    textCache.delete(t.id);
+    return { kind: 'detached' };
+  }
+  function placeIn(t: Thread, h: Home): Placement {
+    const a = t.anchor;
+    if (a.kind === 'page') return pageCorner(h);
+    const el = findTarget(h.doc, a.selector);
+    if (!el) return { kind: 'detached' };
     if (!onScreen(el)) return { kind: 'hidden' };
+    const seen = (at: XY) => seenThrough(el.ownerDocument, at);
     if (a.kind === 'text') {
       const range = quoteRange(t.id, el, a.quote);
       if (range) {
         const end = caretAfter(range);
-        return end
-          ? { kind: 'text', range, at: { x: end.x - 4, y: end.y + 3 } }
-          : { kind: 'hidden' };
+        const at = end && { x: end.x - 4, y: end.y + 3 };
+        return at && seen(at) ? { kind: 'text', range, at } : { kind: 'hidden' };
       }
     }
-    const r = el.getBoundingClientRect();
+    const r = boxOf(el);
     const at = a.point
       ? { x: r.left + a.point.x * r.width, y: r.top + a.point.y * r.height }
       : { x: r.right - 11, y: r.top + 11 };
-    return { kind: 'element', at };
+    return seen(at) ? { kind: 'element', at } : { kind: 'hidden' };
   }
   const applyPin = (pin: HTMLElement, p: Placement) => {
     pin.classList.toggle('detached', p.kind === 'detached');
     pin.style.display = p.kind === 'hidden' ? 'none' : '';
-    const at = p.kind === 'text' || p.kind === 'element' ? p.at : { x: 12, y: 34 };
+    const at = p.kind === 'hidden' || p.kind === 'detached' ? PAGE_CORNER : p.at;
     pin.style.left = `${at.x}px`;
     pin.style.top = `${at.y}px`;
   };
@@ -1104,7 +1213,7 @@ type Brisk = {
   function renderPins() {
     const next = new Map<string, Slot>();
     for (const t of threads) {
-      if (!here(t.page) || !pinShown(t, panel.filter)) continue;
+      if (rankOf(t) < 0 || !pinShown(t, panel.filter)) continue;
       let s = slots.get(t.id);
       if (!s) {
         const pin = document.createElement('button');
@@ -1125,7 +1234,7 @@ type Brisk = {
         .filter(Boolean)
         .join(' ');
       pin.textContent = t.reaction ?? String(t.num);
-      pin.title = `#${t.num} · ${t.author}${t.reaction ? ` reacted ${t.reaction}` : ` · ${clean(t.text, 60)}`}`;
+      pin.title = `${t.site === SITE ? '' : `${t.site} `}#${t.num} · ${t.author}${t.reaction ? ` reacted ${t.reaction}` : ` · ${clean(t.text, 60)}`}`;
       const kind = t.reaction ? `reaction ${t.reaction}` : 'comment';
       pin.setAttribute(
         'aria-label',
@@ -1150,14 +1259,25 @@ type Brisk = {
     setTimeout(() => pin.classList.remove('flash'), 1900);
   };
 
+  const targetOf = (t: Thread): Element | null => {
+    const a = t.anchor;
+    if (a.kind === 'page') return null;
+    const found = homesOf(t).flatMap((h) => findTarget(h.doc, a.selector) ?? []);
+    return found.find(onScreen) ?? found[0] ?? null;
+  };
   function revealOnPage(t: Thread) {
     const s = slots.get(t.id);
-    const target = t.anchor.kind === 'page' ? null : findTarget(t.anchor.selector);
+    const target = targetOf(t);
     const box =
       s?.placement.kind === 'text'
-        ? s.placement.range.getBoundingClientRect()
-        : target?.getBoundingClientRect();
-    const off = box && (box.bottom < 0 || box.top > innerHeight);
+        ? shift(s.placement.range.getBoundingClientRect(), docFor(s.placement.range.startContainer))
+        : target && boxOf(target);
+    const off =
+      box &&
+      (box.bottom < 0 ||
+        box.top > innerHeight ||
+        s?.placement.kind === 'hidden' ||
+        (target && !seenThrough(target.ownerDocument, mid(box))));
     if (off && target)
       target.scrollIntoView({
         block: 'center',
@@ -1166,49 +1286,66 @@ type Brisk = {
     setTimeout(() => flash(t.id), off ? 450 : 0);
   }
 
-  let marks: { all: Highlight; focus: Highlight; sheet: CSSStyleSheet } | null = null;
-  try {
-    if (CSS.highlights && typeof Highlight === 'function') {
-      const sheet = new CSSStyleSheet();
-      sheet.replaceSync(HIGHLIGHT_CSS);
-      marks = { all: new Highlight(), focus: new Highlight(), sheet };
+  type Marks = { all: Highlight; focus: Highlight; sheet: CSSStyleSheet };
+  /** Highlights and their sheet belong to one window, so each frame gets its own. */
+  const markSets = new WeakMap<Document, Marks | null>();
+  function marksIn(doc: Document): Marks | null {
+    if (markSets.has(doc)) return markSets.get(doc)!;
+    let m: Marks | null = null;
+    try {
+      const w = doc.defaultView as (Window & typeof globalThis) | null;
+      if (w?.CSS.highlights && typeof w.Highlight === 'function') {
+        const sheet = new w.CSSStyleSheet();
+        sheet.replaceSync(HIGHLIGHT_CSS);
+        m = { all: new w.Highlight(), focus: new w.Highlight(), sheet };
+      }
+    } catch (err) {
+      console.warn('[comments] highlights unavailable:', err);
     }
-  } catch (err) {
-    console.warn('[comments] highlights unavailable:', err);
+    markSets.set(doc, m);
+    return m;
   }
   let pendingRange: Range | null = null;
 
   function paint() {
-    if (!marks) return;
-    try {
-      const { all, focus, sheet } = marks;
-      // A page may replace these wholesale; put ours back.
-      if (!document.adoptedStyleSheets.includes(sheet))
-        document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
-      if (CSS.highlights.get('brisk-comment') !== all) CSS.highlights.set('brisk-comment', all);
-      if (CSS.highlights.get('brisk-comment-focus') !== focus)
-        CSS.highlights.set('brisk-comment-focus', focus);
-      all.clear();
-      focus.clear();
-      if (hidden || collapsed) return;
-      if (pendingRange) focus.add(pendingRange);
-      if (pinsHidden) return;
-      const focused = focusedId();
-      for (const s of slots.values()) {
-        if (s.placement.kind !== 'text' || s.thread.status !== 'open') continue;
-        (s.thread.id === focused ? focus : all).add(s.placement.range);
+    const live = new Map<Document, Marks>();
+    for (const doc of pageDocs()) {
+      const m = marksIn(doc);
+      if (!m) continue;
+      try {
+        const { all, focus, sheet } = m;
+        const highlights = (doc.defaultView as Window & typeof globalThis).CSS.highlights;
+        // A page may replace these wholesale; put ours back.
+        if (!doc.adoptedStyleSheets.includes(sheet))
+          doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, sheet];
+        if (highlights.get('brisk-comment') !== all) highlights.set('brisk-comment', all);
+        if (highlights.get('brisk-comment-focus') !== focus)
+          highlights.set('brisk-comment-focus', focus);
+        all.clear();
+        focus.clear();
+        live.set(doc, m);
+      } catch (err) {
+        markSets.set(doc, null);
+        console.warn('[comments] highlights disabled:', err);
       }
-    } catch (err) {
-      marks = null;
-      console.warn('[comments] highlights disabled:', err);
+    }
+    const add = (r: Range, which: 'all' | 'focus') =>
+      live.get(docFor(r.startContainer))?.[which].add(r);
+    if (hidden || collapsed) return;
+    if (pendingRange) add(pendingRange, 'focus');
+    if (pinsHidden) return;
+    const focused = focusedId();
+    for (const s of slots.values()) {
+      if (s.placement.kind !== 'text' || s.thread.status !== 'open') continue;
+      add(s.placement.range, s.thread.id === focused ? 'focus' : 'all');
     }
   }
 
   // ---- render -----------------------------------------------------------------
   function render() {
-    const seen = { ...serverSeen, ...Object.fromEntries(pendingSeen) };
-    threads = buildThreads({ drafts, docs: published, seen, me: me.email });
-    if (!seenReady) for (const t of threads) t.unread = false;
+    shown = view();
+    syncSites(shown);
+    threads = shown.sites.flatMap((site) => on({ site }).threads());
     if (panel.expanded && !threadById(panel.expanded.id)) panel.expanded = null;
     renderPins();
     paint();
@@ -1221,34 +1358,54 @@ type Brisk = {
     updateBadges();
     for (const id of [popThread?.id, panel.open ? panel.expanded?.id : undefined]) {
       const t = threadById(id);
-      if (t?.unread && !pendingSeen.has(t.id)) markRead(t.id);
+      if (t?.unread) markRead(t.id);
     }
   }
 
-  /** Scroll/resize path: move the existing pins, coalesced to one rAF. */
+  let inView = new Set<string>();
+  /** Gives each site in view its SiteComments, with realtime from the first page
+   *  of that site that loaded /brisk.js. */
+  function syncSites(v: View) {
+    for (const site of v.sites) {
+      const known = sites.has(site);
+      const s = on({ site });
+      const sdk = v.homes.find((h) => h.site === site && h.win.brisk)?.win.brisk ?? null;
+      // Back in view after its frame left: catch up. A new realtime source re-reads by itself.
+      if (known && !inView.has(site) && !sdk) void s.refresh();
+      s.listen(sdk);
+    }
+    for (const site of inView) if (!v.sites.includes(site)) sites.get(site)?.listen(null);
+    inView = new Set(v.sites);
+  }
+
+  /** Scroll/resize path: move the existing pins, coalesced to one rAF. A changed
+   *  view (a frame came, went or navigated) renders instead. */
   let repositionQueued = false;
   const scheduleReposition = () => {
     if (repositionQueued) return;
     repositionQueued = true;
     requestAnimationFrame(() => {
       repositionQueued = false;
-      for (const s of slots.values()) {
-        s.placement = place(s.thread);
-        applyPin(s.pin, s.placement);
-      }
+      wire();
+      if (view().key !== shown.key) render();
+      else
+        for (const s of slots.values()) {
+          s.placement = place(s.thread);
+          applyPin(s.pin, s.placement);
+        }
       if (bar.kind === 'selection') placeBar();
       paint();
     });
   };
 
   function renderPanel() {
-    const view = panelView(threads, panel, here);
+    const view = panelView(threads, panel, rankOf);
     redraw(
       panelEl,
       panelHtml(view, panel, {
         site: SITE,
         picking,
-        drafts: drafts.length,
+        drafts: allDrafts().length,
         thread: (t) => threadOpts(t, 'panel'),
       }),
     );
@@ -1287,7 +1444,7 @@ type Brisk = {
     const t = threadById(id);
     if (!t) return;
     if (t.kind === 'published' && !matches(t, panel.filter, null)) setFilter(t.status);
-    if (panel.scope === 'page' && !here(t.page)) {
+    if (panel.scope === 'page' && rankOf(t) < 0) {
       panel.scope = 'site';
       remember('scope', 'site');
     }
@@ -1358,7 +1515,7 @@ type Brisk = {
 
   const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
   const commandItems = (fromPanel: boolean) => (): MenuItem[] => {
-    const n = drafts.length;
+    const n = allDrafts().length;
     return [
       ...(fromPanel
         ? []
@@ -1391,9 +1548,9 @@ type Brisk = {
       { act: 'hide', label: 'Hide until Shift+C', icon: 'hide' },
     ];
   };
-  const commandHead = () => menuHead(SITE, threads);
+  const commandHead = () => menuHead(shown.sites.join(' + '), threads);
   const statusItems = (): MenuItem[] => {
-    const counts = panelView(threads, panel, here).filterCounts;
+    const counts = panelView(threads, panel, rankOf).filterCounts;
     return (['resolved', 'deleted'] as const).map((f) => ({
       act: 'filter',
       v: f,
@@ -1408,7 +1565,7 @@ type Brisk = {
   // Minimize collapses to a small bubble that's always visible — click it to
   // reopen. Shift+C fully hides everything (bubble included) for clean shots.
   function updateBadges() {
-    const unread = threads.filter((t) => t.unread && here(t.page)).length;
+    const unread = threads.filter((t) => t.unread && rankOf(t) >= 0).length;
     badge.hidden = unread === 0;
     badge.textContent = String(unread);
     nub.classList.toggle('has', unread > 0);
@@ -1453,9 +1610,10 @@ type Brisk = {
     expand: (el) => {
       const t = threadById(idOf(el));
       if (!t) return;
-      if (t.page && !here(t.page)) {
-        remember('goto', t.id);
-        location.assign(t.page);
+      if (t.page && rankOf(t) < 0) {
+        // The widget on that page reads it under its own site.
+        localStorage.setItem(storageKey(t.site, 'goto'), t.id);
+        location.assign(pageHref(t.page, t.site, topWhere()));
         return;
       }
       expand(t.id);
@@ -1471,7 +1629,8 @@ type Brisk = {
     filter: (el) => setFilter(parseFilter(el.dataset.v ?? null)),
     'status-menu': (el) => toggleMenu(statusItems, el),
     'more-menu': (el) => toggleMenu(commandItems(true), el, commandHead),
-    'goto-page': (el) => location.assign(el.dataset.v ?? '/'),
+    'goto-page': (el) =>
+      location.assign(pageHref(el.dataset.v ?? '/', el.dataset.site ?? SITE, topWhere())),
     close: () => setPanelOpen(false),
     panel: () => setPanelOpen(!panel.open),
     pick: pickOrQuote,
@@ -1494,8 +1653,8 @@ type Brisk = {
     },
     'confirm-delete': (el) => {
       const t = threadById(idOf(el));
-      if (t?.kind === 'draft') discardDraft(t.id);
-      else if (t) void deleteThread(t.id);
+      if (t?.kind === 'draft') discardDraft(t);
+      else if (t) void deleteThread(t);
     },
     reply: (el) => void sendReply(idOf(el)),
     publish: (el) => {
@@ -1512,8 +1671,7 @@ type Brisk = {
     'copy-drafts': () => void clip(`comment-drafts-${SITE}.md`, draftsMarkdown()),
     'publish-all': () => void publishAll(),
     'discard-drafts': () => {
-      drafts = [];
-      saveDrafts();
+      for (const site of shown.sites) on({ site }).dropDrafts('all');
       render();
       toast('Drafts discarded');
     },
@@ -1642,32 +1800,17 @@ type Brisk = {
     }
   };
 
-  document.addEventListener('mousemove', onMove, true);
-  document.addEventListener('mousedown', onDown, true);
-  document.addEventListener('mouseup', onUp, true);
-  document.addEventListener('click', onClick, true);
-  document.addEventListener('keydown', onKey, true);
   const onClickAway = () => {
     if (popHasUnsavedText()) nudge();
     else if (pop.classList.contains('show')) closePop();
     closeMenu();
     closeBar();
   };
-  document.addEventListener('selectionchange', checkSelection);
   for (const scroller of [panelEl, pop])
     scroller.addEventListener('scroll', () => bar.kind === 'target' && closeBar(), true);
-  document.addEventListener('mousedown', onClickAway, false);
-  // Reposition pins on scroll; the popover stays put (it's fixed) so a scrolling
-  // textarea can't dismiss it.
-  addEventListener('scroll', scheduleReposition, true);
-  addEventListener('resize', scheduleReposition, true);
-  // A cross-fade leaves the incoming element at opacity 0 for the length of its
-  // transition, long after the class flip — re-place when the motion lands too.
-  addEventListener('transitionend', scheduleReposition, true);
-  addEventListener('animationend', scheduleReposition, true);
   // Slides, tabs and accordions swap what's on screen with a class or style
   // flip and fire no event of their own — watch the markup so pins follow.
-  new MutationObserver((records) => {
+  const markup = new MutationObserver((records) => {
     let move = false;
     for (const r of records) {
       if (r.type !== 'characterData') move = true;
@@ -1680,25 +1823,62 @@ type Brisk = {
       }
     }
     if (move) scheduleReposition();
-  }).observe(document.documentElement, {
-    subtree: true,
-    childList: true,
-    characterData: true,
-    attributes: true,
-    attributeFilter: ['class', 'style', 'hidden', 'aria-hidden', 'open'],
   });
-  // History-routed navigation changes the page identity — re-filter the pins.
-  addEventListener('popstate', () => render());
+  const wired = new WeakSet<Document>();
+  /** Listens on the top page and on every same-origin frame not yet wired. */
+  function wire() {
+    for (const doc of pageDocs()) {
+      const win = doc.defaultView;
+      if (!win || wired.has(doc)) continue;
+      wired.add(doc);
+      doc.addEventListener('mousemove', onMove, true);
+      doc.addEventListener('mousedown', onDown, true);
+      doc.addEventListener('mouseup', onUp, true);
+      doc.addEventListener('click', onClick, true);
+      doc.addEventListener('keydown', onKey, true);
+      doc.addEventListener('selectionchange', checkSelection);
+      doc.addEventListener('mousedown', onClickAway, false);
+      // A frame's load event does not bubble, but a capture listener sees it.
+      doc.addEventListener('load', onFrameLoad, true);
+      // History-routed navigation changes the page identity — re-filter the pins.
+      win.addEventListener('popstate', onHistory);
+      // Reposition pins on scroll; the popover stays put (it's fixed) so a
+      // scrolling textarea can't dismiss it.
+      win.addEventListener('scroll', scheduleReposition, true);
+      win.addEventListener('resize', scheduleReposition, true);
+      // A cross-fade leaves the incoming element at opacity 0 for the length of
+      // its transition, long after the class flip — re-place when it lands too.
+      win.addEventListener('transitionend', scheduleReposition, true);
+      win.addEventListener('animationend', scheduleReposition, true);
+      markup.observe(doc.documentElement, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+        attributes: true,
+        attributeFilter: ['class', 'style', 'hidden', 'aria-hidden', 'open'],
+      });
+    }
+  }
+  function onFrameLoad(e: Event) {
+    const t = e.target as Element;
+    if (t.nodeType !== Node.ELEMENT_NODE || !frameDoc(t)) return;
+    wire();
+    render();
+  }
+  function onHistory() {
+    render();
+  }
+  wire();
 
   // ---- boot -----------------------------------------------------------------
   const goto = recall('goto');
-  if (goto) localStorage.removeItem(key('goto'));
+  if (goto) localStorage.removeItem(storageKey(SITE, 'goto'));
   panelEl.classList.toggle('open', panel.open);
   layer.classList.toggle('panel-open', panel.open);
   applyHidden();
   applyCollapsed();
   render();
-  void refreshPublished().then(() => {
+  void on({ site: SITE }).loaded.then(() => {
     const t = threadById(goto ?? '');
     if (!t) return;
     if (!panel.open) setPanelOpen(true);

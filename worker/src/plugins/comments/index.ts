@@ -319,7 +319,7 @@ async function list(ctx: PluginActionCtx, args: Record<string, string>): Promise
 
 async function siteThreads(store: DocStore, site: string): Promise<Thread[]> {
   const docs = await store.list(site, COMMENTS, { limit: 500, sort: '-created' });
-  return buildThreads({ drafts: [], docs, seen: {}, me: '' });
+  return buildThreads({ site, drafts: [], docs, seen: {}, me: '' });
 }
 
 async function show(ctx: PluginActionCtx, args: Record<string, string>): Promise<string> {

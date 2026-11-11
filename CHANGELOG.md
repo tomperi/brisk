@@ -76,12 +76,21 @@ releases are published to
 
 ### Fixed
 
+- **Comments** — the comment and reply boxes show one focus ring. They used to
+  show two, the box's own and a second outline on the text inside it.
 - **Comments** — a half-typed comment no longer vanishes on a stray click: the
   popover shakes and keeps your text until you save or cancel.
 - **Comments** — a site shown in a frame on another page no longer brings its
   own toolbar and panel, so a Brisk site that frames another one shows the
-  comments widget once. The widget runs only on the top page; open a framed
-  site on its own to comment on it.
+  comments widget once. The widget runs only on the top page.
+- **Comments** — you can comment on content inside a same-origin frame, such as
+  a page that shows each tab in an iframe. A comment on a framed Brisk page is
+  saved on that page's own site and page, so it shows when you open the page on
+  its own too, at its `/s/<site>/` address or on its subdomain, and the page
+  around the frame shows it with its own comments. A frame without comments of
+  its own keeps its comments on the page around it. Before, only the top page
+  outside the frames took comments, and Esc did not leave comment mode after you
+  clicked into a frame.
 - **Comments** — the header of the ⋯ and right-click menus counts only published
   threads as open. It used to count your unpublished drafts too, so it said
   "2 open" on a page where nothing was published yet.

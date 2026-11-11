@@ -51,6 +51,8 @@ export interface Reply {
 
 export interface Thread {
   id: string;
+  /** The site that stores the thread: every write about it goes there. */
+  site: string;
   kind: 'draft' | 'published';
   page: string;
   anchor: Anchor;
@@ -68,6 +70,7 @@ export interface Thread {
   reactions: Reaction[];
   unread: boolean;
   seenAt: string | undefined;
+  /** 1..n within `site`, the number `brisk plugin comments export <site>` prints. */
   num: number;
 }
 
@@ -87,6 +90,24 @@ export interface PanelState {
 export const parseScope = (raw: string | null): Scope => (raw === 'site' ? 'site' : 'page');
 export const parseFilter = (raw: string | null): Filter =>
   (FILTERS as readonly (string | null)[]).includes(raw) ? (raw as Filter) : 'open';
+
+type Where = { readonly site: string; readonly hostname: string; readonly pathname: string };
+/** The apex (`home`) can't tell subdomain mode from path mode, so it counts as path mode. */
+const onSubdomain = (top: Where) =>
+  top.site !== 'home' &&
+  top.hostname.startsWith(`${top.site}.`) &&
+  !top.pathname.startsWith(`/s/${top.site}/`);
+/** The path a page of `site` has at its own canonical URL. A top page on its
+ *  site's subdomain frames other sites only through `/s/<site>/`. */
+export function canonicalPath(pathname: string, site: string, top: Where): string {
+  const prefix = `/s/${site}/`;
+  return onSubdomain(top) && pathname.startsWith(prefix)
+    ? pathname.slice(prefix.length - 1)
+    : pathname;
+}
+/** Where to navigate, from `top`, to a page of `site`: the inverse of canonicalPath. */
+export const pageHref = (page: string, site: string, top: Where): string =>
+  onSubdomain(top) && site !== top.site ? `/s/${site}${page}` : page;
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 const later = (a: string, b: string) => (Date.parse(b) > Date.parse(a) ? b : a);
@@ -110,12 +131,13 @@ function groupReactions(docs: readonly StoredDoc[], me: string): Reaction[] {
 }
 
 export function buildThreads(input: {
+  site: string;
   drafts: readonly Draft[];
   docs: readonly StoredDoc[];
   seen: Readonly<Record<string, string>>;
   me: string;
 }): Thread[] {
-  const { drafts, docs, seen, me } = input;
+  const { site, drafts, docs, seen, me } = input;
   const children = new Map<string, StoredDoc[]>();
   for (const d of docs) {
     const parent = str(d.parentId);
@@ -124,6 +146,7 @@ export function buildThreads(input: {
   const threads: Thread[] = [
     ...drafts.map((d) => ({
       id: d.id,
+      site,
       kind: 'draft' as const,
       page: d.page,
       anchor: anchorOfRecord(d),
@@ -159,6 +182,7 @@ export function buildThreads(input: {
         const status = statusOf(d);
         return {
           id: d.id,
+          site,
           kind: 'published' as const,
           page: str(d.page),
           anchor: anchorOfRecord(d),
@@ -217,8 +241,10 @@ export const pinShown = (t: Thread, filter: Filter): boolean =>
   (filter === 'unread' || filter === 'open' ? t.status === 'open' : t.status === filter);
 
 export interface PageGroup {
+  site: string;
   page: string;
-  here: boolean;
+  /** Where the page is on screen: 0 the top page, 1+ a frame, -1 not shown. */
+  rank: number;
   threads: Thread[];
 }
 
@@ -230,13 +256,15 @@ export interface PanelView {
   hiddenUnread: { status: Status; count: number }[];
 }
 
+export type RankOf = (t: Pick<Thread, 'site' | 'page'>) => number;
+
 export function panelView(
   threads: readonly Thread[],
   state: Pick<PanelState, 'scope' | 'filter' | 'expanded'>,
-  isHere: (page: string) => boolean,
+  rankOf: RankOf,
 ): PanelView {
   const { scope, filter, expanded } = state;
-  const inScope = (t: Thread, s: Scope) => s === 'site' || isHere(t.page);
+  const inScope = (t: Thread, s: Scope) => s === 'site' || rankOf(t) >= 0;
   const posted = threads.filter((t) => t.kind === 'published');
   const count = (pred: (t: Thread) => boolean) => posted.filter(pred).length;
   const shown = posted
@@ -248,13 +276,15 @@ export function panelView(
     );
   const byPage = new Map<string, PageGroup>();
   for (const t of shown) {
-    const here = scope === 'page' || isHere(t.page);
-    const key = here ? '\0here' : t.page;
-    const group = byPage.get(key) ?? { page: here ? '' : t.page, here, threads: [] };
+    const rank = rankOf(t);
+    // By rank, so a bare-path comment and a ?query one on the same shown page share a group.
+    const key = rank >= 0 ? `rank:${rank}` : `${t.site}\n${t.page}`;
+    const group = byPage.get(key) ?? { site: t.site, page: t.page, rank, threads: [] };
     group.threads.push(t);
     byPage.set(key, group);
   }
-  const groups = [...byPage.values()].sort((a, b) => Number(b.here) - Number(a.here));
+  const order = (g: PageGroup) => (g.rank < 0 ? Number.MAX_SAFE_INTEGER : g.rank);
+  const groups = [...byPage.values()].sort((a, b) => order(a) - order(b));
   return {
     drafts: threads
       .filter((t) => t.kind === 'draft' && inScope(t, scope))
