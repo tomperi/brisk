@@ -143,6 +143,7 @@ import {
     return new DOMRect(r.x + o.x, r.y + o.y, r.width, r.height);
   };
   const boxOf = (el: Element) => shift(el.getBoundingClientRect(), el.ownerDocument);
+  const mid = (r: DOMRect): XY => ({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
   const boxesOf = (r: Range) =>
     [...r.getClientRects()].map((b) => shift(b, docFor(r.startContainer)));
   /** A mouse event's position in the top page's viewport. */
@@ -618,7 +619,13 @@ import {
   function placeBar() {
     if (bar.kind === 'closed') return;
     const box = bar.kind === 'target' ? bar.from : lastLine(bar.range);
-    if (!box || box.bottom < 0 || box.top > innerHeight) return closeBar();
+    if (
+      !box ||
+      box.bottom < 0 ||
+      box.top > innerHeight ||
+      (bar.kind === 'selection' && !seenThrough(docFor(bar.range.startContainer), mid(box)))
+    )
+      return closeBar();
     const w = qbar.offsetWidth;
     const h = qbar.offsetHeight;
     const right = innerWidth - (bar.kind === 'selection' && docked ? PANEL_W : 0);
@@ -1258,7 +1265,12 @@ import {
       s?.placement.kind === 'text'
         ? shift(s.placement.range.getBoundingClientRect(), docFor(s.placement.range.startContainer))
         : target && boxOf(target);
-    const off = box && (box.bottom < 0 || box.top > innerHeight);
+    const off =
+      box &&
+      (box.bottom < 0 ||
+        box.top > innerHeight ||
+        s?.placement.kind === 'hidden' ||
+        (target && !seenThrough(target.ownerDocument, mid(box))));
     if (off && target)
       target.scrollIntoView({
         block: 'center',
