@@ -91,6 +91,19 @@ export const parseScope = (raw: string | null): Scope => (raw === 'site' ? 'site
 export const parseFilter = (raw: string | null): Filter =>
   (FILTERS as readonly (string | null)[]).includes(raw) ? (raw as Filter) : 'open';
 
+type Where = { readonly site: string; readonly hostname: string; readonly pathname: string };
+/** The path a page of `site` has at its own canonical URL. A top page on its
+ *  site's subdomain frames other sites only through `/s/<site>/`. The apex
+ *  (`home`) can't tell subdomain mode from path mode, so it keeps raw paths. */
+export function canonicalPath(pathname: string, site: string, top: Where): string {
+  const subdomain =
+    top.site !== 'home' &&
+    top.hostname.startsWith(`${top.site}.`) &&
+    !top.pathname.startsWith(`/s/${top.site}/`);
+  const prefix = `/s/${site}/`;
+  return subdomain && pathname.startsWith(prefix) ? pathname.slice(prefix.length - 1) : pathname;
+}
+
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 const later = (a: string, b: string) => (Date.parse(b) > Date.parse(a) ? b : a);
 const statusOf = (d: StoredDoc): Status =>

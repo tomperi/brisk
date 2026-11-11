@@ -29,6 +29,7 @@ import {
 import { siteComments, storageKey, type Brisk, type Me, type SiteComments } from './site-comments';
 import { DOCK_MIN, HIGHLIGHT_CSS, PANEL_W, WIDGET_CSS } from './styles';
 import {
+  canonicalPath,
   matches,
   panelView,
   parseEmoji,
@@ -193,8 +194,9 @@ import {
       .briskSite || null;
   const homeAt = (doc: Document, site: string): Home => {
     const win = doc.defaultView as Win;
-    const { pathname, search } = win.location;
-    return { site, page: pathname + search, path: pathname, doc, win };
+    const top = { site: SITE, hostname: location.hostname, pathname: location.pathname };
+    const path = canonicalPath(win.location.pathname, site, top);
+    return { site, page: path + win.location.search, path, doc, win };
   };
   const homeOf = (doc: Document): Home => {
     for (let d: Document | undefined = doc; d && d !== document; ) {

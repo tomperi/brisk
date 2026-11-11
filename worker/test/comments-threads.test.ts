@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildThreads,
+  canonicalPath,
   isNewReply,
   newReplyCount,
   panelView,
@@ -357,5 +358,26 @@ describe('newReplyCount', () => {
     expect(newReplyCount(threadsOf(docs, { t: at(9) })[0]!, ME)).toBe(0);
     expect(newReplyCount(threadsOf(docs, { t: '' })[0]!, ME)).toBe(0);
     expect(newReplyCount(threadsOf(docs)[0]!, ME)).toBe(0);
+  });
+});
+
+describe('canonicalPath', () => {
+  const sub = { site: 'a', hostname: 'a.brisk.example.com', pathname: '/x.html' };
+  const path = { site: 'a', hostname: 'brisk.example.com', pathname: '/s/a/x.html' };
+
+  it('drops the /s/<site> prefix of a framed page when the top page is on its subdomain', () => {
+    expect(canonicalPath('/s/b/y.html', 'b', sub)).toBe('/y.html');
+    expect(canonicalPath('/s/b/', 'b', sub)).toBe('/');
+    expect(canonicalPath('/x.html', 'a', sub)).toBe('/x.html');
+    expect(canonicalPath('/s/c/y.html', 'b', sub)).toBe('/s/c/y.html');
+  });
+
+  it('keeps raw paths in path mode and on the apex', () => {
+    expect(canonicalPath('/s/b/y.html', 'b', path)).toBe('/s/b/y.html');
+    expect(canonicalPath('/s/a/x.html', 'a', path)).toBe('/s/a/x.html');
+    const onBase = { site: 'a', hostname: 'a.brisk.example.com', pathname: '/s/a/x.html' };
+    expect(canonicalPath('/s/b/y.html', 'b', onBase)).toBe('/s/b/y.html');
+    const apex = { site: 'home', hostname: 'home.example.com', pathname: '/' };
+    expect(canonicalPath('/s/b/y.html', 'b', apex)).toBe('/s/b/y.html');
   });
 });
