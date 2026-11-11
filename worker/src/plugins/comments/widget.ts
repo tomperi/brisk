@@ -662,6 +662,7 @@ import {
     return !el || el.closest(EDITABLE) || el.isContentEditable ? null : range;
   }
   const sameRange = (a: Range, b: Range) =>
+    docFor(a.startContainer) === docFor(b.startContainer) &&
     a.compareBoundaryPoints(Range.START_TO_START, b) === 0 &&
     a.compareBoundaryPoints(Range.END_TO_END, b) === 0;
   let pressing = false;
