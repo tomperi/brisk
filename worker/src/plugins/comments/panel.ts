@@ -349,7 +349,7 @@ function groupHead(g: PageGroup, site: string): string {
   if (g.rank === 0) return label('This page');
   if (g.rank > 0) return label(where + pageName(g.page));
   if (!g.page) return label('No page');
-  return `<button class="grp" data-act="goto-page" data-v="${escapeHtml(g.page)}" title="Go to ${escapeHtml(g.page)}">${icon('page')}<span>${escapeHtml(where + g.page)}</span>${icon('arrow')}</button>`;
+  return `<button class="grp" data-act="goto-page" data-v="${escapeHtml(g.page)}" data-site="${escapeHtml(g.site)}" title="Go to ${escapeHtml(g.page)}">${icon('page')}<span>${escapeHtml(where + g.page)}</span>${icon('arrow')}</button>`;
 }
 
 export function panelHtml(

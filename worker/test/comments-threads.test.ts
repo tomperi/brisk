@@ -4,6 +4,7 @@ import {
   canonicalPath,
   isNewReply,
   newReplyCount,
+  pageHref,
   panelView,
   parseFilter,
   pinShown,
@@ -379,5 +380,11 @@ describe('canonicalPath', () => {
     expect(canonicalPath('/s/b/y.html', 'b', onBase)).toBe('/s/b/y.html');
     const apex = { site: 'home', hostname: 'home.example.com', pathname: '/' };
     expect(canonicalPath('/s/b/y.html', 'b', apex)).toBe('/s/b/y.html');
+  });
+
+  it('pageHref navigates back to the framed page canonicalPath shortened', () => {
+    expect(pageHref(canonicalPath('/s/b/y.html', 'b', sub), 'b', sub)).toBe('/s/b/y.html');
+    expect(pageHref('/x.html', 'a', sub)).toBe('/x.html');
+    expect(pageHref('/s/b/y.html', 'b', path)).toBe('/s/b/y.html');
   });
 });

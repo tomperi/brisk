@@ -31,6 +31,7 @@ import { DOCK_MIN, HIGHLIGHT_CSS, PANEL_W, WIDGET_CSS } from './styles';
 import {
   canonicalPath,
   matches,
+  pageHref,
   panelView,
   parseEmoji,
   parseFilter,
@@ -192,10 +193,10 @@ import {
   const tagSite = (doc: Document): string | null =>
     doc.querySelector<HTMLScriptElement>('script[data-brisk-plugin="comments"]')?.dataset
       .briskSite || null;
+  const topWhere = () => ({ site: SITE, hostname: location.hostname, pathname: location.pathname });
   const homeAt = (doc: Document, site: string): Home => {
     const win = doc.defaultView as Win;
-    const top = { site: SITE, hostname: location.hostname, pathname: location.pathname };
-    const path = canonicalPath(win.location.pathname, site, top);
+    const path = canonicalPath(win.location.pathname, site, topWhere());
     return { site, page: path + win.location.search, path, doc, win };
   };
   const homeOf = (doc: Document): Home => {
@@ -1612,7 +1613,7 @@ import {
       if (t.page && rankOf(t) < 0) {
         // The widget on that page reads it under its own site.
         localStorage.setItem(storageKey(t.site, 'goto'), t.id);
-        location.assign(t.page);
+        location.assign(pageHref(t.page, t.site, topWhere()));
         return;
       }
       expand(t.id);
@@ -1628,7 +1629,8 @@ import {
     filter: (el) => setFilter(parseFilter(el.dataset.v ?? null)),
     'status-menu': (el) => toggleMenu(statusItems, el),
     'more-menu': (el) => toggleMenu(commandItems(true), el, commandHead),
-    'goto-page': (el) => location.assign(el.dataset.v ?? '/'),
+    'goto-page': (el) =>
+      location.assign(pageHref(el.dataset.v ?? '/', el.dataset.site ?? SITE, topWhere())),
     close: () => setPanelOpen(false),
     panel: () => setPanelOpen(!panel.open),
     pick: pickOrQuote,
