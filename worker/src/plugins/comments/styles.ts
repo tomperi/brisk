@@ -76,8 +76,10 @@ button { font: inherit; color: inherit; background: none; border: 0; padding: 0;
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 textarea {
   font: inherit; color: var(--fg); caret-color: var(--accent); background: transparent;
-  border: 0; resize: none; width: 100%; outline: none;
+  border: 0; resize: none; width: 100%;
 }
+/* Its .field / .inp box draws the focus ring. */
+textarea:focus-visible { outline: none; }
 textarea::placeholder { color: var(--fg-muted); }
 .i {
   width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5;

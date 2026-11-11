@@ -76,6 +76,8 @@ releases are published to
 
 ### Fixed
 
+- **Comments** — the comment and reply boxes show one focus ring. They used to
+  show two, the box's own and a second outline on the text inside it.
 - **Comments** — a half-typed comment no longer vanishes on a stray click: the
   popover shakes and keeps your text until you save or cancel.
 - **Comments** — a site shown in a frame on another page no longer brings its
