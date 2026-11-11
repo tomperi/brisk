@@ -356,7 +356,10 @@ import {
   const setPick = (on: boolean) => {
     picking = on;
     snapshot = null;
-    if (on) closeBar();
+    if (on) {
+      wire();
+      closeBar();
+    }
     hi.style.display = 'none';
     const b = fab.querySelector<HTMLElement>('[data-act="pick"]')!;
     b.classList.toggle('on', on);
@@ -1380,6 +1383,7 @@ import {
     repositionQueued = true;
     requestAnimationFrame(() => {
       repositionQueued = false;
+      wire();
       if (view().key !== shown.key) render();
       else
         for (const s of slots.values()) {
