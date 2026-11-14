@@ -63,9 +63,13 @@ jobs:
             if npm view "@usebrisk/$pkg@$V" version >/dev/null 2>&1; then
               echo "@usebrisk/$pkg@$V is already on npm, skipping"
             else
-              (cd "$pkg" && npm publish)
+              (cd "$pkg" && npm publish --loglevel verbose)
             fi
           done
+        env:
+          # setup-node's placeholder token would hide a failed OIDC exchange
+          # behind a 404 from the registry.
+          NODE_AUTH_TOKEN: ''
 
       # CHANGELOG.md is the single source of truth for release notes. Pull the
       # pushed version's section out of it (the ### groups + bullets, without the
