@@ -8,15 +8,18 @@ releases are published to
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-11-14
+
 ### Added
 
 - **`brisk db`** — read and write a site's `brisk.db` from a terminal or a job:
   `get`, `list`, `put` (create or replace a doc under your own id, JSON from
-  `--file` or stdin) and `delete`, plus `brisk db put <collection> --jsonl
-<file>` to write many rows in one run. `--json` prints machine-readable
-  results; a batch reports each row, keeps going when one fails, and exits
-  non-zero if any did. Each request times out after `--timeout` seconds
-  (default 30). The site comes from `--site`, `brisk.json`, or the folder.
+  `--file` or stdin) and `delete`. `put --jsonl <file>` writes many rows in one
+  run, one `{"id":…,"doc":{…}}` per line; lines with the same id land in file
+  order. `--json` prints machine-readable results; a batch reports each row,
+  keeps going when one fails, and exits non-zero if any did. Each request times
+  out after `--timeout` seconds (default 30). The site comes from `--site`,
+  `brisk.json`, or the folder.
 - **`brisk.db` `set(id, fields)`** and **`PUT /api/db/:collection/:id`** —
   create a doc under an id you choose, or replace all of its fields when it
   exists (`createdAt` stays, `updatedAt` moves). The response is 201 for a new
@@ -314,7 +317,8 @@ releases are published to
 - `@usebrisk/cli` and `@usebrisk/sdk` published to npm, cut in lockstep by a
   tag-driven release workflow.
 
-[unreleased]: https://github.com/tomperi/brisk/compare/v0.4.2...HEAD
+[unreleased]: https://github.com/tomperi/brisk/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/tomperi/brisk/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/tomperi/brisk/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/tomperi/brisk/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/tomperi/brisk/compare/v0.3.0...v0.4.0
