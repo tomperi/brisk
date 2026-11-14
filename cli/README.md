@@ -27,8 +27,11 @@ brisk db delete <collection> <id>
 - `--json` prints machine-readable output. A single `put` prints
   `{"id","ok","status"}` (201 created, 200 replaced, or `error` on failure); a
   batch prints `{"ok","total","failed","results":[{"line","id","ok","status","error"}]}`.
-- A batch sends up to 4 rows at a time. A failed row is reported and the others
-  still run; the exit code is non-zero when any row failed.
+- A batch sends up to 4 rows at a time. Lines with the same id go in file order,
+  so the last one wins. A failed row is reported and the others still run; the
+  exit code is non-zero when any row failed.
+- `list` returns 100 docs by default and at most 500 (`--limit`); there is no
+  paging yet.
 - `--timeout <seconds>` caps each request (default 30).
 - Ids are 1–200 characters of letters, digits and `. _ : -`, starting with a
   letter or digit.

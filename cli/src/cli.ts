@@ -24,7 +24,7 @@ ${bold('Accounts')}
 
 ${bold('Database')} ${dim('(the site’s brisk.db; the site comes from --site, brisk.json, or the folder)')}
   brisk db get <collection> <id>          print one doc
-  brisk db list <collection>              docs, oldest first; --limit <n>, --sort -created
+  brisk db list <collection>              oldest first; --limit <n> (default 100, max 500), --sort -created
   brisk db put <collection> <id>          create or fully replace a doc: JSON from --file <path> or stdin
   brisk db put <collection> --jsonl <f>   upsert many in one run: one {"id":…,"doc":{…}} per line
   brisk db delete <collection> <id>       delete a doc

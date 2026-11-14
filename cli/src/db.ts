@@ -13,7 +13,10 @@ export interface DbFlags extends Flags {
 }
 
 const DEFAULT_TIMEOUT_S = 30;
+const MAX_TIMEOUT_S = Math.floor((2 ** 31 - 1) / 1000);
 const BATCH_CONCURRENCY = 4;
+const SERVER_LIST_DEFAULT = 100;
+const SERVER_LIST_MAX = 500;
 
 const USAGE = `usage:
   brisk db get <collection> <id>
@@ -54,12 +57,18 @@ const docPath = (collection: string, id?: string): string =>
 function context(flags: DbFlags): Ctx {
   const dir = process.cwd();
   const seconds = flags.timeout === undefined ? DEFAULT_TIMEOUT_S : Number(flags.timeout);
-  if (!Number.isFinite(seconds) || seconds <= 0) {
-    throw new Error(`--timeout must be a positive number of seconds, got "${flags.timeout}"`);
+  // AbortSignal.timeout fires after 1 ms for any delay past 2^31-1 ms.
+  if (!Number.isFinite(seconds) || seconds <= 0 || seconds > MAX_TIMEOUT_S) {
+    throw new Error(
+      `--timeout must be between 0 and ${MAX_TIMEOUT_S} seconds, got "${flags.timeout}"`,
+    );
   }
+  const site = resolveSite(dir, flags);
+  // An empty x-brisk-site falls back to the host's site (the dashboard's `home`).
+  if (!site) throw new Error('--site is empty');
   return {
     conn: resolveConnection(flags, dir),
-    site: resolveSite(dir, flags),
+    site,
     timeoutMs: seconds * 1000,
     json: Boolean(flags.json),
   };
@@ -153,6 +162,14 @@ async function list(ctx: Ctx, collection: string, flags: DbFlags): Promise<void>
   }
   const width = Math.max(...body.docs.map((d) => d.id.length)) + 2;
   for (const d of body.docs) console.log(`${bold(d.id.padEnd(width))}${dim(d.updatedAt)}`);
+  const asked = flags.limit === undefined ? SERVER_LIST_DEFAULT : Number(flags.limit);
+  if (body.docs.length >= Math.min(asked, SERVER_LIST_MAX)) {
+    console.error(
+      dim(
+        `showing ${body.docs.length}; there may be more (--limit, up to ${SERVER_LIST_MAX}, --sort -created)`,
+      ),
+    );
+  }
 }
 
 async function remove(ctx: Ctx, collection: string, id: string): Promise<void> {
@@ -233,18 +250,23 @@ async function putBatch(ctx: Ctx, collection: string, file: string): Promise<voi
     .map((r) => ({ line: r.line, parsed: parseLine(r.text, r.line) }));
 
   const results: PutResult[] = new Array(rows.length);
-  let next = 0;
+  // Rows that share an id run in line order on one worker, so the last line wins.
+  const byId = new Map<string, number[]>();
+  rows.forEach(({ parsed }, i) => {
+    if ('ok' in parsed) results[i] = parsed;
+    else byId.set(parsed.id, [...(byId.get(parsed.id) ?? []), i]);
+  });
+  const queue = [...byId.values()];
   const worker = async (): Promise<void> => {
-    while (next < rows.length) {
-      const i = next++;
-      const { line, parsed } = rows[i]!;
-      results[i] =
-        'ok' in parsed
-          ? parsed
-          : { line, ...(await putRow(ctx, collection, parsed.id, parsed.doc)) };
+    for (let group = queue.shift(); group; group = queue.shift()) {
+      for (const i of group) {
+        const { line, parsed } = rows[i]!;
+        if ('ok' in parsed) continue;
+        results[i] = { line, ...(await putRow(ctx, collection, parsed.id, parsed.doc)) };
+      }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(BATCH_CONCURRENCY, rows.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(BATCH_CONCURRENCY, queue.length) }, worker));
 
   report(ctx, collection, results);
   const failed = results.filter((r) => !r.ok).length;
@@ -266,7 +288,9 @@ function report(ctx: Ctx, collection: string, results: PutResult[]): void {
     const where = r.line === undefined ? '' : dim(`line ${r.line} `);
     if (r.ok) {
       const verb = r.status === 201 ? 'created' : 'replaced';
-      console.log(`${green('✓')} ${where}${verb} ${bold(`${collection}/${r.id}`)}`);
+      // A batch names the site once, in its summary line.
+      const site = r.line === undefined ? ` ${dim(`on ${ctx.site}`)}` : '';
+      console.log(`${green('✓')} ${where}${verb} ${bold(`${collection}/${r.id}`)}${site}`);
     } else {
       console.error(`${yellow('✗')} ${where}${r.id ?? ''}${r.id ? ': ' : ''}${r.error}`);
     }
