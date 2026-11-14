@@ -44,7 +44,7 @@ interface SiteInfo {
 
 const SKIP = new Set(['.git', 'node_modules', '.DS_Store', 'brisk.json']);
 
-function resolveSite(dir: string, flags: Flags): string {
+export function resolveSite(dir: string, flags: Flags): string {
   const site = flags.site ?? loadConfig(dir).site ?? path.basename(path.resolve(dir));
   return slugify(site);
 }

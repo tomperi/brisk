@@ -6,13 +6,14 @@ then run as `node cli/dist/cli.js …`.
 
 ## Map
 
-| File               | Owns                                                                 |
-| ------------------ | -------------------------------------------------------------------- |
-| `src/cli.ts`       | Arg parsing (`node:util` parseArgs), help, command routing           |
-| `src/commands.ts`  | All commands; `deploy` is the core, `login` runs the localhost flow  |
-| `src/config.ts`    | Profiles (`~/.config/brisk/config.json`) + connection resolution     |
-| `src/templates.ts` | What `brisk init` scaffolds — including the _site-level_ `AGENTS.md` |
-| `src/ui.ts`        | ANSI helpers, byte/time formatting                                   |
+| File               | Owns                                                                      |
+| ------------------ | ------------------------------------------------------------------------- |
+| `src/cli.ts`       | Arg parsing (`node:util` parseArgs), help, command routing                |
+| `src/commands.ts`  | The other commands; `deploy` is the core, `login` runs the localhost flow |
+| `src/db.ts`        | `brisk db`: get/list/put/delete on a site's collections, `--jsonl`        |
+| `src/config.ts`    | Profiles (`~/.config/brisk/config.json`) + connection resolution          |
+| `src/templates.ts` | What `brisk init` scaffolds — including the _site-level_ `AGENTS.md`      |
+| `src/ui.ts`        | ANSI helpers, byte/time formatting                                        |
 
 ## Non-obvious
 

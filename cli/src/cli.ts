@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util';
 import * as commands from './commands.js';
+import { db } from './db.js';
 import { bold, cyan, dim, yellow } from './ui.js';
 
 const HELP = `${bold('brisk')} — drop a folder, get a site
@@ -20,6 +21,14 @@ ${bold('Accounts')}
   brisk profiles               list profiles (● marks the active one)
   brisk profile use <name>     switch the active profile
   brisk profile set-username <name>  set your deploy identity on the active profile
+
+${bold('Database')} ${dim('(the site’s brisk.db; the site comes from --site, brisk.json, or the folder)')}
+  brisk db get <collection> <id>          print one doc
+  brisk db list <collection>              docs, oldest first; --limit <n>, --sort -created
+  brisk db put <collection> <id>          create or fully replace a doc: JSON from --file <path> or stdin
+  brisk db put <collection> --jsonl <f>   upsert many in one run: one {"id":…,"doc":{…}} per line
+  brisk db delete <collection> <id>       delete a doc
+                                          --json for machine output; --timeout <s> per request (default 30)
 
 ${bold('Plugins')}
   brisk plugin list                    installed plugins on the instance
@@ -49,7 +58,17 @@ async function main(): Promise<void> {
   // any leading global flags to find the command — and let commands.plugin do
   // its own lenient parsing. Leading --server/--profile pass through to it.
   const raw = process.argv.slice(2);
-  const valueFlags = new Set(['--server', '--profile', '--site', '--username']);
+  const valueFlags = new Set([
+    '--server',
+    '--profile',
+    '--site',
+    '--username',
+    '--file',
+    '--jsonl',
+    '--limit',
+    '--sort',
+    '--timeout',
+  ]);
   let pi = 0;
   while (pi < raw.length && raw[pi]!.startsWith('-')) {
     pi += valueFlags.has(raw[pi]!) ? 2 : 1;
@@ -58,7 +77,18 @@ async function main(): Promise<void> {
     return commands.plugin([...raw.slice(0, pi), ...raw.slice(pi + 1)]);
   }
 
+  // parseArgs refuses a dash-leading value after a space, and `--sort -created`
+  // is the natural spelling; glue it on as `--sort=-created`.
+  const argv = raw.flatMap((a, i) =>
+    raw[i - 1] === '--sort'
+      ? []
+      : a === '--sort' && i + 1 < raw.length
+        ? [`--sort=${raw[i + 1]}`]
+        : [a],
+  );
+
   const { values, positionals } = parseArgs({
+    args: argv,
     options: {
       site: { type: 'string' },
       server: { type: 'string' },
@@ -67,6 +97,14 @@ async function main(): Promise<void> {
       force: { type: 'boolean', short: 'f' },
       yes: { type: 'boolean', short: 'y' },
       help: { type: 'boolean', short: 'h' },
+      // `brisk db` only. Ids and collections never start with a dash and doc
+      // JSON arrives by file or stdin, so db needs no interception like plugin.
+      file: { type: 'string' },
+      jsonl: { type: 'string' },
+      limit: { type: 'string' },
+      sort: { type: 'string' },
+      json: { type: 'boolean' },
+      timeout: { type: 'string' },
     },
     allowPositionals: true,
   });
@@ -101,6 +139,16 @@ async function main(): Promise<void> {
     case 'pull':
       if (!args[0]) throw new Error('usage: brisk pull <site> [dir]');
       return commands.pull(args[0], args[1], flags);
+    case 'db':
+      return db(args, {
+        ...flags,
+        file: values.file,
+        jsonl: values.jsonl,
+        limit: values.limit,
+        sort: values.sort,
+        json: Boolean(values.json),
+        timeout: values.timeout,
+      });
     case 'login':
       return commands.login(args[0], flags);
     case 'logout':
