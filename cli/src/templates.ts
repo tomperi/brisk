@@ -48,6 +48,7 @@ const posts = brisk.db.collection('posts');
 const doc   = await posts.create({ title: 'Hello', votes: 0 });   // {id, createdAt, ...}
 const all   = await posts.list({ sort: '-created', limit: 50 });
 await posts.update(doc.id, { votes: 1 });   // shallow merge
+await posts.set('2026-11', { title: 'Nov' });  // own id: create, or replace every field
 await posts.delete(doc.id);
 const stop  = posts.subscribe({                                    // realtime
   onCreate: (doc) => {}, onUpdate: (doc) => {}, onDelete: (id) => {},

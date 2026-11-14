@@ -367,13 +367,13 @@ to install it — as one text file, generated from this repo at build time.
 
 Full reference lives on your instance at `/docs`. The shape of it:
 
-| Namespace                      | What you get                                                              |
-| ------------------------------ | ------------------------------------------------------------------------- |
-| `brisk.db.collection(name)`    | Schemaless JSON docs: `create / list / get / update / delete / subscribe` |
-| `brisk.me()`                   | `{ email, name, picture }` of whoever is looking at the page              |
-| `brisk.ai.chat(prompt, opts?)` | LLM calls proxied through the server's keys                               |
-| `brisk.fs.upload(files)`       | Permanent URLs for user uploads                                           |
-| `brisk.channel(name)`          | Realtime messaging + presence per site                                    |
+| Namespace                      | What you get                                                                    |
+| ------------------------------ | ------------------------------------------------------------------------------- |
+| `brisk.db.collection(name)`    | Schemaless JSON docs: `create / list / get / update / set / delete / subscribe` |
+| `brisk.me()`                   | `{ email, name, picture }` of whoever is looking at the page                    |
+| `brisk.ai.chat(prompt, opts?)` | LLM calls proxied through the server's keys                                     |
+| `brisk.fs.upload(files)`       | Permanent URLs for user uploads                                                 |
+| `brisk.channel(name)`          | Realtime messaging + presence per site                                          |
 
 Everything is namespaced per site. Docs and channels of one site are invisible
 to another, purely as a convenience (it's all one happy trust bubble).
