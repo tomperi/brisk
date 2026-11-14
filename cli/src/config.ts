@@ -164,6 +164,15 @@ export class ApiError extends Error {
 }
 
 export async function api<T>(conn: Connection, route: string, init: RequestInit = {}): Promise<T> {
+  return (await request<T>(conn, route, init)).body;
+}
+
+/** Like `api`, but also returns the success status (e.g. 201 created vs 200 replaced). */
+export async function request<T>(
+  conn: Connection,
+  route: string,
+  init: RequestInit = {},
+): Promise<{ status: number; body: T }> {
   const res = await fetch(`${conn.server}${route}`, {
     ...init,
     headers: { ...authHeaders(conn), ...(init.headers as Record<string, string>) },
@@ -187,5 +196,5 @@ export async function api<T>(conn: Connection, route: string, init: RequestInit 
       body,
     );
   }
-  return res.json() as Promise<T>;
+  return { status: res.status, body: (await res.json()) as T };
 }

@@ -165,6 +165,12 @@ export const db = {
           method: 'PATCH',
           body: JSON.stringify(fields),
         }),
+      /** Create the doc under your own id, or replace all of its fields if it exists. */
+      set: (id: string, fields: Record<string, unknown>) =>
+        api<Doc>(`${base}/${encodeURIComponent(id)}`, {
+          method: 'PUT',
+          body: JSON.stringify(fields),
+        }),
       delete: (id: string) =>
         api<{ ok: boolean }>(`${base}/${encodeURIComponent(id)}`, { method: 'DELETE' }),
       /** Live changes for this collection. Returns an unsubscribe function. */

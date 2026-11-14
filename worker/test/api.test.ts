@@ -530,6 +530,74 @@ describe('database', () => {
     expect((await res.json<{ docs: unknown[] }>()).docs).toHaveLength(1);
   });
 
+  describe('PUT (upsert under a chosen id)', () => {
+    const put = (path: string, body: unknown, h: Record<string, string> = headers) =>
+      SELF.fetch(`${HOST}/api/db/${path}`, {
+        method: 'PUT',
+        headers: h,
+        body: typeof body === 'string' ? body : JSON.stringify(body),
+      });
+
+    it('creates with 201, then fully replaces with 200 and keeps createdAt', async () => {
+      const id = 'v-mw5daksa-cve-2026-116779';
+      const first = await put(`reports/${id}`, { title: 'one', severity: 'high', id: 'forged' });
+      expect(first.status).toBe(201);
+      const created = await first.json<Record<string, unknown>>();
+      expect(created).toMatchObject({ id, title: 'one', severity: 'high' });
+      expect(created.updatedAt).toBe(created.createdAt);
+
+      const second = await put(`reports/${id}`, { title: 'two' });
+      expect(second.status).toBe(200);
+      const replaced = await second.json<Record<string, unknown>>();
+      expect(replaced).toMatchObject({ id, title: 'two', createdAt: created.createdAt });
+      expect(replaced).not.toHaveProperty('severity');
+      expect((replaced.updatedAt as string) > (created.updatedAt as string)).toBe(true);
+
+      const third = await (
+        await put(`reports/${id}`, { title: 'three' })
+      ).json<{
+        updatedAt: string;
+      }>();
+      expect(third.updatedAt > (replaced.updatedAt as string)).toBe(true);
+
+      const got = await (
+        await SELF.fetch(`${HOST}/api/db/reports/${id}`, { headers })
+      ).json<Record<string, unknown>>();
+      expect(got).toEqual(third);
+    });
+
+    it('accepts dotted, coloned and month ids', async () => {
+      for (const id of ['2026-11', 'months', 'a.b:c_d-e']) {
+        expect((await put(`idx/${encodeURIComponent(id)}`, { ok: true })).status).toBe(201);
+      }
+    });
+
+    it('rejects bad ids and non-object bodies', async () => {
+      for (const id of ['-lead', '.hidden', 'has%20space', 'x'.repeat(201), 'slash%2Fid']) {
+        expect((await put(`idx/${id}`, { ok: true })).status).toBe(400);
+      }
+      expect((await put('idx/ok', [1, 2])).status).toBe(400);
+      expect((await put('idx/ok', 'null')).status).toBe(400);
+      expect((await put('idx/ok', 'not json')).status).toBe(400);
+    });
+
+    it('refuses reserved plugin collections', async () => {
+      expect((await put('_plugin:comments/x', { createdBy: 'spoofed' })).status).toBe(403);
+    });
+
+    it('namespaces the doc by the x-brisk-site header', async () => {
+      const mine = { ...headers, 'x-brisk-site': 'put-a' };
+      const theirs = { ...headers, 'x-brisk-site': 'put-b' };
+      expect((await put('notes/shared-id', { owner: 'a' }, mine)).status).toBe(201);
+      // Same collection and id on another site is a separate doc, not a replace.
+      expect((await put('notes/shared-id', { owner: 'b' }, theirs)).status).toBe(201);
+      const a = await (
+        await SELF.fetch(`${HOST}/api/db/notes/shared-id`, { headers: mine })
+      ).json<{ owner: string }>();
+      expect(a.owner).toBe('a');
+    });
+  });
+
   it('rejects malformed x-brisk-site headers', async () => {
     const res = await SELF.fetch(`${HOST}/api/db/notes`, {
       headers: { 'x-brisk-site': 'home/../sneaky' },
@@ -689,6 +757,20 @@ describe('realtime websocket', () => {
       event: 'create',
       collection: 'msgs',
       doc: { id: created.id, text: 'over the wire' },
+    });
+
+    const put = (text: string) =>
+      SELF.fetch(`${HOST}/api/db/msgs/chosen`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json', 'x-brisk-site': site },
+        body: JSON.stringify({ text }),
+      });
+    await put('new');
+    expect(await next()).toMatchObject({ event: 'create', doc: { id: 'chosen', text: 'new' } });
+    await put('replaced');
+    expect(await next()).toMatchObject({
+      event: 'update',
+      doc: { id: 'chosen', text: 'replaced' },
     });
 
     ws.close();

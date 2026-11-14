@@ -67,6 +67,28 @@ export function runHttpParity(base: () => string): void {
       };
       expect(list.docs.length).toBeGreaterThanOrEqual(1);
     });
+
+    it('upserts under a chosen id: 201 create, 200 full replace that keeps createdAt', async () => {
+      const put = (path: string, body: unknown, site = 'p-db') =>
+        fetch(`${base()}/api/db/${path}`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json', 'x-brisk-site': site },
+          body: JSON.stringify(body),
+        });
+      const first = await put('reports/2026-11', { a: 1, b: 2 });
+      expect(first.status).toBe(201);
+      const created = (await first.json()) as { createdAt: string; updatedAt: string };
+      const second = await put('reports/2026-11', { a: 3 });
+      expect(second.status).toBe(200);
+      const replaced = (await second.json()) as Record<string, unknown>;
+      expect(replaced).toMatchObject({ id: '2026-11', a: 3, createdAt: created.createdAt });
+      expect(replaced).not.toHaveProperty('b');
+      expect((replaced.updatedAt as string) > created.updatedAt).toBe(true);
+
+      expect((await put('reports/2026-11', { a: 1 }, 'p-db-other')).status).toBe(201);
+      expect((await put('reports/-bad', { a: 1 })).status).toBe(400);
+      expect((await put('_plugin:comments/x', { a: 1 })).status).toBe(403);
+    });
   });
 }
 
@@ -176,6 +198,20 @@ export function runRealtimeParity(base: () => string): void {
         event: 'create',
         collection: 'msgs',
         doc: { id: created.id, text: 'over the wire' },
+      });
+
+      const put = (text: string) =>
+        fetch(`${base()}/api/db/msgs/chosen`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json', 'x-brisk-site': 'p-ws' },
+          body: JSON.stringify({ text }),
+        });
+      await put('new');
+      expect(await next()).toMatchObject({ event: 'create', doc: { id: 'chosen', text: 'new' } });
+      await put('replaced');
+      expect(await next()).toMatchObject({
+        event: 'update',
+        doc: { id: 'chosen', text: 'replaced' },
       });
       ws.close();
     });
