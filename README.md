@@ -532,8 +532,9 @@ git tag v0.1.1 && git push origin v0.1.1
 
 The [`release`](.github/workflows/release.yml) workflow builds, runs the CI
 gates, publishes both packages, and cuts a GitHub release. It fires only on
-`v*` tags — nothing publishes on ordinary pushes. Requires an `NPM_TOKEN`
-repo secret (an npm automation token scoped to the `@usebrisk` org).
+`v*` tags — nothing publishes on ordinary pushes. It publishes through npm
+trusted publishing (OIDC), so there is no npm token secret: each package on
+npmjs.com names `tomperi/brisk` and `release.yml` as its trusted publisher.
 
 ## License
 

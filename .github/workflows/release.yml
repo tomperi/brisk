@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: write # create the GitHub release (and the tag, on manual dispatch)
+  id-token: write # npm trusted publishing (OIDC): no npm token secret
 
 jobs:
   release:
@@ -50,15 +51,21 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm --filter @usebrisk/worker test
 
-      - name: Publish @usebrisk/sdk
-        run: pnpm --filter @usebrisk/sdk publish --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # Trusted publishing needs npm >= 11.5.1; Node 22 ships npm 10. Both
+      # packages have no dependencies, so plain `npm publish` is what pnpm sent.
+      - run: npm install -g npm@^11.5.1
 
-      - name: Publish @usebrisk/cli
-        run: pnpm --filter @usebrisk/cli publish --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # A version already on npm is skipped, so a rerun after a partial publish works.
+      - name: Publish @usebrisk/sdk and @usebrisk/cli
+        run: |
+          V="${{ steps.v.outputs.version }}"
+          for pkg in sdk cli; do
+            if npm view "@usebrisk/$pkg@$V" version >/dev/null 2>&1; then
+              echo "@usebrisk/$pkg@$V is already on npm, skipping"
+            else
+              (cd "$pkg" && npm publish)
+            fi
+          done
 
       # CHANGELOG.md is the single source of truth for release notes. Pull the
       # pushed version's section out of it (the ### groups + bullets, without the
