@@ -12,7 +12,7 @@ import {
   SHELL_ASSETS,
   type SchemeSource,
 } from './auth';
-import { DocStore } from './docs';
+import { DocStore, isValidDocId } from './docs';
 import { contentType } from './mime';
 import {
   deleteSite,
@@ -237,6 +237,26 @@ export function createApp(
     if (!doc) return c.json({ error: 'not found' }, 404);
     publish(c, c.var.site, { collection, event: 'update', doc });
     return c.json(doc);
+  });
+
+  // Upsert under a caller-chosen id: a full replace, unlike PATCH's merge.
+  app.put('/api/db/:collection/:id', async (c) => {
+    const collection = c.req.param('collection');
+    if (isPluginCollection(collection)) return reservedCollection(c);
+    const id = c.req.param('id');
+    if (!isValidDocId(id)) return c.json({ error: 'invalid id' }, 400);
+    const fields = await c.req.json<unknown>().catch(() => null);
+    if (!fields || typeof fields !== 'object' || Array.isArray(fields)) {
+      return c.json({ error: 'body must be a JSON object' }, 400);
+    }
+    const { doc, created } = await new DocStore(c.var.platform.db).set(
+      c.var.site,
+      collection,
+      id,
+      fields as Record<string, unknown>,
+    );
+    publish(c, c.var.site, { collection, event: created ? 'create' : 'update', doc });
+    return c.json(doc, created ? 201 : 200);
   });
 
   app.delete('/api/db/:collection/:id', async (c) => {

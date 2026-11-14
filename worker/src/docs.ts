@@ -14,6 +14,11 @@ export interface CollectionInfo {
 
 const MAX_LIMIT = 500;
 
+const DOC_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
+
+/** Ids a caller may choose (`PUT /api/db/:collection/:id`). */
+export const isValidDocId = (id: string): boolean => DOC_ID.test(id);
+
 /**
  * `id` / `createdAt` / `updatedAt` are ours; user fields can't shadow them. We
  * also drop a `__proto__` key: writes are shallow-spread / JSON-only today so
@@ -128,6 +133,34 @@ export class DocStore {
     ).run();
     if (res.meta.changes === 0) return null;
     return { id, createdAt, updatedAt: now, ...merged };
+  }
+
+  /**
+   * Creates the doc under `id`, or replaces all of its fields when it exists
+   * (keeping `createdAt`). One statement, so concurrent writers never interleave.
+   */
+  async set(
+    site: string,
+    collection: string,
+    id: string,
+    fields: Record<string, unknown>,
+  ): Promise<{ doc: Doc; created: boolean }> {
+    const now = new Date().toISOString();
+    // Same monotonic updated_at bump as update(). ISO strings of one fixed width
+    // compare correctly as text, so max() picks the later instant.
+    const row = await this.db
+      .prepare(
+        `INSERT INTO docs (site, collection, id, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (site, collection, id) DO UPDATE SET
+           data = excluded.data,
+           updated_at = max(excluded.updated_at, strftime('%Y-%m-%dT%H:%M:%fZ', docs.updated_at, '+0.001 seconds'))
+         RETURNING *`,
+      )
+      .bind(site, collection, id, JSON.stringify(ownFields(fields)), now, now)
+      .first<DocRow>();
+    if (!row) throw new Error('upsert returned no row');
+    // A replace always moves updated_at past created_at; only an insert leaves them equal.
+    return { doc: toDoc(row), created: row.created_at === row.updated_at };
   }
 
   async delete(site: string, collection: string, id: string): Promise<boolean> {
