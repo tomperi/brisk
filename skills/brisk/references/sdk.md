@@ -13,6 +13,7 @@ const doc = await posts.create({ title: 'Hello', votes: 0 }); // → {id, create
 const all = await posts.list({ sort: '-created', limit: 50 }); // omit opts for oldest-first
 const one = await posts.get(doc.id);
 await posts.update(doc.id, { votes: 1 }); // shallow merge
+await posts.set('2026-11', { title: 'November' }); // your own id: create, or replace every field
 await posts.delete(doc.id);
 
 const stop = posts.subscribe({
@@ -22,6 +23,11 @@ const stop = posts.subscribe({
   onDelete: (id) => {},
 });
 ```
+
+The same collections from a terminal or a job, for the site in `--site`:
+`brisk db get|list|put|delete <collection> [id]`, and
+`brisk db put <collection> --jsonl rows.jsonl` for many rows in one run. See
+`brisk --help`.
 
 ## Identity — who's looking at the page
 

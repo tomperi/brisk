@@ -10,6 +10,19 @@ releases are published to
 
 ### Added
 
+- **`brisk db`** — read and write a site's `brisk.db` from a terminal or a job:
+  `get`, `list`, `put` (create or replace a doc under your own id, JSON from
+  `--file` or stdin) and `delete`, plus `brisk db put <collection> --jsonl
+<file>` to write many rows in one run. `--json` prints machine-readable
+  results; a batch reports each row, keeps going when one fails, and exits
+  non-zero if any did. Each request times out after `--timeout` seconds
+  (default 30). The site comes from `--site`, `brisk.json`, or the folder.
+- **`brisk.db` `set(id, fields)`** and **`PUT /api/db/:collection/:id`** —
+  create a doc under an id you choose, or replace all of its fields when it
+  exists (`createdAt` stays, `updatedAt` moves). The response is 201 for a new
+  doc and 200 for a replaced one, and subscribers get `create` or `update` to
+  match. Ids are 1–200 letters, digits and `. _ : -`, starting with a letter or
+  digit.
 - **`/llms.txt`** — everything about Brisk as one text file for coding agents:
   the companion skill and how to install it, the `/docs` and `/host` pages, the
   architecture, and the changelog, generated from the repo at build time so it

@@ -103,6 +103,22 @@ brisk list             # everything deployed on the instance
 brisk pull <site> dir  # download a site's source to remix it
 ```
 
+To read or write a site's `brisk.db` from a script or a job (no browser), use
+`brisk db`. It talks to the site named by `--site` (else `brisk.json` or the
+folder), with your login:
+
+```sh
+brisk db list reports --site cves --sort -created --limit 20
+brisk db get  reports <id> --site cves
+brisk db put  reports 2026-11 --site cves --file doc.json   # create, or replace every field
+brisk db put  reports --site cves --jsonl rows.jsonl --json # many rows: {"id":…,"doc":{…}} per line
+brisk db delete reports <id> --site cves
+```
+
+`put` picks the id itself (letters, digits, `. _ : -`), so a re-run replaces the
+row instead of adding a copy. `--json` prints machine-readable results; a batch
+exits non-zero when any row fails, and a failed row doesn't stop the rest.
+
 ## Plugins
 
 Plugins are first-party features a site switches on, injected into its pages by
