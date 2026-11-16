@@ -408,6 +408,31 @@ export async function list(flags: Flags): Promise<void> {
   }
 }
 
+/** Every label in use, most used first, so a deploy can reuse an existing spelling. */
+export async function labels(flags: Flags, json: boolean): Promise<void> {
+  const conn = resolveConnection(flags, process.cwd());
+  const { sites } = await api<{ sites: SiteInfo[] }>(conn, '/api/sites');
+  const counts = new Map<string, number>();
+  for (const s of sites) for (const l of s.labels ?? []) counts.set(l, (counts.get(l) ?? 0) + 1);
+  const rows = [...counts]
+    .map(([label, n]) => ({ label, sites: n }))
+    .sort((a, b) => b.sites - a.sites || a.label.localeCompare(b.label));
+  if (json) {
+    console.log(JSON.stringify(rows));
+    return;
+  }
+  if (!rows.length) {
+    console.log(`No labels yet. ${dim('Add some: brisk deploy --labels dashboard,marketing')}`);
+    return;
+  }
+  const width = Math.max(...rows.map((r) => r.label.length)) + 3;
+  for (const r of rows) {
+    console.log(
+      `${cyan(`#${r.label}`.padEnd(width))}${dim(`${r.sites} ${r.sites === 1 ? 'site' : 'sites'}`)}`,
+    );
+  }
+}
+
 export async function open(siteArg: string | undefined, flags: Flags): Promise<void> {
   const dir = process.cwd();
   const site = siteArg ?? resolveSite(dir, flags);

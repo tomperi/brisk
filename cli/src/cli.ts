@@ -11,6 +11,7 @@ ${bold('Usage')}
   brisk deploy [dir|file]      upload a folder (or one html file), get a URL
   brisk dev [dir|file]         deploy on every file change
   brisk list                   all sites on the instance
+  brisk labels                 labels in use and how many sites have each; --json
   brisk open [site]            open a site in the browser
   brisk pull <site> [dir]      download a site's source to remix it
 
@@ -139,6 +140,8 @@ async function main(): Promise<void> {
     case 'list':
     case 'ls':
       return commands.list(flags);
+    case 'labels':
+      return commands.labels(flags, Boolean(values.json));
     case 'open':
       return commands.open(args[0], flags);
     case 'pull':
