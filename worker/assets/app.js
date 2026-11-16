@@ -43,12 +43,80 @@ let sites = [];
 // forced overwrite splits them — both count. `owner` is NULL on older sites.
 const matches = (site, needle) =>
   site.name.includes(needle) ||
-  [site.owner, site.updatedBy].some((label) => label?.toLowerCase().includes(needle));
+  [site.owner, site.updatedBy].some((label) => label?.toLowerCase().includes(needle)) ||
+  (site.labels ?? []).some((label) => label.includes(needle));
+
+// ---- label filter -----------------------------------------------------------------
+// The selected labels live in the URL (?labels=marketing,dashboard) so a filtered
+// view is a link you can share. A site shows only when it has every one of them.
+
+const selectedFromUrl = () =>
+  new Set(
+    (new URLSearchParams(location.search).get('labels') ?? '')
+      .split(',')
+      .map((l) => l.trim().toLowerCase())
+      .filter(Boolean),
+  );
+
+let selected = selectedFromUrl();
+
+function setSelected(next) {
+  selected = next;
+  const url = new URL(location.href);
+  if (selected.size) url.searchParams.set('labels', [...selected].join(','));
+  else url.searchParams.delete('labels');
+  // Commas read better than %2C in a link people paste around.
+  history.pushState(null, '', url.href.replace(/%2C/gi, ','));
+  render();
+}
+
+const toggleLabel = (label) => {
+  const next = new Set(selected);
+  if (!next.delete(label)) next.add(label);
+  setSelected(next);
+};
+
+addEventListener('popstate', () => {
+  selected = selectedFromUrl();
+  render();
+});
+
+function labelButton(label, className) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = className;
+  b.textContent = `#${label}`;
+  b.addEventListener('click', () => toggleLabel(label));
+  return b;
+}
+
+function renderChips() {
+  const bar = $('label-filter');
+  bar.hidden = !selected.size;
+  bar.replaceChildren(
+    ...[...selected].map((label) => {
+      const chip = labelButton(label, 'chip');
+      chip.title = `stop filtering by ${label}`;
+      chip.append(cell('x', '×'));
+      return chip;
+    }),
+  );
+}
 
 function render() {
+  renderChips();
   const list = $('site-list');
   const typed = $('filter').value.trim();
-  const visible = sites.filter((s) => matches(s, typed.toLowerCase()));
+  const visible = sites.filter(
+    (s) =>
+      matches(s, typed.toLowerCase()) &&
+      [...selected].every((label) => (s.labels ?? []).includes(label)),
+  );
+  const total = `${sites.length} ${sites.length === 1 ? 'site' : 'sites'}`;
+  $('site-count').textContent =
+    typed || selected.size
+      ? `${visible.length} of ${total}, freshest first`
+      : `${total}, freshest first`;
   list.replaceChildren(
     ...visible.map((site) => {
       const li = document.createElement('li');
@@ -71,13 +139,28 @@ function render() {
       wireCopy(copy, site.url);
 
       li.append(name, files, size, when, by, copy);
+
+      // Their own line under the name, and only on rows that have any.
+      if (site.labels?.length) {
+        const labels = document.createElement('span');
+        labels.className = 'labels';
+        for (const label of site.labels) {
+          const tag = labelButton(label, selected.has(label) ? 'label on' : 'label');
+          tag.title = selected.has(label)
+            ? `stop filtering by ${label}`
+            : `only sites labelled ${label}`;
+          labels.append(tag);
+        }
+        li.append(labels);
+      }
       return li;
     }),
   );
-  if (!visible.length && typed) {
+  if (!visible.length && (typed || selected.size)) {
     const li = document.createElement('li');
     li.className = 'list-empty';
-    li.textContent = `nothing matches “${typed}”`;
+    const wanted = [typed && `“${typed}”`, ...[...selected].map((l) => `#${l}`)].filter(Boolean);
+    li.textContent = `nothing matches ${wanted.join(' + ')}`;
     list.append(li);
   }
 }
@@ -113,8 +196,6 @@ async function load() {
     return;
   }
   $('sites-section').hidden = false;
-  $('site-count').textContent =
-    `${sites.length} ${sites.length === 1 ? 'site' : 'sites'}, freshest first`;
   showFilter(sites.length >= 9);
   render();
 }
