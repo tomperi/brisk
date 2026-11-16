@@ -41,6 +41,8 @@ ${bold('Options')}
   --server <url>               target instance directly, e.g. brisk.example.com
   --profile <name>             use a specific profile for this command
   --username <name>            deploy identity / owner label (default: profile username)
+  --labels <a,b>               deploy with these labels (max 5), overriding brisk.json;
+                               "" clears them. Without it, a redeploy keeps the site's labels
   -f, --force                  overwrite a site owned by someone else
   -y, --yes                    confirm deploying to an open (AUTH=none) public instance
 
@@ -63,6 +65,7 @@ async function main(): Promise<void> {
     '--profile',
     '--site',
     '--username',
+    '--labels',
     '--file',
     '--jsonl',
     '--limit',
@@ -94,6 +97,7 @@ async function main(): Promise<void> {
       server: { type: 'string' },
       profile: { type: 'string' },
       username: { type: 'string' },
+      labels: { type: 'string' },
       force: { type: 'boolean', short: 'f' },
       yes: { type: 'boolean', short: 'y' },
       help: { type: 'boolean', short: 'h' },
@@ -120,6 +124,7 @@ async function main(): Promise<void> {
     server: values.server,
     profile: values.profile,
     username: values.username,
+    labels: values.labels,
     force: Boolean(values.force),
     yes: Boolean(values.yes),
   };
