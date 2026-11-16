@@ -87,6 +87,33 @@ brisk dev      # redeploy on every save — use while iterating
 brisk deploy   # ship once
 ```
 
+### Label it
+
+Labels are how teammates find sites on the dashboard: each row shows them, and
+clicking a few narrows the list to sites with all of them
+(`/?labels=marketing,dashboard`). Give every new site labels, and pick them
+yourself rather than asking:
+
+1. **Look at what the instance already uses.** `brisk list` prints each site's
+   labels as `#tags`. Reuse an existing spelling whenever one fits (`dashboard`,
+   not `dashboards` or `dash`) — a new label only when nothing fits.
+2. **Describe the site, not the request.** One label for what it _is_
+   (`dashboard`, `game`, `form`, `report`, `tool`) and one or two for who it's
+   for or what it's about (`marketing`, `security`, `launch-kit`, `q4-offsite`),
+   from the request, the folder, or what you built. Five at most; two or three
+   is usually right.
+3. **Write them down, don't block on them.** Put them in `brisk.json` —
+   `{ "site": "cve-tracker", "labels": ["dashboard", "security"] }` — or, for a
+   single-file deploy (which has no `brisk.json`), pass
+   `brisk deploy report.html --labels dashboard,security`. Say which labels you
+   chose in your summary so the user can change them.
+
+Labels are lowercase letters, digits, and dashes, up to 24 characters; the CLI
+turns `Launch Kit` into `launch-kit` and refuses anything else before uploading.
+A redeploy that sends no labels keeps the site's current ones, so when
+**iterating on an existing site, leave its labels alone** unless asked.
+`--labels ""` clears them.
+
 ### 5. Verify — always
 
 ```sh
@@ -99,7 +126,7 @@ Never report "done" without seeing it live.
 ### 6. Remix and inspect existing sites
 
 ```sh
-brisk list             # everything deployed on the instance
+brisk list             # everything deployed on the instance, with each site's #labels
 brisk pull <site> dir  # download a site's source to remix it
 ```
 
