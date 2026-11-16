@@ -271,7 +271,7 @@ td code {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
-  gap: 1rem;
+  gap: 0.6rem 1rem;
   margin: 3rem 0 0.5rem;
 }
 
@@ -379,10 +379,19 @@ td code {
   color: var(--accent);
 }
 
+/* Its own line under the count and the search box. */
 .label-filter {
+  order: 1;
+  flex-basis: 100%;
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
+  align-items: baseline;
+  gap: 0.3rem 0.9rem;
+}
+
+.facet .n {
+  margin-left: 0.3rem;
+  opacity: 0.6;
 }
 
 .label-filter[hidden] {

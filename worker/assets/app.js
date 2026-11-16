@@ -90,21 +90,35 @@ function labelButton(label, className) {
   return b;
 }
 
-function renderChips() {
+/** Selected labels as removable chips, then every other label on the visible
+ *  rows with how many of them carry it: a click never empties the list. */
+function renderLabelBar(visible) {
+  const counts = new Map();
+  for (const site of visible) {
+    for (const label of site.labels ?? []) {
+      if (!selected.has(label)) counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+  }
+  const chips = [...selected].map((label) => {
+    const chip = labelButton(label, 'chip');
+    chip.title = `stop filtering by ${label}`;
+    chip.append(cell('x', '×'));
+    return chip;
+  });
+  const facets = [...counts]
+    .sort(([a, n], [b, m]) => m - n || a.localeCompare(b))
+    .map(([label, n]) => {
+      const facet = labelButton(label, 'label facet');
+      facet.title = `only sites labelled ${label}`;
+      facet.append(cell('n', String(n)));
+      return facet;
+    });
   const bar = $('label-filter');
-  bar.hidden = !selected.size;
-  bar.replaceChildren(
-    ...[...selected].map((label) => {
-      const chip = labelButton(label, 'chip');
-      chip.title = `stop filtering by ${label}`;
-      chip.append(cell('x', '×'));
-      return chip;
-    }),
-  );
+  bar.replaceChildren(...chips, ...facets);
+  bar.hidden = !bar.childElementCount;
 }
 
 function render() {
-  renderChips();
   const list = $('site-list');
   const typed = $('filter').value.trim();
   const visible = sites.filter(
@@ -112,6 +126,7 @@ function render() {
       matches(s, typed.toLowerCase()) &&
       [...selected].every((label) => (s.labels ?? []).includes(label)),
   );
+  renderLabelBar(visible);
   const total = `${sites.length} ${sites.length === 1 ? 'site' : 'sites'}`;
   $('site-count').textContent =
     typed || selected.size
