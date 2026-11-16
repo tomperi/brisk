@@ -469,6 +469,72 @@ describe('site ownership', () => {
   });
 });
 
+describe('site labels', () => {
+  const deploy = (name: string, labels?: string) =>
+    SELF.fetch(`${HOST}/api/deploy/${name}`, {
+      method: 'POST',
+      body: deployForm({ 'index.html': 'x' }),
+      headers: labels === undefined ? {} : { 'x-brisk-labels': labels },
+    });
+  const labelsOf = async (name: string): Promise<string[]> =>
+    (await (await SELF.fetch(`${HOST}/api/sites/${name}`)).json<{ labels: string[] }>()).labels;
+
+  it('normalizes and dedupes labels, and lists them with the site', async () => {
+    const res = await deploy('tagged', JSON.stringify(['Launch Kit', 'launch_kit', ' Marketing ']));
+    expect(res.status).toBe(200);
+    expect((await res.json<{ labels: string[] }>()).labels).toEqual(['launch-kit', 'marketing']);
+
+    const { sites } = await (
+      await SELF.fetch(`${HOST}/api/sites`)
+    ).json<{
+      sites: { name: string; labels: string[] }[];
+    }>();
+    expect(sites.find((s) => s.name === 'tagged')?.labels).toEqual(['launch-kit', 'marketing']);
+  });
+
+  it('keeps labels when a deploy sends none, and clears them on an explicit []', async () => {
+    await deploy('kept', JSON.stringify(['dashboard']));
+    // A drag-and-drop or an older CLI says nothing about labels.
+    expect((await deploy('kept')).status).toBe(200);
+    expect(await labelsOf('kept')).toEqual(['dashboard']);
+
+    await deploy('kept', JSON.stringify(['dashboard', 'marketing']));
+    expect(await labelsOf('kept')).toEqual(['dashboard', 'marketing']);
+
+    await deploy('kept', '[]');
+    expect(await labelsOf('kept')).toEqual([]);
+  });
+
+  it('reports [] for a site deployed without ever sending labels', async () => {
+    await deploy('unlabelled');
+    expect(await labelsOf('unlabelled')).toEqual([]);
+  });
+
+  it('rejects bad labels with a 400 and leaves the site untouched', async () => {
+    await deploy('strict', JSON.stringify(['ok']));
+    const cases = [
+      JSON.stringify(['a', 'b', 'c', 'd', 'e', 'f']), // too many
+      JSON.stringify(['emoji 🚀']),
+      JSON.stringify(['x'.repeat(25)]),
+      JSON.stringify(['  ']), // empty once normalized
+      JSON.stringify('dashboard'), // not an array
+      JSON.stringify([1]),
+      'dashboard,marketing', // not JSON
+    ];
+    for (const labels of cases) {
+      const res = await deploy('strict', labels);
+      expect(res.status, labels).toBe(400);
+    }
+    expect(await labelsOf('strict')).toEqual(['ok']);
+  });
+
+  it('allows exactly five once duplicates collapse', async () => {
+    const res = await deploy('five', JSON.stringify(['a', 'b', 'c', 'd', 'e', 'A', 'e ']));
+    expect(res.status).toBe(200);
+    expect(await labelsOf('five')).toEqual(['a', 'b', 'c', 'd', 'e']);
+  });
+});
+
 describe('database', () => {
   const headers = { 'content-type': 'application/json', 'x-brisk-site': 'db-test' };
 
