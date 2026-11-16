@@ -10,6 +10,7 @@ brisk init my-site     # scaffold a site
 brisk deploy my-site   # deploy a folder → get a URL
 brisk dev              # run locally
 brisk list             # your sites
+brisk labels           # labels in use, with site counts
 brisk pull <site>      # download a deployed site
 ```
 

@@ -94,8 +94,9 @@ clicking a few narrows the list to sites with all of them
 (`/?labels=marketing,dashboard`). Give every new site labels, and pick them
 yourself rather than asking:
 
-1. **Look at what the instance already uses.** `brisk list` prints each site's
-   labels as `#tags`. Reuse an existing spelling whenever one fits (`dashboard`,
+1. **Look at what the instance already uses.** `brisk labels` lists every
+   label in use, most used first, with how many sites carry it (`--json` for
+   machine output). Reuse an existing spelling whenever one fits (`dashboard`,
    not `dashboards` or `dash`) — a new label only when nothing fits.
 2. **Describe the site, not the request.** One label for what it _is_
    (`dashboard`, `game`, `form`, `report`, `tool`) and one or two for who it's
@@ -127,6 +128,7 @@ Never report "done" without seeing it live.
 
 ```sh
 brisk list             # everything deployed on the instance, with each site's #labels
+brisk labels           # labels in use, most used first, with site counts
 brisk pull <site> dir  # download a site's source to remix it
 ```
 

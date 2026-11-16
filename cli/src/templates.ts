@@ -92,7 +92,7 @@ room.on('presence', (members) => {});                 // fires on join/leave
   teammates can leave feedback on any element. See \`brisk plugin --help\`.
 - Labels tag the site on the dashboard so teammates can filter by them:
   \`"labels": ["dashboard", "marketing"]\` in \`brisk.json\` (max 5, lowercase,
-  spaces become dashes). Reuse labels other sites already have (\`brisk list\`
-  shows them) before inventing new ones. \`brisk deploy --labels a,b\` sets them
+  spaces become dashes). Reuse labels other sites already have (\`brisk labels\`
+  lists them with counts) before inventing new ones. \`brisk deploy --labels a,b\` sets them
   for a single-file deploy, which has no \`brisk.json\`.
 `;

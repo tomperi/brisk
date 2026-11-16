@@ -17,12 +17,15 @@ releases are published to
   CLI refuses a bad one before uploading and the server answers 400. A deploy
   that sends no labels — including a dashboard drop with no `brisk.json` —
   keeps the site's current ones, and `--labels ""` clears them.
-- **Dashboard** — each site row shows its labels. Click labels to show only the
-  sites that have all of them; the selection is in the URL
+- **Dashboard** — each site row shows its labels, and a bar above the list
+  shows every label with how many of the listed sites carry it. Click labels to
+  show only the sites that have all of them, and the counts follow; the selection is in the URL
   (`/?labels=marketing,dashboard`) so you can share it, and each one is a chip
   you click to remove. Dropping a folder reads labels from its `brisk.json`.
-- **`brisk list`** shows each site's labels, and the Brisk skill picks labels
-  for new sites, reusing the ones the instance already has.
+- **`brisk labels`** lists every label in use with its site count, most used
+  first (`--json` for agents). `brisk list` shows each site's labels, and the
+  Brisk skill picks labels for new sites, reusing the ones the instance
+  already has.
 
 ### Changed
 
