@@ -23,7 +23,7 @@ releases are published to
   (`/?labels=marketing,dashboard`) so you can share it, and each one is a chip
   you click to remove. Dropping a folder reads labels from its `brisk.json`.
 - **`brisk labels`** lists every label in use with its site count, most used
-  first (`--json` for agents). `brisk list` shows each site's labels, and the
+  first (`--json` for agents), from the new `GET /api/labels`. `brisk list` shows each site's labels, and the
   Brisk skill picks labels for new sites, reusing the ones the instance
   already has.
 

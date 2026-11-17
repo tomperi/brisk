@@ -96,7 +96,7 @@ yourself rather than asking:
 
 1. **Look at what the instance already uses.** `brisk labels` lists every
    label in use, most used first, with how many sites carry it (`--json` for
-   machine output). Reuse an existing spelling whenever one fits (`dashboard`,
+   machine output; `GET /api/labels` is the same list). Reuse an existing spelling whenever one fits (`dashboard`,
    not `dashboards` or `dash`) — a new label only when nothing fits.
 2. **Describe the site, not the request.** One label for what it _is_
    (`dashboard`, `game`, `form`, `report`, `tool`) and one or two for who it's
