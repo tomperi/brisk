@@ -40,6 +40,8 @@ export interface Env {
   DEPLOY_TOKEN?: string;
   ANTHROPIC_API_KEY?: string;
   OPENAI_API_KEY?: string;
+  /** Jev (TypeSafe) key; powers GET /api/labels/suggested. */
+  TYPESAFE_API_KEY?: string;
 }
 
 export interface User {

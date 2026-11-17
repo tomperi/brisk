@@ -53,6 +53,7 @@ export const SECRET_VARS = [
   'DEPLOY_TOKEN',
   'ANTHROPIC_API_KEY',
   'OPENAI_API_KEY',
+  'TYPESAFE_API_KEY',
 ] as const;
 
 export interface GeneratedFile {

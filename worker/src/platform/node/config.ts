@@ -28,6 +28,7 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): Env {
     GOOGLE_CLIENT_SECRET: env.GOOGLE_CLIENT_SECRET,
     DEPLOY_TOKEN: env.DEPLOY_TOKEN,
     ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY,
+    TYPESAFE_API_KEY: env.TYPESAFE_API_KEY,
     OPENAI_API_KEY: env.OPENAI_API_KEY,
   };
 }

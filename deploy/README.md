@@ -30,6 +30,7 @@ the Node storage/runtime settings. Compose reads them from `deploy/.env` (copy
 | `DEPLOY_TOKEN`          | _(none)_             | Optional bearer token for CI deploys.                                                     |
 | `ANTHROPIC_API_KEY`     | _(none)_             | Optional; enables the AI proxy (Anthropic).                                               |
 | `OPENAI_API_KEY`        | _(none)_             | Optional; AI proxy alternative (provider is picked by whichever key is set).              |
+| `TYPESAFE_API_KEY`      | _(none)_             | Optional; enables label suggestions (`GET /api/labels/suggested`, Jev).                   |
 | `STORAGE`               | `s3`                 | `fs` (objects on the data volume) or `s3`. Compose and Helm override the default to `fs`. |
 | `SQLITE_PATH`           | `/data/brisk.sqlite` | SQLite database file (always on the volume, in both storage modes).                       |
 | `FS_ROOT`               | `/data/objects`      | Object directory when `STORAGE=fs`.                                                       |
@@ -109,7 +110,7 @@ Inspect the rendered manifests first with `helm template brisk deploy/helm/brisk
 ### Secrets
 
 Sensitive values (`SESSION_SECRET`, `GOOGLE_*`, `DEPLOY_TOKEN`,
-`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `S3_*` credentials) go into a Kubernetes
+`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `TYPESAFE_API_KEY`, `S3_*` credentials) go into a Kubernetes
 Secret. Either inline them via `--set secrets.<name>=…` (the chart creates the
 Secret) or, for production, pre-create your own Secret with the same keys and
 point the chart at it:

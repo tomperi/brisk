@@ -22,6 +22,7 @@ services:
       DEPLOY_TOKEN: ${DEPLOY_TOKEN:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
       # storage: filesystem by default (one volume). Override to s3 with the profile below.
       STORAGE: ${STORAGE:-fs}
       FS_ROOT: /data/objects
