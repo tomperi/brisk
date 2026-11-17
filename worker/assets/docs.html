@@ -97,6 +97,7 @@ brisk deploy my-site   # → https://my-site.your-host/
 brisk dev my-site      # redeploy on every save
 brisk list             # everything on this instance
 brisk labels           # labels in use, most used first
+brisk labels suggest "a CVE dashboard for security"  # existing labels that fit
 brisk pull some-site   # download any site's source to remix it</code></pre>
       <p>
         When this instance runs a newer Brisk than your CLI, the CLI says so: update with
@@ -113,9 +114,11 @@ brisk pull some-site   # download any site's source to remix it</code></pre>
         <code>brisk.json</code> — <code>{ "labels": ["dashboard", "security"] }</code> — or pass
         <code>brisk deploy --labels dashboard,security</code>, which wins over
         <code>brisk.json</code>. <code>brisk labels</code> lists the labels already in use, so reuse
-        one before you make a new one. A deploy with neither keeps the site's labels, and
-        <code>--labels ""</code> clears them. On the dashboard, click labels to list only the sites
-        that have all of them; the link (<code>/?labels=dashboard,security</code>) is shareable.
+        one before you make a new one; where the instance has suggestions,
+        <code>brisk labels suggest "&lt;what the site is&gt;"</code> names the ones that fit. A
+        deploy with neither keeps the site's labels, and <code>--labels ""</code> clears them. On
+        the dashboard, click labels to list only the sites that have all of them; the link
+        (<code>/?labels=dashboard,security</code>) is shareable.
       </p>
       <p>
         Every publish is a versioned snapshot. Only the current version is ever served; by default
