@@ -411,12 +411,10 @@ export async function list(flags: Flags): Promise<void> {
 /** Every label in use, most used first, so a deploy can reuse an existing spelling. */
 export async function labels(flags: Flags, json: boolean): Promise<void> {
   const conn = resolveConnection(flags, process.cwd());
-  const { sites } = await api<{ sites: SiteInfo[] }>(conn, '/api/sites');
-  const counts = new Map<string, number>();
-  for (const s of sites) for (const l of s.labels ?? []) counts.set(l, (counts.get(l) ?? 0) + 1);
-  const rows = [...counts]
-    .map(([label, n]) => ({ label, sites: n }))
-    .sort((a, b) => b.sites - a.sites || a.label.localeCompare(b.label));
+  const { labels: rows } = await api<{ labels: { label: string; sites: number }[] }>(
+    conn,
+    '/api/labels',
+  );
   if (json) {
     console.log(JSON.stringify(rows));
     return;
