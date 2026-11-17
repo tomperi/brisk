@@ -10,7 +10,7 @@ ${bold('Usage')}
   brisk init [name]            scaffold a new site folder
   brisk deploy [dir|file]      upload a folder (or one html file), get a URL
   brisk dev [dir|file]         deploy on every file change
-  brisk list                   all sites on the instance
+  brisk list                   all sites on the instance, with their #labels
   brisk labels                 labels in use and how many sites have each; --json
   brisk open [site]            open a site in the browser
   brisk pull <site> [dir]      download a site's source to remix it
@@ -42,8 +42,8 @@ ${bold('Options')}
   --server <url>               target instance directly, e.g. brisk.example.com
   --profile <name>             use a specific profile for this command
   --username <name>            deploy identity / owner label (default: profile username)
-  --labels <a,b>               deploy with these labels (max 5), overriding brisk.json;
-                               "" clears them. Without it, a redeploy keeps the site's labels
+  --labels <a,b>               deploy with these labels (max 5), overriding brisk.json "labels";
+                               "" clears them. With neither, a redeploy keeps the site's labels
   -f, --force                  overwrite a site owned by someone else
   -y, --yes                    confirm deploying to an open (AUTH=none) public instance
 

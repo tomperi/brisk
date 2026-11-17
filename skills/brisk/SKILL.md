@@ -1,6 +1,6 @@
 ---
 name: brisk
-description: Use when creating, deploying, or iterating on a Brisk app or site. Brisk is drop-a-folder hosting with zero-config browser APIs (db, identity, ai, files, channels). Triggers on "build a brisk app/site", "deploy to brisk", "make me a … site" on a Brisk instance, and on acting on comments left on a Brisk site.
+description: Use when creating, deploying, or iterating on a Brisk app or site. Brisk is drop-a-folder hosting with zero-config browser APIs (db, identity, ai, files, channels). Triggers on "build a brisk app/site", "deploy to brisk", "make me a … site" on a Brisk instance, on labelling sites or finding them by label, and on acting on comments left on a Brisk site.
 ---
 
 # Building and deploying Brisk apps
@@ -80,14 +80,7 @@ Plain HTML/CSS/JS. Load the SDK and use it directly — no keys, no imports:
 For the full set of calls (db, me, ai, fs, channels), see
 [references/sdk.md](references/sdk.md). One folder, `index.html` is the entry.
 
-### 4. Ship
-
-```sh
-brisk dev      # redeploy on every save — use while iterating
-brisk deploy   # ship once
-```
-
-### Label it
+### 4. Label it
 
 Labels are how teammates find sites on the dashboard: each row shows them, and
 clicking a few narrows the list to sites with all of them
@@ -96,8 +89,9 @@ yourself rather than asking:
 
 1. **Look at what the instance already uses.** `brisk labels` lists every
    label in use, most used first, with how many sites carry it (`--json` for
-   machine output; `GET /api/labels` is the same list). Reuse an existing spelling whenever one fits (`dashboard`,
-   not `dashboards` or `dash`) — a new label only when nothing fits.
+   machine output; `GET /api/labels` is the same list). Reuse an existing
+   spelling whenever one fits (`dashboard`, not `dashboards` or `dash`) — a
+   new label only when nothing fits.
 2. **Describe the site, not the request.** One label for what it _is_
    (`dashboard`, `game`, `form`, `report`, `tool`) and one or two for who it's
    for or what it's about (`marketing`, `security`, `launch-kit`, `q4-offsite`),
@@ -111,11 +105,25 @@ yourself rather than asking:
 
 Labels are lowercase letters, digits, and dashes, up to 24 characters; the CLI
 turns `Launch Kit` into `launch-kit` and refuses anything else before uploading.
-A redeploy that sends no labels keeps the site's current ones, so when
-**iterating on an existing site, leave its labels alone** unless asked.
-`--labels ""` clears them.
+A deploy without `--labels` and without `"labels"` in `brisk.json` keeps the
+site's current ones, so when **iterating on an existing site, leave its labels
+alone** unless asked. To relabel a site, change `"labels"` in its `brisk.json`
+and deploy, or deploy with `--labels a,b` (the flag wins over `brisk.json`);
+`--labels ""` clears them. Dropping a folder on the dashboard reads the same
+`brisk.json` labels.
 
-### 5. Verify — always
+To find sites by label, `brisk list` shows each site's `#labels`, and the
+dashboard link `/?labels=dashboard,security` lists only the sites that have all
+of those labels — share it when the user asks for "all our security dashboards".
+
+### 5. Ship
+
+```sh
+brisk dev      # redeploy on every save — use while iterating
+brisk deploy   # ship once
+```
+
+### 6. Verify — always
 
 ```sh
 brisk open     # open the deployed URL
@@ -124,7 +132,7 @@ brisk open     # open the deployed URL
 Load the URL and confirm the page renders and a `brisk.*` call actually works.
 Never report "done" without seeing it live.
 
-### 6. Remix and inspect existing sites
+### 7. Remix and inspect existing sites
 
 ```sh
 brisk list             # everything deployed on the instance, with each site's #labels
