@@ -528,6 +528,30 @@ describe('site labels', () => {
     expect(await labelsOf('strict')).toEqual(['ok']);
   });
 
+  it('counts each label across sites, most used first', async () => {
+    const counted = async () =>
+      (
+        await (
+          await SELF.fetch(`${HOST}/api/labels`)
+        ).json<{
+          labels: { label: string; sites: number }[];
+        }>()
+      ).labels.filter((l) => l.label.startsWith('tally-'));
+
+    await deploy('tally-1', JSON.stringify(['tally-b', 'tally-a']));
+    await deploy('tally-2', JSON.stringify(['tally-a']));
+    await deploy('tally-3', JSON.stringify(['tally-a', 'tally-c']));
+    expect(await counted()).toEqual([
+      { label: 'tally-a', sites: 3 },
+      { label: 'tally-b', sites: 1 },
+      { label: 'tally-c', sites: 1 },
+    ]);
+
+    await deploy('tally-3', '[]');
+    await SELF.fetch(`${HOST}/api/sites/tally-1`, { method: 'DELETE' });
+    expect(await counted()).toEqual([{ label: 'tally-a', sites: 1 }]);
+  });
+
   it('allows exactly five once duplicates collapse', async () => {
     const res = await deploy('five', JSON.stringify(['a', 'b', 'c', 'd', 'e', 'A', 'e ']));
     expect(res.status).toBe(200);

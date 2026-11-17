@@ -170,6 +170,19 @@ export async function listSites(platform: Platform): Promise<SiteInfo[]> {
   return results.map(toInfo);
 }
 
+/** Every label in use with how many sites carry it, most used first. */
+export async function listLabels(platform: Platform): Promise<{ label: string; sites: number }[]> {
+  const { results } = await platform.db
+    .prepare(
+      `SELECT j.value AS label, COUNT(*) AS sites
+       FROM sites, json_each(sites.labels) j
+       GROUP BY j.value
+       ORDER BY sites DESC, label`,
+    )
+    .all<{ label: string; sites: number }>();
+  return results;
+}
+
 export async function getSite(platform: Platform, name: string): Promise<SiteInfo | null> {
   const row = await platform.db
     .prepare('SELECT * FROM sites WHERE name = ?')

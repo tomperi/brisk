@@ -21,6 +21,7 @@ import {
   getSite,
   isValidSiteName,
   listFiles,
+  listLabels,
   listSites,
   parseLabels,
   serveSite,
@@ -362,6 +363,8 @@ export function createApp(
     );
     return res!; // build() never returns null here
   });
+
+  app.get('/api/labels', async (c) => c.json({ labels: await listLabels(c.var.platform) }));
 
   app.get('/api/sites/:name', async (c) => {
     const site = await getSite(c.var.platform, c.req.param('name'));
