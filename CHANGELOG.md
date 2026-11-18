@@ -19,13 +19,13 @@ releases are published to
   keeps the site's current ones, and `--labels ""` clears them.
 - **Dashboard** — each site row shows its labels, and a bar above the list
   shows every label with how many of the listed sites carry it. Click labels to
-  show only the sites that have all of them, and the counts follow; the selection is in the URL
-  (`/?labels=marketing,dashboard`) so you can share it, and each one is a chip
-  you click to remove. Dropping a folder reads labels from its `brisk.json`.
+  show only the sites that have all of them, and the counts follow; the
+  selection is in the URL (`/?labels=marketing,dashboard`) so you can share it,
+  and each one is a chip you click to remove. Dropping a folder reads labels from its `brisk.json`.
 - **`brisk labels`** lists every label in use with its site count, most used
-  first (`--json` for agents), from the new `GET /api/labels`. `brisk list` shows each site's labels, and the
-  Brisk skill picks labels for new sites, reusing the ones the instance
-  already has.
+  first (`--json` for agents), from the new `GET /api/labels`. `brisk list`
+  shows each site's labels, and the Brisk skill picks labels for new sites,
+  reusing the ones the instance already has.
 
 ### Changed
 
