@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { noteServerVersion } from './version.js';
 
 // ---- per-folder config (brisk.json) -----------------------------------------
 
@@ -179,6 +180,7 @@ export async function request<T>(
     ...init,
     headers: { ...authHeaders(conn), ...(init.headers as Record<string, string>) },
   });
+  noteServerVersion(res.headers.get('x-brisk-version'));
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     let body: unknown = text;

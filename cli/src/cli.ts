@@ -3,6 +3,7 @@ import { parseArgs } from 'node:util';
 import * as commands from './commands.js';
 import { db } from './db.js';
 import { bold, cyan, dim, yellow } from './ui.js';
+import { CLI_VERSION } from './version.js';
 
 const HELP = `${bold('brisk')} — drop a folder, get a site
 
@@ -46,6 +47,7 @@ ${bold('Options')}
                                "" clears them. With neither, a redeploy keeps the site's labels
   -f, --force                  overwrite a site owned by someone else
   -y, --yes                    confirm deploying to an open (AUTH=none) public instance
+  -v, --version                print the CLI version
 
 ${bold('Environment')}
   BRISK_PROFILE                like --profile
@@ -102,6 +104,7 @@ async function main(): Promise<void> {
       force: { type: 'boolean', short: 'f' },
       yes: { type: 'boolean', short: 'y' },
       help: { type: 'boolean', short: 'h' },
+      version: { type: 'boolean', short: 'v' },
       // `brisk db` only. Ids and collections never start with a dash and doc
       // JSON arrives by file or stdin, so db needs no interception like plugin.
       file: { type: 'string' },
@@ -115,6 +118,10 @@ async function main(): Promise<void> {
   });
 
   const [command, ...args] = positionals;
+  if (values.version) {
+    console.log(CLI_VERSION);
+    return;
+  }
   if (values.help || !command) {
     console.log(HELP);
     return;
