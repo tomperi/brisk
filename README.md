@@ -347,6 +347,7 @@ brisk pull <site> [dir]         # download any site's source to remix it
 
 brisk login [server]            # log in to an instance, creates a profile
 brisk whoami                    # who you are, where
+brisk --version                 # the CLI's version; it notes when the instance is newer
 brisk profiles                  # list profiles; `brisk profile use <name>` switches
 ```
 
