@@ -365,8 +365,9 @@ free-form, normalized to lowercase slugs (`Launch Kit` → `launch-kit`);
 `brisk labels` lists the ones in use so you can reuse a spelling. The dashboard
 shows every label with its site count above the list; clicking labels narrows
 the list to sites that have all of them, the counts follow the narrowed list,
-and the URL (`/?labels=dashboard,marketing`) is shareable. A deploy that sends no labels
-keeps the site's current ones; `--labels ""` clears them.
+and the URL (`/?labels=dashboard,marketing`) is shareable. `--labels` wins over
+`brisk.json`; a deploy with neither keeps the site's current labels, and
+`--labels ""` clears them.
 
 `brisk init` also drops an `AGENTS.md` so coding agents immediately know the
 SDK — "make me a lunch-voting site" works out of the box. For an agent to know
