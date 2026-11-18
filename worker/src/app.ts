@@ -30,6 +30,7 @@ import {
   type DeployFile,
 } from './sites';
 import type { AppEnv, Env } from './env';
+import { version } from '../package.json';
 import type { DbEvent, Platform } from './platform/types';
 import { PLUGINS } from './plugins';
 import { resolveEnabled, withMandatory } from './plugins/resolve';
@@ -177,6 +178,11 @@ export function createApp(
     await next();
   };
   app.use('/api/*', denyFrameNoSniff);
+  // The CLI compares this with its own version and says when to update.
+  app.use('/api/*', async (c, next) => {
+    c.header('x-brisk-version', version);
+    await next();
+  });
   app.use('/auth/*', denyFrameNoSniff);
 
   app.use('*', auth());
