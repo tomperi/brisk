@@ -10,6 +10,8 @@ export interface SiteConfig {
   server?: string;
   /** Per-plugin on/off; resolved against the instance's registry at deploy. */
   plugins?: Record<string, boolean>;
+  /** Free-form dashboard tags; `--labels` on deploy overrides them. */
+  labels?: unknown;
 }
 
 export function loadConfig(dir: string): SiteConfig {

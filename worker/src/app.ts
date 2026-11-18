@@ -21,7 +21,9 @@ import {
   getSite,
   isValidSiteName,
   listFiles,
+  listLabels,
   listSites,
+  parseLabels,
   serveSite,
   siteFromHost,
   sitePlugins,
@@ -61,6 +63,20 @@ function parseRequestedPlugins(header: string | undefined): Record<string, boole
   } catch {
     return {};
   }
+}
+
+/** The site's labels, sent as an x-brisk-labels JSON array. Unlike plugins, a
+ *  bad value fails the deploy: labels are typed by people, and silently dropping
+ *  a typo would hide it. No header = `undefined` = keep the current labels. */
+function requestedLabels(header: string | undefined): { labels?: string[] } | { error: string } {
+  if (header === undefined) return {};
+  let value: unknown;
+  try {
+    value = JSON.parse(header);
+  } catch {
+    return { error: 'x-brisk-labels must be a JSON array of strings' };
+  }
+  return parseLabels(value);
 }
 
 /**
@@ -348,6 +364,8 @@ export function createApp(
     return res!; // build() never returns null here
   });
 
+  app.get('/api/labels', async (c) => c.json({ labels: await listLabels(c.var.platform) }));
+
   app.get('/api/sites/:name', async (c) => {
     const site = await getSite(c.var.platform, c.req.param('name'));
     return site
@@ -382,6 +400,8 @@ export function createApp(
       .map((file) => ({ path: file.name.replace(/^\/+/, ''), file }))
       .filter(({ path }) => path && !path.split('/').includes('..'));
     if (!files.length) return c.json({ error: 'no files in form field "files"' }, 400);
+    const labelled = requestedLabels(c.req.header('x-brisk-labels'));
+    if ('error' in labelled) return c.json({ error: labelled.error }, 400);
     if (files.length > MAX_DEPLOY_FILES) {
       return c.json({ error: `too many files (max ${MAX_DEPLOY_FILES})` }, 400);
     }
@@ -418,6 +438,7 @@ export function createApp(
       who,
       c.env.DEPLOY_HISTORY === 'on',
       enabled,
+      labelled.labels,
     );
     return c.json({ ...info, url: siteUrl(c, site) });
   });

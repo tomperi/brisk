@@ -19,6 +19,9 @@
   const USERNAME_KEY = 'brisk-username';
 
   let dropped = []; // [{ path, file }]
+  /** From the dropped folder's brisk.json, like the CLI: undefined sends no
+   *  labels (the site keeps its own), a string is why they're unusable. */
+  let droppedLabels;
   let stage = null;
   let shipping = false;
   /** Set once the server has told us this name is owned by someone else, so the
@@ -36,6 +39,7 @@
     overlay.hidden = true;
     stage = null;
     dropped = [];
+    droppedLabels = undefined;
     shipping = false;
     // Dismissing ends the flow the 409 armed this for. Leaving it set would let
     // the next drop overwrite a site someone else owns with no confirmation —
@@ -97,6 +101,37 @@
     return { files: out, defaultName: single };
   }
 
+  // ---- brisk.json labels ---------------------------------------------------------
+  // Mirror of worker/src/sites.ts parseLabels, checked here so a bad brisk.json
+  // shows up before launch instead of as a failed upload.
+
+  const normalizeLabel = (raw) =>
+    raw
+      .trim()
+      .toLowerCase()
+      .replace(/[\s_]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+
+  async function labelsFrom(configFile) {
+    let config;
+    try {
+      config = JSON.parse(await configFile.text());
+    } catch {
+      return 'brisk.json is not valid JSON';
+    }
+    const raw = config?.labels;
+    if (raw === undefined) return undefined;
+    if (!Array.isArray(raw) || !raw.every((l) => typeof l === 'string')) {
+      return 'brisk.json "labels" must be an array of strings';
+    }
+    const labels = [...new Set(raw.map(normalizeLabel))];
+    const bad = labels.find((l) => !/^[a-z0-9-]{1,24}$/.test(l));
+    if (bad !== undefined) return `brisk.json has an invalid label “${bad}”`;
+    if (labels.length > 5) return `brisk.json has ${labels.length} labels — the max is 5`;
+    return labels;
+  }
+
   // ---- the name stage ----------------------------------------------------------
 
   const slugify = (s) => s.toLowerCase().replace(/[^a-z0-9-]/g, '-');
@@ -122,8 +157,10 @@
 
   function prepareNameStage(defaultName) {
     const bytes = dropped.reduce((sum, f) => sum + f.file.size, 0);
+    const tags = Array.isArray(droppedLabels) ? droppedLabels.map((l) => `#${l}`).join(' ') : '';
     $('drop-count').textContent =
-      `${dropped.length} ${dropped.length === 1 ? 'file' : 'files'} ready · ${humanBytes(bytes)}`;
+      `${dropped.length} ${dropped.length === 1 ? 'file' : 'files'} ready · ${humanBytes(bytes)}` +
+      (tags ? ` · ${tags}` : '');
     $('name-suffix').textContent = subdomainMode() ? `.${location.host}` : ` → /s/…/`;
     nameInput.value = slugify(defaultName);
     $('deploy-username').value = localStorage.getItem(USERNAME_KEY) ?? '';
@@ -132,7 +169,8 @@
     nameInput.focus();
     nameInput.select();
 
-    if (dropped.length > MAX_FILES)
+    if (typeof droppedLabels === 'string') fail(droppedLabels);
+    else if (dropped.length > MAX_FILES)
       fail(`that's ${dropped.length} files — the limit is ${MAX_FILES}`);
     else if (bytes > MAX_BYTES)
       fail(`that's ${humanBytes(bytes)} — keep deploys under ${humanBytes(MAX_BYTES)}`);
@@ -157,6 +195,7 @@
     }
     const bytes = dropped.reduce((sum, f) => sum + f.file.size, 0);
     if (dropped.length > MAX_FILES || bytes > MAX_BYTES) return;
+    if (typeof droppedLabels === 'string') return fail(droppedLabels);
 
     shipping = true;
     launch.disabled = true;
@@ -176,7 +215,10 @@
       const res = await fetch(`/api/deploy/${name}${armedForce ? '?force=1' : ''}`, {
         method: 'POST',
         body: form,
-        headers: username ? { 'x-brisk-username': username } : {},
+        headers: {
+          ...(username ? { 'x-brisk-username': username } : {}),
+          ...(droppedLabels ? { 'x-brisk-labels': JSON.stringify(droppedLabels) } : {}),
+        },
       });
       const info = await res.json().catch(() => ({}));
 
@@ -243,8 +285,12 @@
     depth = 0;
     if (stage !== 'over') return; // mid-flow drops are ignored; esc first
     const { files, defaultName } = await collect(e.dataTransfer);
-    if (!files.length) return reset();
-    dropped = files;
+    // A dropped folder's brisk.json is config, not content — the CLI never
+    // uploads it either. Only the root one counts, as with the CLI.
+    const config = files.find((f) => f.path === 'brisk.json');
+    dropped = files.filter((f) => f !== config);
+    if (!dropped.length) return reset();
+    droppedLabels = config ? await labelsFrom(config.file) : undefined;
     prepareNameStage(defaultName);
   });
 

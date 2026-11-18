@@ -17,6 +17,8 @@ export interface SiteInfo {
    *  (an explicit opt-out), so the API doesn't report a widget-injecting legacy
    *  site as having plugins off. */
   plugins: string[] | null;
+  /** Free-form tags for finding sites on the dashboard; `[]` when none. */
+  labels: string[];
 }
 
 interface SiteRow {
@@ -29,6 +31,7 @@ interface SiteRow {
   updated_by: string | null;
   owner: string | null;
   plugins: string | null;
+  labels: string | null;
 }
 
 /** Subdomain-safe: a site name has to be a valid DNS label. */
@@ -58,7 +61,37 @@ export function siteFromHost(host: string, baseHost = ''): string | null {
   return null;
 }
 
-function parsePlugins(raw: string | null): string[] {
+export const MAX_LABELS = 5;
+const LABEL = /^[a-z0-9-]{1,24}$/;
+
+/**
+ * Labels are free-form, so one spelling per idea is what keeps filtering useful:
+ * `Launch Kit`, `launch_kit` and `launch-kit` are the same label. Kept in step
+ * with the CLI's and the dashboard's copies, which check before uploading.
+ */
+export const normalizeLabel = (raw: string): string =>
+  raw
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+
+/** A deploy's requested labels, normalized and deduped — or why they're refused. */
+export function parseLabels(input: unknown): { labels: string[] } | { error: string } {
+  if (!Array.isArray(input) || !input.every((l) => typeof l === 'string')) {
+    return { error: 'labels must be a JSON array of strings' };
+  }
+  const labels = [...new Set(input.map(normalizeLabel))];
+  const bad = labels.find((l) => !LABEL.test(l));
+  if (bad !== undefined) {
+    return { error: `invalid label "${bad}": 1–24 lowercase letters, digits, and dashes` };
+  }
+  if (labels.length > MAX_LABELS) return { error: `too many labels (max ${MAX_LABELS})` };
+  return { labels };
+}
+
+function parseStringArray(raw: string | null): string[] {
   if (!raw) return [];
   try {
     const value = JSON.parse(raw);
@@ -77,7 +110,8 @@ function toInfo(row: SiteRow): SiteInfo {
     updatedAt: row.updated_at,
     updatedBy: row.updated_by,
     owner: row.owner,
-    plugins: row.plugins != null ? parsePlugins(row.plugins) : null,
+    plugins: row.plugins != null ? parseStringArray(row.plugins) : null,
+    labels: parseStringArray(row.labels),
   };
 }
 
@@ -103,7 +137,7 @@ async function pointer(platform: Platform, site: string): Promise<Pointer> {
     .first<{ active_deploy: string; plugins: string | null }>();
   const value: Pointer = {
     deploy: row?.active_deploy ?? null,
-    plugins: row && row.plugins != null ? parsePlugins(row.plugins) : null,
+    plugins: row && row.plugins != null ? parseStringArray(row.plugins) : null,
   };
   pointerCache.set(site, { value, expires: Date.now() + POINTER_TTL_MS });
   return value;
@@ -134,6 +168,19 @@ export async function listSites(platform: Platform): Promise<SiteInfo[]> {
     .prepare('SELECT * FROM sites ORDER BY updated_at DESC')
     .all<SiteRow>();
   return results.map(toInfo);
+}
+
+/** Every label in use with how many sites carry it, most used first. */
+export async function listLabels(platform: Platform): Promise<{ label: string; sites: number }[]> {
+  const { results } = await platform.db
+    .prepare(
+      `SELECT j.value AS label, COUNT(*) AS sites
+       FROM sites, json_each(sites.labels) j
+       GROUP BY j.value
+       ORDER BY sites DESC, label`,
+    )
+    .all<{ label: string; sites: number }>();
+  return results;
 }
 
 export async function getSite(platform: Platform, name: string): Promise<SiteInfo | null> {
@@ -256,6 +303,8 @@ export async function deploySite(
   who: string,
   keepHistory: boolean,
   plugins: string[],
+  /** `undefined` keeps the site's current labels; `[]` clears them. */
+  labels?: string[],
 ): Promise<SiteInfo> {
   const previous = await activeDeploy(platform, site);
   const deploy = crypto.randomUUID().slice(0, 8);
@@ -276,23 +325,37 @@ export async function deploySite(
   const now = new Date().toISOString();
   const row = await platform.db
     .prepare(
-      `INSERT INTO sites (name, active_deploy, files, bytes, created_at, updated_at, updated_by, owner, plugins)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO sites (name, active_deploy, files, bytes, created_at, updated_at, updated_by, owner, plugins, labels)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT (name) DO UPDATE SET
        active_deploy = excluded.active_deploy,
        files = excluded.files,
        bytes = excluded.bytes,
        updated_at = excluded.updated_at,
        updated_by = excluded.updated_by,
-       plugins = excluded.plugins
+       plugins = excluded.plugins,
+       labels = COALESCE(excluded.labels, sites.labels)
      RETURNING *`,
     )
     // Attribute to `who` — the asserted deployer, which auth already falls back
     // to the user's name then email. updated_by is the latest deployer; owner is
     // the same identity but set once at creation: it's absent from the ON CONFLICT
     // UPDATE, so a later deploy (even a forced overwrite) preserves it. plugins
-    // reflects the current deploy, so it IS updated every publish.
-    .bind(site, deploy, files.length, bytes, now, now, who, who, JSON.stringify(plugins))
+    // reflects the current deploy, so it IS updated every publish. labels only
+    // move when the deploy sent some: a drag-and-drop or an older CLI that says
+    // nothing about labels mustn't wipe the ones a teammate set.
+    .bind(
+      site,
+      deploy,
+      files.length,
+      bytes,
+      now,
+      now,
+      who,
+      who,
+      JSON.stringify(plugins),
+      labels ? JSON.stringify(labels) : null,
+    )
     .first<SiteRow>();
   pointerCache.delete(site);
   lonePageCache.delete(site);

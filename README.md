@@ -338,8 +338,10 @@ npm install -g @usebrisk/cli       # or run from this repo: node cli/dist/cli.js
 
 brisk init [name]               # scaffold a folder (brisk.json, index.html, AGENTS.md)
 brisk deploy [dir|file]         # upload a folder — or one html file — and get a URL
+                                #   --labels a,b tags it on the dashboard (or "labels" in brisk.json)
 brisk dev [dir|file]            # redeploy on every save
 brisk list                      # everything on the instance
+brisk labels                    # labels in use, most used first; --json
 brisk open [site]               # open in the browser
 brisk pull <site> [dir]         # download any site's source to remix it
 
@@ -355,6 +357,16 @@ deploys are then attributed to _you_. Every command takes `--profile <name>`
 (or `BRISK_PROFILE`); a repo can pin its instance with `server` in
 `brisk.json` and the CLI picks the matching profile automatically. For CI,
 skip profiles entirely: `BRISK_SERVER` + `BRISK_TOKEN`.
+
+**Labels** tag sites so the dashboard list stays findable as it grows: put
+`"labels": ["dashboard", "marketing"]` in `brisk.json`, or pass
+`--labels dashboard,marketing` (handy for a single-file deploy). Up to five,
+free-form, normalized to lowercase slugs (`Launch Kit` → `launch-kit`);
+`brisk labels` lists the ones in use so you can reuse a spelling. The dashboard
+shows every label with its site count above the list; clicking labels narrows
+the list to sites that have all of them, the counts follow the narrowed list,
+and the URL (`/?labels=dashboard,marketing`) is shareable. A deploy that sends no labels
+keeps the site's current ones; `--labels ""` clears them.
 
 `brisk init` also drops an `AGENTS.md` so coding agents immediately know the
 SDK — "make me a lunch-voting site" works out of the box. For an agent to know

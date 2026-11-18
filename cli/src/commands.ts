@@ -26,6 +26,8 @@ export interface Flags {
   server?: string;
   profile?: string;
   username?: string;
+  /** `--labels a,b` — comma-separated; `''` clears. */
+  labels?: string;
   force?: boolean;
   yes?: boolean;
 }
@@ -37,9 +39,57 @@ interface SiteInfo {
   updatedAt: string;
   updatedBy: string | null;
   owner: string | null;
+  labels?: string[];
   url: string;
   /** Resolved enabled plugin ids, or null for a legacy site (registry defaults). */
   plugins: string[] | null;
+}
+
+const MAX_LABELS = 5;
+const LABEL = /^[a-z0-9-]{1,24}$/;
+
+/** Mirror of worker/src/sites.ts normalizeLabel — `Launch Kit` → `launch-kit`. */
+const normalizeLabel = (raw: string): string =>
+  raw
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+
+/**
+ * The labels this deploy sets, checked here so a typo fails before the upload
+ * (the server re-checks). `--labels` wins over brisk.json; a single file has no
+ * brisk.json of its own, so only the flag applies. `undefined` sends nothing,
+ * and the server keeps whatever labels the site already has.
+ */
+export function deployLabels(
+  flag: string | undefined,
+  config: unknown,
+  source: string,
+): string[] | undefined {
+  let raw: string[];
+  if (flag !== undefined) {
+    raw = flag.split(',').filter((l) => l.trim());
+    source = '--labels';
+  } else if (config === undefined) {
+    return undefined;
+  } else if (Array.isArray(config) && config.every((l) => typeof l === 'string')) {
+    raw = config;
+  } else {
+    throw new Error(`${source}: "labels" must be an array of strings`);
+  }
+  const labels = [...new Set(raw.map(normalizeLabel))];
+  const bad = labels.find((l) => !LABEL.test(l));
+  if (bad !== undefined) {
+    throw new Error(
+      `${source}: invalid label "${bad}" — 1–24 lowercase letters, digits, and dashes`,
+    );
+  }
+  if (labels.length > MAX_LABELS) {
+    throw new Error(`${source}: ${labels.length} labels, the max is ${MAX_LABELS}`);
+  }
+  return labels;
 }
 
 const SKIP = new Set(['.git', 'node_modules', '.DS_Store', 'brisk.json']);
@@ -190,6 +240,11 @@ export async function deploy(
   // independent of the ownership overwrite gate below.
   await confirmOpenTarget(conn, flags);
   const username = resolveUsername(flags, conn);
+  const labels = deployLabels(
+    flags.labels,
+    file ? undefined : loadConfig(dir).labels,
+    path.join(dir, 'brisk.json'),
+  );
 
   const files = file ? [{ rel: path.basename(file), abs: file }] : await collectFiles(dir);
   if (!files.length) throw new Error(`nothing to deploy in ${dir}`);
@@ -205,6 +260,7 @@ export async function deploy(
   const headers: Record<string, string> = {
     ...(username ? { 'x-brisk-username': username } : {}),
     ...(requested ? { 'x-brisk-plugins': JSON.stringify(requested) } : {}),
+    ...(labels ? { 'x-brisk-labels': JSON.stringify(labels) } : {}),
   };
 
   const send = async (force: boolean): Promise<SiteInfo> => {
@@ -232,6 +288,9 @@ export async function deploy(
       console.log(
         `  ${yellow('note:')} ${dim(`${name} isn't an html page — the site root has nothing to serve`)}`,
       );
+    }
+    if (info.labels?.length) {
+      console.log(`  ${dim(`labels: ${info.labels.join(', ')}`)}`);
     }
     if (info.plugins?.length) {
       console.log(`  ${dim(`plugins: ${info.plugins.map((p) => `${p} ✓`).join('  ')}`)}`);
@@ -344,7 +403,30 @@ export async function list(flags: Flags): Promise<void> {
     console.log(
       `${bold(s.name.padEnd(width))}${dim(
         `${String(s.files).padStart(4)} files  ${humanBytes(s.bytes).padStart(9)}  ${timeAgo(s.updatedAt).padStart(10)}`,
-      )}  ${s.updatedBy ? dim(s.updatedBy) : ''}`,
+      )}  ${s.updatedBy ? dim(s.updatedBy) : ''}${s.labels?.length ? `  ${cyan(s.labels.map((l) => `#${l}`).join(' '))}` : ''}`,
+    );
+  }
+}
+
+/** Every label in use, most used first, so a deploy can reuse an existing spelling. */
+export async function labels(flags: Flags, json: boolean): Promise<void> {
+  const conn = resolveConnection(flags, process.cwd());
+  const { labels: rows } = await api<{ labels: { label: string; sites: number }[] }>(
+    conn,
+    '/api/labels',
+  );
+  if (json) {
+    console.log(JSON.stringify(rows));
+    return;
+  }
+  if (!rows.length) {
+    console.log(`No labels yet. ${dim('Add some: brisk deploy --labels dashboard,marketing')}`);
+    return;
+  }
+  const width = Math.max(...rows.map((r) => r.label.length)) + 3;
+  for (const r of rows) {
+    console.log(
+      `${cyan(`#${r.label}`.padEnd(width))}${dim(`${r.sites} ${r.sites === 1 ? 'site' : 'sites'}`)}`,
     );
   }
 }

@@ -8,6 +8,30 @@ releases are published to
 
 ## [Unreleased]
 
+### Added
+
+- **Labels** — tag a site with up to five free-form labels, from `"labels"` in
+  `brisk.json` or `brisk deploy --labels a,b` (which also works for a
+  single-file deploy and overrides `brisk.json`). Labels are normalized to
+  lowercase slugs, so `Launch Kit` and `launch_kit` are both `launch-kit`; the
+  CLI refuses a bad one before uploading and the server answers 400. A deploy
+  that sends no labels — including a dashboard drop with no `brisk.json` —
+  keeps the site's current ones, and `--labels ""` clears them.
+- **Dashboard** — each site row shows its labels, and a bar above the list
+  shows every label with how many of the listed sites carry it. Click labels to
+  show only the sites that have all of them, and the counts follow; the selection is in the URL
+  (`/?labels=marketing,dashboard`) so you can share it, and each one is a chip
+  you click to remove. Dropping a folder reads labels from its `brisk.json`.
+- **`brisk labels`** lists every label in use with its site count, most used
+  first (`--json` for agents), from the new `GET /api/labels`. `brisk list` shows each site's labels, and the
+  Brisk skill picks labels for new sites, reusing the ones the instance
+  already has.
+
+### Changed
+
+- **Dashboard** — a dropped folder's `brisk.json` is no longer uploaded as part
+  of the site, matching `brisk deploy`.
+
 ## [0.4.3] - 2026-11-14
 
 ### Added

@@ -90,4 +90,10 @@ room.on('presence', (members) => {});                 // fires on join/leave
 - Plugins add optional features per site via \`brisk.json\` \`"plugins"\` (e.g.
   \`"plugins": { "comments": false }\` to opt out). Comments is on by default —
   teammates can leave feedback on any element. See \`brisk plugin --help\`.
+- Labels tag the site on the dashboard so teammates can filter by them:
+  \`"labels": ["dashboard", "marketing"]\` in \`brisk.json\` (max 5, lowercase,
+  spaces become dashes). Reuse labels other sites already have (\`brisk labels\`
+  lists them with counts) before inventing new ones. \`brisk deploy --labels a,b\`
+  overrides \`brisk.json\` (and is the only way for a single-file deploy);
+  \`--labels ""\` clears them. A deploy that sets neither keeps the current ones.
 `;
