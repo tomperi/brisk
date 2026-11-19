@@ -77,6 +77,10 @@ async function main(): Promise<void> {
   ]);
   let pi = 0;
   while (pi < raw.length && raw[pi]!.startsWith('-')) {
+    if (raw[pi] === '--version' || raw[pi] === '-v') {
+      console.log(CLI_VERSION);
+      return;
+    }
     pi += valueFlags.has(raw[pi]!) ? 2 : 1;
   }
   if (raw[pi] === 'plugin') {
