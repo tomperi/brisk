@@ -148,6 +148,19 @@ export function createApp(
 ): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
 
+  // The CLI compares this with its own version and says when to update. Set on
+  // the final response so early returns, raw Responses and cache hits carry it.
+  app.use('/api/*', async (c, next) => {
+    await next();
+    if (c.res.status === 101) return;
+    try {
+      c.res.headers.set('x-brisk-version', version);
+    } catch {
+      c.res = new Response(c.res.body, c.res);
+      c.res.headers.set('x-brisk-version', version);
+    }
+  });
+
   // Inject the platform first so every route — including the mounted auth
   // routes — can reach storage/db/rooms/cache via c.var.platform.
   app.use('*', async (c, next) => {
@@ -178,11 +191,6 @@ export function createApp(
     await next();
   };
   app.use('/api/*', denyFrameNoSniff);
-  // The CLI compares this with its own version and says when to update.
-  app.use('/api/*', async (c, next) => {
-    c.header('x-brisk-version', version);
-    await next();
-  });
   app.use('/auth/*', denyFrameNoSniff);
 
   app.use('*', auth());

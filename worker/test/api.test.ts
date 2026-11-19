@@ -475,6 +475,20 @@ describe('version header', () => {
     const res = await SELF.fetch(`${HOST}/api/sites`);
     expect(res.headers.get('x-brisk-version')).toBe(version);
   });
+
+  it('is on early errors, unknown routes and raw file responses too', async () => {
+    await SELF.fetch(`${HOST}/api/deploy/versioned`, {
+      method: 'POST',
+      body: deployForm({ 'index.html': 'x' }),
+    });
+    const responses = [
+      await SELF.fetch(`${HOST}/api/me`, { headers: { 'x-brisk-site': 'INVALID!' } }),
+      await SELF.fetch(`${HOST}/api/no-such-route`),
+      await SELF.fetch(`${HOST}/api/sites/versioned/raw/index.html`),
+    ];
+    expect(responses.map((r) => r.status)).toEqual([400, 404, 200]);
+    for (const r of responses) expect(r.headers.get('x-brisk-version')).toBe(version);
+  });
 });
 
 describe('site labels', () => {
