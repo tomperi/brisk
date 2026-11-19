@@ -24,11 +24,14 @@ import {
   listFiles,
   listLabels,
   listSites,
+  MAX_LABELS,
   parseLabels,
   serveSite,
   siteFromHost,
   sitePlugins,
+  updateLabels,
   type DeployFile,
+  type SiteInfo,
 } from './sites';
 import type { AppEnv, Env } from './env';
 import { version } from '../package.json';
@@ -394,6 +397,46 @@ export function createApp(
       if (err instanceof SuggestNotConfiguredError) return c.json({ error: err.message }, 501);
       return c.json({ error: (err as Error).message }, 502);
     }
+  });
+
+  // Labels change without a deploy: PUT replaces them, PATCH adds and removes.
+  const labelsBody = async (c: Context<AppEnv>): Promise<unknown> =>
+    c.req.json().catch(() => undefined);
+  const labelsResponse = (
+    c: Context<AppEnv>,
+    result: SiteInfo | { error: string } | null,
+  ): Response => {
+    if (!result) return c.json({ error: 'site not found' }, 404);
+    if ('error' in result) return c.json({ error: result.error }, 400);
+    return c.json({ ...result, url: siteUrl(c, result.name) });
+  };
+
+  app.put('/api/sites/:name/labels', async (c) => {
+    const parsed = parseLabels(await labelsBody(c));
+    if ('error' in parsed) return c.json({ error: parsed.error }, 400);
+    return labelsResponse(c, await updateLabels(c.var.platform, c.req.param('name'), () => parsed));
+  });
+
+  app.patch('/api/sites/:name/labels', async (c) => {
+    const body = await labelsBody(c);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return c.json({ error: 'expected { "add": [...], "remove": [...] }' }, 400);
+    }
+    const { add = [], remove = [] } = body as { add?: unknown; remove?: unknown };
+    const adding = parseLabels(add);
+    if ('error' in adding) return c.json({ error: adding.error }, 400);
+    const removing = parseLabels(remove);
+    if ('error' in removing) return c.json({ error: removing.error }, 400);
+    return labelsResponse(
+      c,
+      await updateLabels(c.var.platform, c.req.param('name'), (current) => {
+        const kept = current.filter((l) => !removing.labels.includes(l));
+        const labels = [...new Set([...kept, ...adding.labels])];
+        return labels.length > MAX_LABELS
+          ? { error: `too many labels (max ${MAX_LABELS})` }
+          : { labels };
+      }),
+    );
   });
 
   app.get('/api/sites/:name', async (c) => {

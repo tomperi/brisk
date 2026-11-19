@@ -574,6 +574,69 @@ describe('site labels', () => {
     expect(await counted()).toEqual([{ label: 'tally-a', sites: 1 }]);
   });
 
+  const relabel = (name: string, method: 'PUT' | 'PATCH', body: unknown) =>
+    SELF.fetch(`${HOST}/api/sites/${name}/labels`, {
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+  it('replaces labels without a deploy, and leaves updatedAt alone', async () => {
+    await deploy('relabel-put', JSON.stringify(['old']));
+    const before = await (
+      await SELF.fetch(`${HOST}/api/sites/relabel-put`)
+    ).json<{
+      updatedAt: string;
+    }>();
+    const res = await relabel('relabel-put', 'PUT', ['Launch Kit', 'report']);
+    expect(res.status).toBe(200);
+    const info = await res.json<{ labels: string[]; updatedAt: string; url: string }>();
+    expect(info.labels).toEqual(['launch-kit', 'report']);
+    expect(info.updatedAt).toBe(before.updatedAt);
+    expect(info.url).toContain('relabel-put');
+    expect(await labelsOf('relabel-put')).toEqual(['launch-kit', 'report']);
+
+    expect((await relabel('relabel-put', 'PUT', [])).status).toBe(200);
+    expect(await labelsOf('relabel-put')).toEqual([]);
+  });
+
+  it('adds and removes labels in one PATCH', async () => {
+    await deploy('relabel-patch', JSON.stringify(['a', 'b']));
+    const res = await relabel('relabel-patch', 'PATCH', { add: ['C', 'a'], remove: ['b'] });
+    expect(res.status).toBe(200);
+    expect(await labelsOf('relabel-patch')).toEqual(['a', 'c']);
+    // Removing a label the site lacks is a no-op, not an error.
+    expect((await relabel('relabel-patch', 'PATCH', { remove: ['zzz'] })).status).toBe(200);
+    expect(await labelsOf('relabel-patch')).toEqual(['a', 'c']);
+  });
+
+  it('refuses bad label changes with a 400 and leaves the labels as they were', async () => {
+    await deploy('relabel-strict', JSON.stringify(['a', 'b', 'c', 'd']));
+    const cases: ['PUT' | 'PATCH', unknown][] = [
+      ['PATCH', { add: ['e', 'f'] }], // would make six
+      ['PUT', ['a', 'b', 'c', 'd', 'e', 'f']],
+      ['PUT', ['emoji 🚀']],
+      ['PUT', 'dashboard'],
+      ['PATCH', ['a']], // not { add, remove }
+      ['PATCH', { add: 'a' }],
+    ];
+    for (const [method, body] of cases) {
+      const res = await relabel('relabel-strict', method, body);
+      expect(res.status, `${method} ${JSON.stringify(body)}`).toBe(400);
+    }
+    const notJson = await SELF.fetch(`${HOST}/api/sites/relabel-strict/labels`, {
+      method: 'PUT',
+      body: 'a,b',
+    });
+    expect(notJson.status).toBe(400);
+    expect(await labelsOf('relabel-strict')).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('answers 404 for a site that does not exist', async () => {
+    expect((await relabel('no-such-site-here', 'PUT', ['a'])).status).toBe(404);
+    expect((await relabel('no-such-site-here', 'PATCH', { add: ['a'] })).status).toBe(404);
+  });
+
   it('allows exactly five once duplicates collapse', async () => {
     const res = await deploy('five', JSON.stringify(['a', 'b', 'c', 'd', 'e', 'A', 'e ']));
     expect(res.status).toBe(200);

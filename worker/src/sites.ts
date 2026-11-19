@@ -183,6 +183,33 @@ export async function listLabels(platform: Platform): Promise<{ label: string; s
   return results;
 }
 
+/**
+ * Changes a site's labels without a deploy. `change` gets the current labels;
+ * the write only lands if nobody changed them since the read, else it reads again.
+ * `null` = no such site. Leaves `updatedAt` alone: relabeling is not a publish.
+ */
+export async function updateLabels(
+  platform: Platform,
+  site: string,
+  change: (current: string[]) => { labels: string[] } | { error: string },
+): Promise<SiteInfo | { error: string } | null> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const row = await platform.db
+      .prepare('SELECT labels FROM sites WHERE name = ?')
+      .bind(site)
+      .first<{ labels: string | null }>();
+    if (!row) return null;
+    const next = change(parseStringArray(row.labels));
+    if ('error' in next) return next;
+    const updated = await platform.db
+      .prepare('UPDATE sites SET labels = ? WHERE name = ? AND labels IS ? RETURNING *')
+      .bind(JSON.stringify(next.labels), site, row.labels)
+      .first<SiteRow>();
+    if (updated) return toInfo(updated);
+  }
+  throw new Error(`labels of ${site} kept changing under this write; try again`);
+}
+
 export async function getSite(platform: Platform, name: string): Promise<SiteInfo | null> {
   const row = await platform.db
     .prepare('SELECT * FROM sites WHERE name = ?')
