@@ -12,6 +12,7 @@ brisk dev              # run locally
 brisk list             # your sites
 brisk labels           # labels in use, with site counts
 brisk labels suggest "<text>"  # existing labels that fit a site
+brisk labels add <site> a,b  # relabel without a deploy (also: set, remove)
 brisk --version        # the CLI's version
 brisk pull <site>      # download a deployed site
 ```

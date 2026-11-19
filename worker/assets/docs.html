@@ -98,6 +98,7 @@ brisk dev my-site      # redeploy on every save
 brisk list             # everything on this instance
 brisk labels           # labels in use, most used first
 brisk labels suggest "a CVE dashboard for security"  # existing labels that fit
+brisk labels add my-site security  # relabel without a deploy
 brisk pull some-site   # download any site's source to remix it</code></pre>
       <p>
         When this instance runs a newer Brisk than your CLI, the CLI says so: update with
@@ -116,9 +117,11 @@ brisk pull some-site   # download any site's source to remix it</code></pre>
         <code>brisk.json</code>. <code>brisk labels</code> lists the labels already in use, so reuse
         one before you make a new one; where the instance has suggestions,
         <code>brisk labels suggest "&lt;what the site is&gt;"</code> names the ones that fit. A
-        deploy with neither keeps the site's labels, and <code>--labels ""</code> clears them. On
-        the dashboard, click labels to list only the sites that have all of them; the link
-        (<code>/?labels=dashboard,security</code>) is shareable.
+        deploy with neither keeps the site's labels, and <code>--labels ""</code> clears them. To
+        relabel without a deploy, use <code>brisk labels add|remove|set &lt;site&gt; a,b</code> or
+        the <em>labels</em> button on the site's row. On the dashboard, click labels to list only
+        the sites that have all of them; the link (<code>/?labels=dashboard,security</code>) is
+        shareable.
       </p>
       <p>
         Every publish is a versioned snapshot. Only the current version is ever served; by default
