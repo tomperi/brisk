@@ -11,6 +11,7 @@ brisk deploy my-site   # deploy a folder → get a URL
 brisk dev              # run locally
 brisk list             # your sites
 brisk labels           # labels in use, with site counts
+brisk labels suggest "<text>"  # existing labels that fit a site
 brisk --version        # the CLI's version
 brisk pull <site>      # download a deployed site
 ```

@@ -98,7 +98,10 @@ yourself rather than asking:
    label in use, most used first, with how many sites carry it (`--json` for
    machine output; `GET /api/labels` is the same list). Reuse an existing
    spelling whenever one fits (`dashboard`, not `dashboards` or `dash`) — a
-   new label only when nothing fits.
+   new label only when nothing fits. `brisk labels suggest "<what the site is>"`
+   names the existing labels that fit (it checks the 200 most used), or says
+   none does. When it fails — a 501 on an instance without suggestions, a 502
+   when Jev is down — pick them yourself.
 2. **Describe the site, not the request.** One label for what it _is_
    (`dashboard`, `game`, `form`, `report`, `tool`) and one or two for who it's
    for or what it's about (`marketing`, `security`, `launch-kit`, `q4-offsite`),
@@ -144,6 +147,7 @@ Never report "done" without seeing it live.
 ```sh
 brisk list             # everything deployed on the instance, with each site's #labels
 brisk labels           # labels in use, most used first, with site counts
+brisk labels suggest "<what the site is>"  # existing labels that fit, if the instance has suggestions
 brisk pull <site> dir  # download a site's source to remix it
 ```
 

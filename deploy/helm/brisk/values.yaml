@@ -38,6 +38,7 @@ secrets:
   deployToken: ''
   anthropicApiKey: ''
   openaiApiKey: ''
+  typesafeApiKey: ''
   s3AccessKeyId: ''
   s3SecretAccessKey: ''
 existingSecret: '' # name of a pre-created Secret with the same keys; overrides `secrets`

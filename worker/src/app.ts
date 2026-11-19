@@ -13,6 +13,7 @@ import {
   type SchemeSource,
 } from './auth';
 import { DocStore, isValidDocId } from './docs';
+import { MAX_DESCRIPTION, SuggestNotConfiguredError, suggestLabels } from './suggest';
 import { contentType } from './mime';
 import {
   deleteSite,
@@ -379,6 +380,21 @@ export function createApp(
   });
 
   app.get('/api/labels', async (c) => c.json({ labels: await listLabels(c.var.platform) }));
+
+  app.get('/api/labels/suggested', async (c) => {
+    const description = (c.req.query('description') ?? '').trim();
+    if (!description) return c.json({ error: 'pass ?description=<what the site is>' }, 400);
+    if (description.length > MAX_DESCRIPTION) {
+      return c.json({ error: `description is over ${MAX_DESCRIPTION} characters` }, 400);
+    }
+    try {
+      const labels = await suggestLabels(c.env, description, await listLabels(c.var.platform));
+      return c.json({ labels, match: labels.length > 0 });
+    } catch (err) {
+      if (err instanceof SuggestNotConfiguredError) return c.json({ error: err.message }, 501);
+      return c.json({ error: (err as Error).message }, 502);
+    }
+  });
 
   app.get('/api/sites/:name', async (c) => {
     const site = await getSite(c.var.platform, c.req.param('name'));

@@ -32,6 +32,10 @@ releases are published to
   first (`--json` for agents), from the new `GET /api/labels`. `brisk list`
   shows each site's labels, and the Brisk skill picks labels for new sites,
   reusing the ones the instance already has.
+- **Label suggestions** — `brisk labels suggest "<what the site is>"`
+  (`GET /api/labels/suggested`) names the existing labels that fit a site, or
+  says none does. Jev answers it, on instances that set the new optional
+  `TYPESAFE_API_KEY`; without the key the route answers 501.
 
 ### Changed
 

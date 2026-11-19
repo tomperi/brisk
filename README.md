@@ -224,6 +224,16 @@ npx wrangler secret put ANTHROPIC_API_KEY   # and/or OPENAI_API_KEY
 
 Keys stay on the server; sites call `brisk.ai.chat(...)` with no setup.
 
+```sh
+npx wrangler secret put TYPESAFE_API_KEY    # optional: label suggestions
+```
+
+With it, `brisk labels suggest "<what the site is>"` (`GET /api/labels/suggested`)
+picks the existing labels that fit a site, using
+[Jev](https://docs.typesafe.ai), or says none does. Each call sends TypeSafe the
+description and the names of the instance's 200 most-used labels — nothing else
+about the sites.
+
 ### Demo mode (public, view-only)
 
 Want strangers to be able to _see_ your instance without being able to touch

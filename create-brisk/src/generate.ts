@@ -52,6 +52,8 @@ function envLines(a: Answers, opts: { forCloudflare?: boolean } = {}): string[] 
   lines.push('# Optional AI pass-through — set either, and brisk.ai works:');
   lines.push('ANTHROPIC_API_KEY=');
   lines.push('OPENAI_API_KEY=');
+  lines.push('# Optional label suggestions (Jev):');
+  lines.push('TYPESAFE_API_KEY=');
   if (!opts.forCloudflare) {
     lines.push(`STORAGE=${a.storage}`);
     lines.push('SQLITE_PATH=/data/brisk.sqlite');
@@ -183,6 +185,7 @@ ${allowlistVar}
 ## Secrets (\`wrangler secret put <NAME>\`)
 ${a.auth === 'google' ? '- wrangler secret put SESSION_SECRET\n- wrangler secret put GOOGLE_CLIENT_ID\n- wrangler secret put GOOGLE_CLIENT_SECRET\n- wrangler secret put DEPLOY_TOKEN   # optional, for CI\n' : '(none required for AUTH=none)\n'}- wrangler secret put ANTHROPIC_API_KEY   # optional, powers brisk.ai
 - wrangler secret put OPENAI_API_KEY      # optional, the other brisk.ai provider
+- wrangler secret put TYPESAFE_API_KEY    # optional, label suggestions (Jev)
 
 ## Resources + deploy
     npx wrangler d1 create brisk        # paste the id into worker/wrangler.jsonc

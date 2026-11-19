@@ -431,6 +431,35 @@ export async function labels(flags: Flags, json: boolean): Promise<void> {
   }
 }
 
+/** Existing labels that fit a site description, picked server-side by Jev. */
+export async function suggestLabels(
+  description: string,
+  flags: Flags,
+  json: boolean,
+): Promise<void> {
+  const conn = resolveConnection(flags, process.cwd());
+  const res = await api<{ labels: { label: string; sites: number; probability: number }[] }>(
+    conn,
+    `/api/labels/suggested?description=${encodeURIComponent(description)}`,
+  );
+  if (json) {
+    console.log(JSON.stringify(res));
+    return;
+  }
+  if (!res.labels.length) {
+    console.log(
+      `No existing label fits ${dim('(of the 200 most used). Pick new ones, or deploy without labels.')}`,
+    );
+    return;
+  }
+  const width = Math.max(...res.labels.map((s) => s.label.length)) + 3;
+  for (const s of res.labels) {
+    console.log(
+      `${cyan(`#${s.label}`.padEnd(width))}${dim(`${Math.round(s.probability * 100)}% · ${s.sites} ${s.sites === 1 ? 'site' : 'sites'}`)}`,
+    );
+  }
+}
+
 export async function open(siteArg: string | undefined, flags: Flags): Promise<void> {
   const dir = process.cwd();
   const site = siteArg ?? resolveSite(dir, flags);
