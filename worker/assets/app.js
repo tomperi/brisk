@@ -125,7 +125,9 @@ function renderLabelBar(visible) {
 let canEdit = false;
 let editing = null; // the name of the site whose labels are open for editing
 let labelError = '';
+let pendingInput = ''; // what the user typed, kept when the server refuses it
 let focusLabelInput = false;
+let focusEditButton = null; // the site whose editor just closed: focus goes back to its button
 
 window.briskWhoami?.then((user) => {
   canEdit = Boolean(user);
@@ -135,19 +137,28 @@ window.briskWhoami?.then((user) => {
 function toggleEditing(name) {
   editing = editing === name ? null : name;
   labelError = '';
+  pendingInput = '';
   focusLabelInput = editing !== null;
+  focusEditButton = editing === null ? name : null;
   render();
 }
 
 async function changeLabels(site, change) {
-  const res = await fetch(`/api/sites/${encodeURIComponent(site.name)}/labels`, {
-    method: 'PATCH',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(change),
-  });
-  const info = await res.json().catch(() => ({}));
-  if (res.ok) site.labels = info.labels;
-  labelError = res.ok ? '' : (info.error ?? `couldn't save the labels (${res.status})`);
+  try {
+    const res = await fetch(`/api/sites/${encodeURIComponent(site.name)}/labels`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(change),
+    });
+    const info = await res.json().catch(() => ({}));
+    if (res.ok) {
+      site.labels = info.labels;
+      pendingInput = '';
+    }
+    labelError = res.ok ? '' : (info.error ?? `couldn't save the labels (${res.status})`);
+  } catch {
+    labelError = "couldn't reach the server — try again";
+  }
   focusLabelInput = true;
   render();
 }
@@ -185,9 +196,11 @@ function labelEditor(site) {
   input.setAttribute('list', 'label-options');
   input.placeholder = (site.labels ?? []).length ? 'add another' : 'add a label';
   input.autocomplete = 'off';
+  input.value = pendingInput;
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') return toggleEditing(site.name);
     if (e.key !== 'Enter' || !input.value.trim()) return;
+    pendingInput = input.value;
     const add = input.value.split(',').filter((l) => l.trim());
     changeLabels(site, { add });
   });
@@ -204,6 +217,8 @@ function render() {
       matches(s, typed.toLowerCase()) &&
       [...selected].every((label) => (s.labels ?? []).includes(label)),
   );
+  // An edit can filter its own row out (removing the selected label): close it.
+  if (editing && !visible.some((s) => s.name === editing)) editing = null;
   renderLabelBar(visible);
   const total = `${sites.length} ${sites.length === 1 ? 'site' : 'sites'}`;
   $('site-count').textContent =
@@ -214,6 +229,7 @@ function render() {
     ...visible.map((site) => {
       const li = document.createElement('li');
       li.className = 'site-row';
+      li.dataset.site = site.name;
 
       const name = document.createElement('a');
       name.className = 'name';
@@ -277,6 +293,10 @@ function render() {
     focusLabelInput = false;
     $('label-input')?.focus();
   }
+  if (focusEditButton) {
+    list.querySelector(`[data-site="${CSS.escape(focusEditButton)}"] .edit-labels`)?.focus();
+    focusEditButton = null;
+  }
 }
 
 function cell(className, text) {
@@ -327,7 +347,8 @@ function showFilter(on) {
 $('filter').addEventListener('input', () => render());
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === '/' && !$('filter').hidden && document.activeElement !== $('filter')) {
+  const typing = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName);
+  if (e.key === '/' && !$('filter').hidden && !typing) {
     e.preventDefault();
     $('filter').focus();
   }
