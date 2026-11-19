@@ -124,8 +124,9 @@ function renderLabelBar(visible) {
 
 let canEdit = false;
 let editing = null; // the name of the site whose labels are open for editing
-let labelError = '';
-let pendingInput = ''; // what the user typed, kept when the server refuses it
+let labelError = null; // { site, text }: shown only in that site's editor
+let draft = { site: null, value: '' }; // what the user is typing, kept across renders
+let saving = Promise.resolve(); // label changes go one at a time, so responses land in order
 let focusLabelInput = false;
 let focusEditButton = null; // the site whose editor just closed: focus goes back to its button
 
@@ -136,14 +137,19 @@ window.briskWhoami?.then((user) => {
 
 function toggleEditing(name) {
   editing = editing === name ? null : name;
-  labelError = '';
-  pendingInput = '';
+  labelError = null;
+  draft = { site: editing, value: '' };
   focusLabelInput = editing !== null;
   focusEditButton = editing === null ? name : null;
   render();
 }
 
-async function changeLabels(site, change) {
+function changeLabels(site, change, typed = '') {
+  saving = saving.then(() => saveLabels(site, change, typed));
+}
+
+async function saveLabels(site, change, typed) {
+  let error = '';
   try {
     const res = await fetch(`/api/sites/${encodeURIComponent(site.name)}/labels`, {
       method: 'PATCH',
@@ -151,15 +157,16 @@ async function changeLabels(site, change) {
       body: JSON.stringify(change),
     });
     const info = await res.json().catch(() => ({}));
-    if (res.ok) {
-      site.labels = info.labels;
-      pendingInput = '';
-    }
-    labelError = res.ok ? '' : (info.error ?? `couldn't save the labels (${res.status})`);
+    if (res.ok) site.labels = info.labels;
+    else error = info.error ?? `couldn't save the labels (${res.status})`;
   } catch {
-    labelError = "couldn't reach the server — try again";
+    error = "couldn't reach the server — try again";
   }
-  focusLabelInput = true;
+  if (error) labelError = { site: site.name, text: error };
+  else if (labelError?.site === site.name) labelError = null;
+  // A saved add clears the input only if it still holds what was sent.
+  if (!error && typed && draft.site === site.name && draft.value === typed) draft.value = '';
+  focusLabelInput = editing === site.name;
   render();
 }
 
@@ -196,21 +203,24 @@ function labelEditor(site) {
   input.setAttribute('list', 'label-options');
   input.placeholder = (site.labels ?? []).length ? 'add another' : 'add a label';
   input.autocomplete = 'off';
-  input.value = pendingInput;
+  input.value = draft.site === site.name ? draft.value : '';
+  input.addEventListener('input', () => {
+    draft = { site: site.name, value: input.value };
+  });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') return toggleEditing(site.name);
     if (e.key !== 'Enter' || !input.value.trim()) return;
-    pendingInput = input.value;
     const add = input.value.split(',').filter((l) => l.trim());
-    changeLabels(site, { add });
+    changeLabels(site, { add }, input.value);
   });
   line.append(input);
-  if (labelError) line.append(cell('label-error', labelError));
+  if (labelError?.site === site.name) line.append(cell('label-error', labelError.text));
   return line;
 }
 
 function render() {
   const list = $('site-list');
+  const typing = document.activeElement?.id === 'label-input';
   const typed = $('filter').value.trim();
   const visible = sites.filter(
     (s) =>
@@ -289,7 +299,7 @@ function render() {
     li.textContent = `nothing matches ${wanted.join(' + ')}`;
     list.append(li);
   }
-  if (focusLabelInput) {
+  if (focusLabelInput || typing) {
     focusLabelInput = false;
     $('label-input')?.focus();
   }
