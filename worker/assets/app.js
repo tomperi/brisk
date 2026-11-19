@@ -127,6 +127,7 @@ let editing = null; // the name of the site whose labels are open for editing
 let labelError = null; // { site, text }: shown only in that site's editor
 let draft = { site: null, value: '' }; // what the user is typing, kept across renders
 let saving = Promise.resolve(); // label changes go one at a time, so responses land in order
+let savedDuringLoad = null; // Map(name → labels) of saves that land while load() fetches
 let focusLabelInput = false;
 let focusEditButton = null; // the site whose editor just closed: focus goes back to its button
 
@@ -157,8 +158,12 @@ async function saveLabels(site, change, typed) {
       body: JSON.stringify(change),
     });
     const info = await res.json().catch(() => ({}));
-    if (res.ok) site.labels = info.labels;
-    else error = info.error ?? `couldn't save the labels (${res.status})`;
+    if (res.ok) {
+      // load() may have swapped `sites` for fresh objects since this save was queued.
+      for (const s of [site, sites.find((s) => s.name === site.name)])
+        if (s) s.labels = info.labels;
+      savedDuringLoad?.set(site.name, info.labels);
+    } else error = info.error ?? `couldn't save the labels (${res.status})`;
   } catch {
     error = "couldn't reach the server — try again";
   }
@@ -166,7 +171,6 @@ async function saveLabels(site, change, typed) {
   else if (labelError?.site === site.name) labelError = null;
   // A saved add clears the input only if it still holds what was sent.
   if (!error && typed && draft.site === site.name && draft.value === typed) draft.value = '';
-  focusLabelInput = editing === site.name;
   render();
 }
 
@@ -193,7 +197,10 @@ function labelEditor(site) {
     chip.textContent = `#${label}`;
     chip.title = `remove ${label} from ${site.name}`;
     chip.append(cell('x', '×'));
-    chip.addEventListener('click', () => changeLabels(site, { remove: [label] }));
+    chip.addEventListener('click', () => {
+      $('label-input')?.focus();
+      changeLabels(site, { remove: [label] });
+    });
     line.append(chip);
   }
   labelOptions(site);
@@ -221,6 +228,9 @@ function labelEditor(site) {
 function render() {
   const list = $('site-list');
   const typing = document.activeElement?.id === 'label-input';
+  const onEditButton = document.activeElement?.classList?.contains('edit-labels')
+    ? document.activeElement.closest('li')?.dataset.site
+    : null;
   const typed = $('filter').value.trim();
   const visible = sites.filter(
     (s) =>
@@ -303,10 +313,9 @@ function render() {
     focusLabelInput = false;
     $('label-input')?.focus();
   }
-  if (focusEditButton) {
-    list.querySelector(`[data-site="${CSS.escape(focusEditButton)}"] .edit-labels`)?.focus();
-    focusEditButton = null;
-  }
+  const button = focusEditButton ?? onEditButton;
+  if (button) list.querySelector(`[data-site="${CSS.escape(button)}"] .edit-labels`)?.focus();
+  focusEditButton = null;
 }
 
 function cell(className, text) {
@@ -317,15 +326,23 @@ function cell(className, text) {
 }
 
 async function load() {
-  const res = await fetch('/api/sites');
-  if (!res.ok) {
+  // Fetch after queued label saves, and keep any that land while the fetch is out.
+  await saving;
+  savedDuringLoad = new Map();
+  const res = await fetch('/api/sites').catch(() => null);
+  const fresh = res?.ok ? await res.json() : null;
+  const saved = savedDuringLoad;
+  savedDuringLoad = null;
+  if (!fresh) {
     const section = $('sites-section');
     section.hidden = false;
-    $('site-count').textContent = `couldn't load sites (${res.status}) — try reloading`;
+    $('site-count').textContent =
+      `couldn't load sites (${res?.status ?? 'offline'}) — try reloading`;
     showFilter(false);
     return;
   }
-  ({ sites } = await res.json());
+  ({ sites } = fresh);
+  for (const s of sites) if (saved.has(s.name)) s.labels = saved.get(s.name);
 
   if (!sites.length) {
     // The quickstart teaches deploying — pointless for signed-out visitors.
