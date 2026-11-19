@@ -44,6 +44,7 @@ export async function suggestLabels(
 
   const res = await fetch('https://api.typesafe.ai/v1/systemone', {
     method: 'POST',
+    signal: AbortSignal.timeout(10_000),
     headers: {
       'content-type': 'application/json',
       authorization: `Bearer ${env.TYPESAFE_API_KEY}`,
