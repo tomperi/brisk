@@ -1,6 +1,8 @@
-import { SELF } from 'cloudflare:test';
+import { SELF, createExecutionContext, env as testEnv } from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createApp } from '../src/app';
 import type { Env } from '../src/env';
+import { buildCloudflarePlatform } from '../src/platform/cloudflare/platform';
 import { SuggestNotConfiguredError, suggestLabels } from '../src/suggest';
 
 const HOST = 'http://localhost';
@@ -69,5 +71,40 @@ describe('GET /api/labels/suggested', () => {
   it('answers 501 on an instance without TYPESAFE_API_KEY', async () => {
     const res = await SELF.fetch(`${HOST}/api/labels/suggested?description=a%20dashboard`);
     expect(res.status).toBe(501);
+  });
+
+  const app = createApp((c) => buildCloudflarePlatform(c.env, c.executionCtx));
+  const suggested = () =>
+    app.fetch(
+      new Request(`${HOST}/api/labels/suggested?description=a%20CVE%20dashboard`),
+      { ...testEnv, TYPESAFE_API_KEY: 'k' },
+      createExecutionContext(),
+    );
+
+  it('returns the fitting labels with match: true', async () => {
+    const deployed = await SELF.fetch(`${HOST}/api/deploy/suggest-route`, {
+      method: 'POST',
+      body: (() => {
+        const form = new FormData();
+        form.append('files', new File(['x'], 'index.html'));
+        return form;
+      })(),
+      headers: { 'x-brisk-labels': JSON.stringify(['suggest-fit']) },
+    });
+    expect(deployed.status).toBe(200);
+    stubJev({ 'suggest-fit': 0.9 });
+    const res = await suggested();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      labels: [{ label: 'suggest-fit', sites: 1, probability: 0.9 }],
+      match: true,
+    });
+  });
+
+  it('answers 502, never "no match", when Jev fails', async () => {
+    vi.stubGlobal('fetch', async () => new Response('busy', { status: 429 }));
+    const res = await suggested();
+    expect(res.status).toBe(502);
+    expect((await res.json<{ error: string }>()).error).toContain('TypeSafe error 429');
   });
 });
