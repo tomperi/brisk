@@ -237,7 +237,7 @@ function render() {
         const edit = document.createElement('button');
         edit.type = 'button';
         edit.className = editing === site.name ? 'copy edit-labels on' : 'copy edit-labels';
-        edit.textContent = editing === site.name ? 'done' : 'labels';
+        edit.textContent = 'labels';
         edit.title =
           editing === site.name ? 'stop editing labels' : `edit the labels of ${site.name}`;
         edit.addEventListener('click', () => toggleEditing(site.name));
