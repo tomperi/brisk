@@ -96,4 +96,5 @@ room.on('presence', (members) => {});                 // fires on join/leave
   lists them with counts) before inventing new ones. \`brisk deploy --labels a,b\`
   overrides \`brisk.json\` (and is the only way for a single-file deploy);
   \`--labels ""\` clears them. A deploy that sets neither keeps the current ones.
+  \`brisk labels add|remove|set <site> a,b\` relabels without a deploy.
 `;

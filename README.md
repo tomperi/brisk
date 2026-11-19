@@ -352,6 +352,7 @@ brisk deploy [dir|file]         # upload a folder — or one html file — and g
 brisk dev [dir|file]            # redeploy on every save
 brisk list                      # everything on the instance
 brisk labels                    # labels in use, most used first; --json
+brisk labels add <site> a,b     # relabel without a deploy (also: set, remove)
 brisk open [site]               # open in the browser
 brisk pull <site> [dir]         # download any site's source to remix it
 
@@ -378,7 +379,10 @@ shows every label with its site count above the list; clicking labels narrows
 the list to sites that have all of them, the counts follow the narrowed list,
 and the URL (`/?labels=dashboard,marketing`) is shareable. `--labels` wins over
 `brisk.json`; a deploy with neither keeps the site's current labels, and
-`--labels ""` clears them.
+`--labels ""` clears them. To relabel without a deploy, use
+`brisk labels add|remove|set <site> a,b` or the "labels" button on a dashboard
+row (`PUT`/`PATCH /api/sites/<name>/labels`); a `brisk.json` with `"labels"`
+sets its own again on the next deploy.
 
 `brisk init` also drops an `AGENTS.md` so coding agents immediately know the
 SDK — "make me a lunch-voting site" works out of the box. For an agent to know

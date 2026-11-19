@@ -117,10 +117,13 @@ Labels are lowercase letters, digits, and dashes, up to 24 characters; the CLI
 turns `Launch Kit` into `launch-kit` and refuses anything else before uploading.
 A deploy without `--labels` and without `"labels"` in `brisk.json` keeps the
 site's current ones, so when **iterating on an existing site, leave its labels
-alone** unless asked. To relabel a site, change `"labels"` in its `brisk.json`
-and deploy, or deploy with `--labels a,b` (the flag wins over `brisk.json`);
-`--labels ""` clears them. Dropping a folder on the dashboard reads the same
-`brisk.json` labels.
+alone** unless asked. To relabel a site without a deploy, use
+`brisk labels add <site> a,b`, `brisk labels remove <site> a` or
+`brisk labels set <site> a,b` (`""` clears); teammates can do the same from the
+"labels" button on its dashboard row. If the site's `brisk.json` has `"labels"`,
+change them there too, or its next deploy sets the old ones again. A deploy
+with `--labels a,b` also relabels (the flag wins over `brisk.json`). Dropping a
+folder on the dashboard reads the same `brisk.json` labels.
 
 To find sites by label, `brisk list` shows each site's `#labels`, and the
 dashboard link `/?labels=dashboard,security` lists only the sites that have all
@@ -148,6 +151,7 @@ Never report "done" without seeing it live.
 brisk list             # everything deployed on the instance, with each site's #labels
 brisk labels           # labels in use, most used first, with site counts
 brisk labels suggest "<what the site is>"  # existing labels that fit, if the instance has suggestions
+brisk labels add <site> a,b   # relabel without a deploy (also: set, remove)
 brisk pull <site> dir  # download a site's source to remix it
 ```
 

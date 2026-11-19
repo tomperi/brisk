@@ -118,14 +118,127 @@ function renderLabelBar(visible) {
   bar.hidden = !bar.childElementCount;
 }
 
+// ---- label editing ---------------------------------------------------------------
+// Members change a row's labels in place (PATCH /api/sites/:name/labels); signed-out
+// visitors on a public instance only read and filter.
+
+let canEdit = false;
+let editing = null; // the name of the site whose labels are open for editing
+let labelError = null; // { site, text }: shown only in that site's editor
+let draft = { site: null, value: '' }; // what the user is typing, kept across renders
+let saving = Promise.resolve(); // label changes go one at a time, so responses land in order
+let savedDuringLoad = null; // Map(name → labels) of saves that land while load() fetches
+let focusLabelInput = false;
+let focusEditButton = null; // the site whose editor just closed: focus goes back to its button
+
+window.briskWhoami?.then((user) => {
+  canEdit = Boolean(user);
+  if (sites.length) render();
+});
+
+function toggleEditing(name) {
+  editing = editing === name ? null : name;
+  labelError = null;
+  draft = { site: editing, value: '' };
+  focusLabelInput = editing !== null;
+  focusEditButton = editing === null ? name : null;
+  render();
+}
+
+function changeLabels(site, change, typed = '') {
+  saving = saving.then(() => saveLabels(site, change, typed));
+}
+
+async function saveLabels(site, change, typed) {
+  let error = '';
+  try {
+    const res = await fetch(`/api/sites/${encodeURIComponent(site.name)}/labels`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(change),
+    });
+    const info = await res.json().catch(() => ({}));
+    if (res.ok) {
+      // load() may have swapped `sites` for fresh objects since this save was queued.
+      for (const s of [site, sites.find((s) => s.name === site.name)])
+        if (s) s.labels = info.labels;
+      savedDuringLoad?.set(site.name, info.labels);
+    } else error = info.error ?? `couldn't save the labels (${res.status})`;
+  } catch {
+    error = "couldn't reach the server — try again";
+  }
+  if (error) labelError = { site: site.name, text: error };
+  else if (labelError?.site === site.name) labelError = null;
+  // A saved add clears the input only if it still holds what was sent.
+  if (!error && typed && draft.site === site.name && draft.value === typed) draft.value = '';
+  render();
+}
+
+/** Every label in use, most used first, minus the ones this site already has. */
+function labelOptions(site) {
+  const counts = new Map();
+  for (const s of sites) for (const l of s.labels ?? []) counts.set(l, (counts.get(l) ?? 0) + 1);
+  const options = $('label-options');
+  options.replaceChildren(
+    ...[...counts]
+      .filter(([label]) => !(site.labels ?? []).includes(label))
+      .sort(([a, n], [b, m]) => m - n || a.localeCompare(b))
+      .map(([label]) => Object.assign(document.createElement('option'), { value: label })),
+  );
+}
+
+function labelEditor(site) {
+  const line = document.createElement('span');
+  line.className = 'labels editing';
+  for (const label of site.labels ?? []) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip';
+    chip.textContent = `#${label}`;
+    chip.title = `remove ${label} from ${site.name}`;
+    chip.append(cell('x', '×'));
+    chip.addEventListener('click', () => {
+      $('label-input')?.focus();
+      changeLabels(site, { remove: [label] });
+    });
+    line.append(chip);
+  }
+  labelOptions(site);
+  const input = document.createElement('input');
+  input.id = 'label-input';
+  input.className = 'label-input';
+  input.setAttribute('list', 'label-options');
+  input.placeholder = (site.labels ?? []).length ? 'add another' : 'add a label';
+  input.autocomplete = 'off';
+  input.value = draft.site === site.name ? draft.value : '';
+  input.addEventListener('input', () => {
+    draft = { site: site.name, value: input.value };
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') return toggleEditing(site.name);
+    if (e.key !== 'Enter' || !input.value.trim()) return;
+    const add = input.value.split(',').filter((l) => l.trim());
+    changeLabels(site, { add }, input.value);
+  });
+  line.append(input);
+  if (labelError?.site === site.name) line.append(cell('label-error', labelError.text));
+  return line;
+}
+
 function render() {
   const list = $('site-list');
+  const typing = document.activeElement?.id === 'label-input';
+  const onEditButton = document.activeElement?.classList?.contains('edit-labels')
+    ? document.activeElement.closest('li')?.dataset.site
+    : null;
   const typed = $('filter').value.trim();
   const visible = sites.filter(
     (s) =>
       matches(s, typed.toLowerCase()) &&
       [...selected].every((label) => (s.labels ?? []).includes(label)),
   );
+  // An edit can filter its own row out (removing the selected label): close it.
+  if (editing && !visible.some((s) => s.name === editing)) editing = null;
   renderLabelBar(visible);
   const total = `${sites.length} ${sites.length === 1 ? 'site' : 'sites'}`;
   $('site-count').textContent =
@@ -136,6 +249,7 @@ function render() {
     ...visible.map((site) => {
       const li = document.createElement('li');
       li.className = 'site-row';
+      li.dataset.site = site.name;
 
       const name = document.createElement('a');
       name.className = 'name';
@@ -153,10 +267,27 @@ function render() {
       copy.textContent = 'url';
       wireCopy(copy, site.url);
 
-      li.append(name, files, size, when, by, copy);
+      const actions = document.createElement('span');
+      actions.className = 'actions';
+      if (canEdit) {
+        const edit = document.createElement('button');
+        edit.type = 'button';
+        edit.className = editing === site.name ? 'copy edit-labels on' : 'copy edit-labels';
+        edit.textContent = 'labels';
+        edit.title =
+          editing === site.name ? 'stop editing labels' : `edit the labels of ${site.name}`;
+        edit.addEventListener('click', () => toggleEditing(site.name));
+        actions.append(edit);
+      }
+      actions.append(copy);
+
+      li.append(name, files, size, when, by, actions);
 
       // Their own line under the name, and only on rows that have any.
-      if (site.labels?.length) {
+      if (editing === site.name) {
+        li.classList.add('editing');
+        li.append(labelEditor(site));
+      } else if (site.labels?.length) {
         const labels = document.createElement('span');
         labels.className = 'labels';
         for (const label of site.labels) {
@@ -178,6 +309,14 @@ function render() {
     li.textContent = `nothing matches ${wanted.join(' + ')}`;
     list.append(li);
   }
+  // An explicit close or open wins over keeping whatever had focus before.
+  const editButton = (name) =>
+    list.querySelector(`[data-site="${CSS.escape(name)}"] .edit-labels`)?.focus();
+  if (focusEditButton) editButton(focusEditButton);
+  else if (focusLabelInput || typing) $('label-input')?.focus();
+  else if (onEditButton) editButton(onEditButton);
+  focusEditButton = null;
+  focusLabelInput = false;
 }
 
 function cell(className, text) {
@@ -187,16 +326,44 @@ function cell(className, text) {
   return span;
 }
 
-async function load() {
-  const res = await fetch('/api/sites');
-  if (!res.ok) {
+let loading = null;
+let reloadWanted = false;
+
+/** One list fetch at a time; a call during one fetches again after it, so the newest list wins. */
+function load() {
+  if (loading) {
+    reloadWanted = true;
+    return loading;
+  }
+  loading = (async () => {
+    do {
+      reloadWanted = false;
+      await loadOnce();
+    } while (reloadWanted);
+  })().finally(() => {
+    loading = null;
+  });
+  return loading;
+}
+
+async function loadOnce() {
+  // Fetch after queued label saves, and keep any that land while the fetch is out.
+  await saving;
+  savedDuringLoad = new Map();
+  const res = await fetch('/api/sites').catch(() => null);
+  const fresh = res?.ok ? await res.json() : null;
+  const saved = savedDuringLoad;
+  savedDuringLoad = null;
+  if (!fresh) {
     const section = $('sites-section');
     section.hidden = false;
-    $('site-count').textContent = `couldn't load sites (${res.status}) — try reloading`;
+    $('site-count').textContent =
+      `couldn't load sites (${res?.status ?? 'offline'}) — try reloading`;
     showFilter(false);
     return;
   }
-  ({ sites } = await res.json());
+  ({ sites } = fresh);
+  for (const s of sites) if (saved.has(s.name)) s.labels = saved.get(s.name);
 
   if (!sites.length) {
     // The quickstart teaches deploying — pointless for signed-out visitors.
@@ -228,7 +395,8 @@ function showFilter(on) {
 $('filter').addEventListener('input', () => render());
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === '/' && !$('filter').hidden && document.activeElement !== $('filter')) {
+  const typing = ['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName);
+  if (e.key === '/' && !$('filter').hidden && !typing) {
     e.preventDefault();
     $('filter').focus();
   }

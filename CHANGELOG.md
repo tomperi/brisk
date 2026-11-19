@@ -15,7 +15,14 @@ releases are published to
   features such as labels need a CLI as new as the instance. Every `/api/*`
   response carries the instance's version in `x-brisk-version`, and
   `brisk --version` prints the CLI's.
-
+- **Relabel without a deploy** — `brisk labels set <site> a,b` (`""` clears),
+  `brisk labels add <site> a,b` and `brisk labels remove <site> a`, backed by
+  `PUT /api/sites/:name/labels` (replace) and `PATCH` with `add` and `remove`
+  lists (applied in one step, so concurrent edits don't drop each other). On
+  the dashboard, members get a **labels** button on each row: remove
+  a label with its ×, or type one (existing labels are offered first).
+  Relabeling leaves the site's `updatedAt` alone. A `brisk.json` with
+  `"labels"` still sets its own on the next deploy.
 - **Labels** — tag a site with up to five free-form labels, from `"labels"` in
   `brisk.json` or `brisk deploy --labels a,b` (which also works for a
   single-file deploy and overrides `brisk.json`). Labels are normalized to
@@ -27,7 +34,8 @@ releases are published to
   shows every label with how many of the listed sites carry it. Click labels to
   show only the sites that have all of them, and the counts follow; the
   selection is in the URL (`/?labels=marketing,dashboard`) so you can share it,
-  and each one is a chip you click to remove. Dropping a folder reads labels from its `brisk.json`.
+  and each one is a chip you click to remove. Dropping a folder reads labels
+  from its `brisk.json`.
 - **`brisk labels`** lists every label in use with its site count, most used
   first (`--json` for agents), from the new `GET /api/labels`. `brisk list`
   shows each site's labels, and the Brisk skill picks labels for new sites,

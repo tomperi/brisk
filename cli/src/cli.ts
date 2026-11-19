@@ -14,6 +14,9 @@ ${bold('Usage')}
   brisk list                   all sites on the instance, with their #labels
   brisk labels                 labels in use and how many sites have each; --json
   brisk labels suggest <text>  existing labels that fit a site described in <text>
+  brisk labels set <site> <a,b>     replace a site's labels without a deploy ("" clears)
+  brisk labels add <site> <a,b>     add labels to a site
+  brisk labels remove <site> <a,b>  remove labels from a site
   brisk open [site]            open a site in the browser
   brisk pull <site> [dir]      download a site's source to remix it
 
@@ -156,6 +159,12 @@ async function main(): Promise<void> {
       if (args[0] === 'suggest') {
         if (!args[1]) throw new Error('usage: brisk labels suggest "<what the site is>"');
         return commands.suggestLabels(args.slice(1).join(' '), flags, Boolean(values.json));
+      }
+      if (args[0] === 'set' || args[0] === 'add' || args[0] === 'remove') {
+        if (!args[1] || args[2] === undefined || args.length > 3) {
+          throw new Error(`usage: brisk labels ${args[0]} <site> <a,b>  (commas, no spaces)`);
+        }
+        return commands.relabel(args[0], args[1], args[2], flags, Boolean(values.json));
       }
       return commands.labels(flags, Boolean(values.json));
     case 'open':
