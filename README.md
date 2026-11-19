@@ -230,7 +230,9 @@ npx wrangler secret put TYPESAFE_API_KEY    # optional: label suggestions
 
 With it, `brisk labels suggest "<what the site is>"` (`GET /api/labels/suggested`)
 picks the existing labels that fit a site, using
-[Jev](https://docs.typesafe.ai), or says none does.
+[Jev](https://docs.typesafe.ai), or says none does. Each call sends TypeSafe the
+description and the names of the instance's 200 most-used labels — nothing else
+about the sites.
 
 ### Demo mode (public, view-only)
 

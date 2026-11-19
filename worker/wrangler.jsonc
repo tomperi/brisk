@@ -81,4 +81,5 @@
   //   DEPLOY_TOKEN          — optional bearer token the CLI uses when AUTH=google
   //   ANTHROPIC_API_KEY     — optional, powers brisk.ai via Claude
   //   OPENAI_API_KEY        — optional, powers brisk.ai via OpenAI
+  //   TYPESAFE_API_KEY      — optional, label suggestions via Jev
 }
