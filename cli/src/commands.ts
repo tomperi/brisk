@@ -431,8 +431,11 @@ export async function relabel(
     ? cyan(info.labels.map((l) => `#${l}`).join(' '))
     : dim('no labels');
   console.log(`${green('✓')} ${bold(site)}  ${now}`);
-  const here = loadConfig(process.cwd());
-  if (here.labels !== undefined && (here.site ?? path.basename(process.cwd())) === site) {
+  // Same name a deploy from here would use, so the note fires exactly when it matters.
+  if (
+    loadConfig(process.cwd()).labels !== undefined &&
+    resolveSite(process.cwd(), flags) === site
+  ) {
     console.log(
       `  ${yellow('note:')} ${dim('brisk.json here has "labels"; the next deploy from this folder sets those again')}`,
     );

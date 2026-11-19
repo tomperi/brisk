@@ -161,8 +161,8 @@ async function main(): Promise<void> {
         return commands.suggestLabels(args.slice(1).join(' '), flags, Boolean(values.json));
       }
       if (args[0] === 'set' || args[0] === 'add' || args[0] === 'remove') {
-        if (!args[1] || args[2] === undefined) {
-          throw new Error(`usage: brisk labels ${args[0]} <site> <a,b>`);
+        if (!args[1] || args[2] === undefined || args.length > 3) {
+          throw new Error(`usage: brisk labels ${args[0]} <site> <a,b>  (commas, no spaces)`);
         }
         return commands.relabel(args[0], args[1], args[2], flags, Boolean(values.json));
       }
