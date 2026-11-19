@@ -408,6 +408,37 @@ export async function list(flags: Flags): Promise<void> {
   }
 }
 
+/** Changes a site's labels without a deploy; the server normalizes and checks them. */
+export async function relabel(
+  action: 'set' | 'add' | 'remove',
+  site: string,
+  list: string,
+  flags: Flags,
+  json: boolean,
+): Promise<void> {
+  const conn = resolveConnection(flags, process.cwd());
+  const given = list.split(',').filter((l) => l.trim());
+  const info = await api<SiteInfo>(conn, `/api/sites/${encodeURIComponent(site)}/labels`, {
+    method: action === 'set' ? 'PUT' : 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(action === 'set' ? given : { [action]: given }),
+  });
+  if (json) {
+    console.log(JSON.stringify(info));
+    return;
+  }
+  const now = info.labels?.length
+    ? cyan(info.labels.map((l) => `#${l}`).join(' '))
+    : dim('no labels');
+  console.log(`${green('✓')} ${bold(site)}  ${now}`);
+  const here = loadConfig(process.cwd());
+  if (here.labels !== undefined && (here.site ?? path.basename(process.cwd())) === site) {
+    console.log(
+      `  ${yellow('note:')} ${dim('brisk.json here has "labels"; the next deploy from this folder sets those again')}`,
+    );
+  }
+}
+
 /** Every label in use, most used first, so a deploy can reuse an existing spelling. */
 export async function labels(flags: Flags, json: boolean): Promise<void> {
   const conn = resolveConnection(flags, process.cwd());
