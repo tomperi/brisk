@@ -118,6 +118,84 @@ function renderLabelBar(visible) {
   bar.hidden = !bar.childElementCount;
 }
 
+// ---- label editing ---------------------------------------------------------------
+// Members change a row's labels in place (PATCH /api/sites/:name/labels); signed-out
+// visitors on a public instance only read and filter.
+
+let canEdit = false;
+let editing = null; // the name of the site whose labels are open for editing
+let labelError = '';
+let focusLabelInput = false;
+
+window.briskWhoami?.then((user) => {
+  canEdit = Boolean(user);
+  if (sites.length) render();
+});
+
+function toggleEditing(name) {
+  editing = editing === name ? null : name;
+  labelError = '';
+  focusLabelInput = editing !== null;
+  render();
+}
+
+async function changeLabels(site, change) {
+  const res = await fetch(`/api/sites/${encodeURIComponent(site.name)}/labels`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(change),
+  });
+  const info = await res.json().catch(() => ({}));
+  if (res.ok) site.labels = info.labels;
+  labelError = res.ok ? '' : (info.error ?? `couldn't save the labels (${res.status})`);
+  focusLabelInput = true;
+  render();
+}
+
+/** Every label in use, most used first, minus the ones this site already has. */
+function labelOptions(site) {
+  const counts = new Map();
+  for (const s of sites) for (const l of s.labels ?? []) counts.set(l, (counts.get(l) ?? 0) + 1);
+  const options = $('label-options');
+  options.replaceChildren(
+    ...[...counts]
+      .filter(([label]) => !(site.labels ?? []).includes(label))
+      .sort(([a, n], [b, m]) => m - n || a.localeCompare(b))
+      .map(([label]) => Object.assign(document.createElement('option'), { value: label })),
+  );
+}
+
+function labelEditor(site) {
+  const line = document.createElement('span');
+  line.className = 'labels editing';
+  for (const label of site.labels ?? []) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip';
+    chip.textContent = `#${label}`;
+    chip.title = `remove ${label} from ${site.name}`;
+    chip.append(cell('x', '×'));
+    chip.addEventListener('click', () => changeLabels(site, { remove: [label] }));
+    line.append(chip);
+  }
+  labelOptions(site);
+  const input = document.createElement('input');
+  input.id = 'label-input';
+  input.className = 'label-input';
+  input.setAttribute('list', 'label-options');
+  input.placeholder = (site.labels ?? []).length ? 'add another' : 'add a label';
+  input.autocomplete = 'off';
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') return toggleEditing(site.name);
+    if (e.key !== 'Enter' || !input.value.trim()) return;
+    const add = input.value.split(',').filter((l) => l.trim());
+    changeLabels(site, { add });
+  });
+  line.append(input);
+  if (labelError) line.append(cell('label-error', labelError));
+  return line;
+}
+
 function render() {
   const list = $('site-list');
   const typed = $('filter').value.trim();
@@ -153,10 +231,27 @@ function render() {
       copy.textContent = 'url';
       wireCopy(copy, site.url);
 
-      li.append(name, files, size, when, by, copy);
+      const actions = document.createElement('span');
+      actions.className = 'actions';
+      if (canEdit) {
+        const edit = document.createElement('button');
+        edit.type = 'button';
+        edit.className = editing === site.name ? 'copy edit-labels on' : 'copy edit-labels';
+        edit.textContent = editing === site.name ? 'done' : 'labels';
+        edit.title =
+          editing === site.name ? 'stop editing labels' : `edit the labels of ${site.name}`;
+        edit.addEventListener('click', () => toggleEditing(site.name));
+        actions.append(edit);
+      }
+      actions.append(copy);
+
+      li.append(name, files, size, when, by, actions);
 
       // Their own line under the name, and only on rows that have any.
-      if (site.labels?.length) {
+      if (editing === site.name) {
+        li.classList.add('editing');
+        li.append(labelEditor(site));
+      } else if (site.labels?.length) {
         const labels = document.createElement('span');
         labels.className = 'labels';
         for (const label of site.labels) {
@@ -177,6 +272,10 @@ function render() {
     const wanted = [typed && `“${typed}”`, ...[...selected].map((l) => `#${l}`)].filter(Boolean);
     li.textContent = `nothing matches ${wanted.join(' + ')}`;
     list.append(li);
+  }
+  if (focusLabelInput) {
+    focusLabelInput = false;
+    $('label-input')?.focus();
   }
 }
 

@@ -439,8 +439,50 @@ td code {
 
 .site-row:hover .copy,
 .site-row .copy:focus-visible,
-.site-row .copy.done {
+.site-row .copy.done,
+.site-row .edit-labels.on {
   opacity: 1;
+}
+
+.site-row .actions {
+  display: flex;
+  gap: 0.4rem;
+  justify-content: flex-end;
+}
+
+.site-row .edit-labels.on {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* The row being relabeled keeps its tint, so it is clear which site changes. */
+.site-row.editing {
+  background: var(--accent-soft);
+}
+
+.labels.editing {
+  align-items: baseline;
+}
+
+.label-input {
+  font: inherit;
+  font-size: 0.75rem;
+  color: var(--ink);
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  padding: 0;
+  width: 9rem;
+  outline: none;
+}
+
+.label-input:focus {
+  border-color: var(--accent);
+}
+
+.label-error {
+  font-size: 0.75rem;
+  color: oklch(52% 0.17 25);
 }
 
 @media (hover: none) {
@@ -653,10 +695,12 @@ footer a {
     text-align: left;
     font-size: 0.78rem;
   }
-  .site-row .copy {
+  .site-row .actions {
     grid-column: 2;
     grid-row: 1 / 4;
     align-self: center;
+  }
+  .site-row .copy {
     opacity: 1;
     padding: 0.35rem 0.75rem;
   }
