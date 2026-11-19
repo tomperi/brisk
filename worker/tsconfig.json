@@ -4,6 +4,7 @@
     "noEmit": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "resolveJsonModule": true,
     "lib": ["ES2023"],
     "types": ["@cloudflare/workers-types"]
   },

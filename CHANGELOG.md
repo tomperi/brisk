@@ -10,6 +10,12 @@ releases are published to
 
 ### Added
 
+- **Update notice** — the CLI prints a note (on stderr, once per run) when the
+  instance runs a newer Brisk than the CLI, with the command to update: new
+  features such as labels need a CLI as new as the instance. Every `/api/*`
+  response carries the instance's version in `x-brisk-version`, and
+  `brisk --version` prints the CLI's.
+
 - **Labels** — tag a site with up to five free-form labels, from `"labels"` in
   `brisk.json` or `brisk deploy --labels a,b` (which also works for a
   single-file deploy and overrides `brisk.json`). Labels are normalized to

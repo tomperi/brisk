@@ -347,6 +347,7 @@ brisk pull <site> [dir]         # download any site's source to remix it
 
 brisk login [server]            # log in to an instance, creates a profile
 brisk whoami                    # who you are, where
+brisk --version                 # the CLI's version; it notes when the instance is newer
 brisk profiles                  # list profiles; `brisk profile use <name>` switches
 ```
 
@@ -536,8 +537,9 @@ wizard), [`deploy/`](deploy) (Dockerfile, Compose stack, Helm chart), and
 
 ### Releasing
 
-`@usebrisk/cli` and `@usebrisk/sdk` publish to npm in lockstep. Bump both to
-the same version, then push a matching tag:
+`@usebrisk/cli` and `@usebrisk/sdk` publish to npm in lockstep. Bump both, and
+`worker/package.json` (the version instances report to the CLI), to the same
+version, then push a matching tag:
 
 ```sh
 git tag v0.1.1 && git push origin v0.1.1

@@ -34,13 +34,16 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Verify cli and sdk versions match
+      # The worker's version is what instances report in x-brisk-version, which
+      # the CLI compares with its own to tell people to update.
+      - name: Verify cli, sdk and worker versions match
         run: |
           V="${{ steps.v.outputs.version }}"
           CLI="$(node -p "require('./cli/package.json').version")"
           SDK="$(node -p "require('./sdk/package.json').version")"
-          if [ "$CLI" != "$V" ] || [ "$SDK" != "$V" ]; then
-            echo "::error::version mismatch — expected $V but cli=$CLI sdk=$SDK"
+          WORKER="$(node -p "require('./worker/package.json').version")"
+          if [ "$CLI" != "$V" ] || [ "$SDK" != "$V" ] || [ "$WORKER" != "$V" ]; then
+            echo "::error::version mismatch — expected $V but cli=$CLI sdk=$SDK worker=$WORKER"
             exit 1
           fi
 

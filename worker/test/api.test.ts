@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { createApp, siteUrl } from '../src/app';
 import { isValidSiteName, listDeploys, siteFromHost } from '../src/sites';
 import { buildCloudflarePlatform } from '../src/platform/cloudflare/platform';
+import { version } from '../package.json';
 
 const HOST = 'http://localhost';
 
@@ -466,6 +467,27 @@ describe('site ownership', () => {
     // Anyone may deploy over it, and a plain update never auto-claims it.
     expect((await deployAs('legacy', 'bob')).status).toBe(200);
     expect(await ownerOf('legacy')).toBeNull();
+  });
+});
+
+describe('version header', () => {
+  it('tells API clients which Brisk the instance runs', async () => {
+    const res = await SELF.fetch(`${HOST}/api/sites`);
+    expect(res.headers.get('x-brisk-version')).toBe(version);
+  });
+
+  it('is on early errors, unknown routes and raw file responses too', async () => {
+    await SELF.fetch(`${HOST}/api/deploy/versioned`, {
+      method: 'POST',
+      body: deployForm({ 'index.html': 'x' }),
+    });
+    const responses = [
+      await SELF.fetch(`${HOST}/api/me`, { headers: { 'x-brisk-site': 'INVALID!' } }),
+      await SELF.fetch(`${HOST}/api/no-such-route`),
+      await SELF.fetch(`${HOST}/api/sites/versioned/raw/index.html`),
+    ];
+    expect(responses.map((r) => r.status)).toEqual([400, 404, 200]);
+    for (const r of responses) expect(r.headers.get('x-brisk-version')).toBe(version);
   });
 });
 

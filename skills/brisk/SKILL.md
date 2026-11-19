@@ -43,6 +43,13 @@ npm install -g @usebrisk/cli          # or: node path/to/brisk/cli/dist/cli.js
 brisk whoami                       # confirm which instance + who you are
 ```
 
+Keep the CLI current: new features (labels, for one) need a CLI as new as the
+instance. The CLI prints a `note:` when the instance runs a newer Brisk, and an
+unknown command or option from this skill (`brisk labels`, `--labels`) means
+the same thing. Either way, run `npm install -g @usebrisk/cli@latest` and retry;
+`brisk --version` prints the version you have. If the note stays after the
+update, npm does not have that release yet: carry on with what works.
+
 Brisk runs against an _instance_ (a deployed Brisk server, or local dev). Resolve
 it before deploying:
 

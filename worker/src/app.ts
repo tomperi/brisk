@@ -30,6 +30,7 @@ import {
   type DeployFile,
 } from './sites';
 import type { AppEnv, Env } from './env';
+import { version } from '../package.json';
 import type { DbEvent, Platform } from './platform/types';
 import { PLUGINS } from './plugins';
 import { resolveEnabled, withMandatory } from './plugins/resolve';
@@ -146,6 +147,19 @@ export function createApp(
   plugins: Plugin[] = PLUGINS,
 ): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
+
+  // The CLI compares this with its own version and says when to update. Set on
+  // the final response so early returns, raw Responses and cache hits carry it.
+  app.use('/api/*', async (c, next) => {
+    await next();
+    if (c.res.status === 101) return;
+    try {
+      c.res.headers.set('x-brisk-version', version);
+    } catch {
+      c.res = new Response(c.res.body, c.res);
+      c.res.headers.set('x-brisk-version', version);
+    }
+  });
 
   // Inject the platform first so every route — including the mounted auth
   // routes — can reach storage/db/rooms/cache via c.var.platform.
