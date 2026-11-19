@@ -447,7 +447,9 @@ export async function suggestLabels(
     return;
   }
   if (!res.labels.length) {
-    console.log(`No existing label fits. ${dim('Pick new ones, or deploy without labels.')}`);
+    console.log(
+      `No existing label fits ${dim('(of the 200 most used). Pick new ones, or deploy without labels.')}`,
+    );
     return;
   }
   const width = Math.max(...res.labels.map((s) => s.label.length)) + 3;
