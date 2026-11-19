@@ -309,13 +309,14 @@ function render() {
     li.textContent = `nothing matches ${wanted.join(' + ')}`;
     list.append(li);
   }
-  if (focusLabelInput || typing) {
-    focusLabelInput = false;
-    $('label-input')?.focus();
-  }
-  const button = focusEditButton ?? onEditButton;
-  if (button) list.querySelector(`[data-site="${CSS.escape(button)}"] .edit-labels`)?.focus();
+  // An explicit close or open wins over keeping whatever had focus before.
+  const editButton = (name) =>
+    list.querySelector(`[data-site="${CSS.escape(name)}"] .edit-labels`)?.focus();
+  if (focusEditButton) editButton(focusEditButton);
+  else if (focusLabelInput || typing) $('label-input')?.focus();
+  else if (onEditButton) editButton(onEditButton);
   focusEditButton = null;
+  focusLabelInput = false;
 }
 
 function cell(className, text) {
@@ -325,7 +326,27 @@ function cell(className, text) {
   return span;
 }
 
-async function load() {
+let loading = null;
+let reloadWanted = false;
+
+/** One list fetch at a time; a call during one fetches again after it, so the newest list wins. */
+function load() {
+  if (loading) {
+    reloadWanted = true;
+    return loading;
+  }
+  loading = (async () => {
+    do {
+      reloadWanted = false;
+      await loadOnce();
+    } while (reloadWanted);
+  })().finally(() => {
+    loading = null;
+  });
+  return loading;
+}
+
+async function loadOnce() {
   // Fetch after queued label saves, and keep any that land while the fetch is out.
   await saving;
   savedDuringLoad = new Map();
