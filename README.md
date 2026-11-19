@@ -537,8 +537,9 @@ wizard), [`deploy/`](deploy) (Dockerfile, Compose stack, Helm chart), and
 
 ### Releasing
 
-`@usebrisk/cli` and `@usebrisk/sdk` publish to npm in lockstep. Bump both to
-the same version, then push a matching tag:
+`@usebrisk/cli` and `@usebrisk/sdk` publish to npm in lockstep. Bump both, and
+`worker/package.json` (the version instances report to the CLI), to the same
+version, then push a matching tag:
 
 ```sh
 git tag v0.1.1 && git push origin v0.1.1
